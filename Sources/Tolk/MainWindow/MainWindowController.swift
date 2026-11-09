@@ -7,12 +7,14 @@ import TolkCore
 @MainActor
 final class MainWindowController: NSWindowController, NSWindowDelegate {
     enum Section: String, CaseIterable {
-        case translate, image, glossary, settings, help
+        case translate, image, documents, history, glossary, settings, help
 
         var title: String {
             switch self {
             case .translate: "Перевод"
             case .image: "Фото и скриншоты"
+            case .documents: "Документы"
+            case .history: "История"
             case .glossary: "Глоссарий"
             case .settings: "Настройки"
             case .help: "Как пользоваться"
@@ -23,6 +25,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             switch self {
             case .translate: "character.bubble"
             case .image: "text.viewfinder"
+            case .documents: "doc.text"
+            case .history: "clock.arrow.circlepath"
             case .glossary: "book.closed"
             case .settings: "gearshape"
             case .help: "questionmark.circle"
@@ -31,7 +35,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
         /// ⌘1…⌘4 in the "Окно" menu.
         var keyEquivalent: String {
-            switch self { case .translate: "1"; case .image: "2"; case .glossary: "3"; case .settings: "4"; case .help: "5" }
+            switch self {
+            case .translate: "1"; case .image: "2"; case .documents: "3"; case .history: "4"
+            case .glossary: "5"; case .settings: "6"; case .help: "7"
+            }
         }
     }
 
@@ -48,8 +55,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     var onClose: (() -> Void)?
 
     /// Pages are built by AppDelegate and handed in, so each area owns its own view controller.
-    init(translate: NSViewController, image: NSViewController, glossary: NSViewController, settings: NSViewController) {
-        pages = [.translate: translate, .image: image, .glossary: glossary, .settings: settings, .help: HelpViewController()]
+    init(translate: NSViewController, image: NSViewController, documents: NSViewController, history: NSViewController,
+         glossary: NSViewController, settings: NSViewController) {
+        pages = [.translate: translate, .image: image, .documents: documents, .history: history,
+                 .glossary: glossary, .settings: settings, .help: HelpViewController()]
         current = Section(rawValue: UserDefaults.standard.string(forKey: Self.sectionKey) ?? "") ?? .translate
         sidebar = SidebarViewController(sections: Section.allCases)
 

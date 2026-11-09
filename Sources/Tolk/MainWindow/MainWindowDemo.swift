@@ -30,6 +30,8 @@ enum MainWindowDemo {
         let translate = TranslatePageViewController(engine: engine)
         let main = MainWindowController(translate: translate,
                                         image: ImageTranslateViewController(engine: engine),
+                                        documents: DocumentsViewController(engine: engine),
+                                        history: HistoryViewController(store: HistoryStore()),
                                         glossary: GlossaryViewController(rulesPath: config.rulesPath),
                                         settings: SettingsViewController(config: config))
         keepAlive = [main, translate]

@@ -20,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var translatePage: TranslatePageViewController!
     private var imagePage: ImageTranslateViewController!
     private var glossaryPage: GlossaryViewController!
+    private var documentsPage: DocumentsViewController!
+    private var historyPage: HistoryViewController!
+    private let history = HistoryStore()
 
     // Menu bar
     private var statusItem: NSStatusItem!
@@ -37,8 +40,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         translatePage = TranslatePageViewController(engine: engine)
         imagePage = ImageTranslateViewController(engine: engine)
         glossaryPage = GlossaryViewController(rulesPath: config.rulesPath)
+        documentsPage = DocumentsViewController(engine: engine)
+        historyPage = HistoryViewController(store: history)
         mainWindow = MainWindowController(translate: translatePage,
                                           image: imagePage,
+                                          documents: documentsPage,
+                                          history: historyPage,
                                           glossary: glossaryPage,
                                           settings: SettingsViewController(config: config))
 
@@ -65,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         screenCapture.start()
         imagePage.screenHotKeyDisplay = screenCapture.hotKeyDisplay
         // Closing the main window stops a long document translation (it would hold an Ollama slot).
-        mainWindow.onClose = { [weak self] in self?.imagePage.cancelWork() }
+        mainWindow.onClose = { [weak self] in self?.imagePage.cancelWork(); self?.documentsPage.cancelWork() }
 
         setupMenu()
         startMonitor()
@@ -145,6 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reply.replaceEngine(engine)
         translatePage.engine = engine
         imagePage.engine = engine
+        documentsPage.engine = engine
         inputWindow.engine = engine
         glossaryPage.switchFile(to: config.rulesPath)
         quickActions.update(engine: engine, config: config)
