@@ -58,9 +58,12 @@ public enum LanguageDetector {
 
     public static func resolve(_ request: TranslationRequest, config: TolkConfig) -> ResolvedRequest {
         let source = request.source ?? detect(request.text)
+        if request.mode == .polish {
+            return ResolvedRequest(text: request.text, source: source, target: source, tone: request.tone, mode: .polish)
+        }
         var target = request.target ?? defaultTarget(for: source, config: config)
         if target == source { target = defaultTarget(for: source, config: config) }
         if target == source { target = source == config.primaryLanguage ? config.secondaryLanguage : config.primaryLanguage }
-        return ResolvedRequest(text: request.text, source: source, target: target, tone: request.tone)
+        return ResolvedRequest(text: request.text, source: source, target: target, tone: request.tone, mode: .translate)
     }
 }

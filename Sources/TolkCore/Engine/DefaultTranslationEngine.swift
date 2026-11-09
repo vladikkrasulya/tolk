@@ -48,8 +48,9 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                     } else {
                         failure = "vkbox недоступен (Ollama не отвечает)"
                     }
-                    guard let fallback else {
-                        throw TolkError.unavailable(failure ?? "Qwen недоступен")
+                    // Google can only translate; a polish request has no fallback.
+                    guard let fallback, resolved.mode == .translate else {
+                        throw TolkError.unavailable(failure ?? "\(primary.name) недоступен")
                     }
                     try Task.checkCancellation()
                     continuation.yield(.fellBack(from: primary.name, reason: failure ?? ""))
@@ -73,6 +74,11 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
         return await ollama.notes(source: source, translation: translation, from: from, to: to)
     }
 
+    public func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String] {
+        guard let ollama = primary as? OllamaProvider, await ollama.isAvailable() else { return [] }
+        return await ollama.alternatives(for: fragment, in: translation, source: source, from: from, to: to)
+    }
+
     public func addGlossaryTerm(source: String, translation: String) throws {
         try rules.addTerm(source: source, translation: translation)
     }
@@ -80,10 +86,10 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
     static func describe(_ error: Error) -> String {
         if let u = error as? URLError {
             switch u.code {
-            case .timedOut: return "Qwen: таймаут"
+            case .timedOut: return "Модель: таймаут"
             case .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .cannotFindHost:
                 return "vkbox недоступен (\(u.localizedDescription))"
-            default: return "Qwen: \(u.localizedDescription)"
+            default: return "Модель: \(u.localizedDescription)"
             }
         }
         return (error as? LocalizedError)?.errorDescription ?? "\(error)"

@@ -10,6 +10,12 @@ cd "$ROOT"
 SIGN_ID="${TOLK_SIGN_ID:-Tolk Local Signing}"
 APP="$ROOT/build/Tolk.app"
 
+# App icon: generated once by make-icon.sh (Resources/AppIcon.icns, referenced by CFBundleIconFile).
+if [ ! -f "$ROOT/Resources/AppIcon.icns" ]; then
+    echo "==> generating app icon"
+    "$ROOT/scripts/make-icon.sh" "$ROOT/Resources/AppIcon.icns"
+fi
+
 echo "==> swift build -c release"
 swift build -c release --product Tolk
 BIN_DIR="$(swift build -c release --show-bin-path)"
@@ -19,7 +25,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Tolk" "$APP/Contents/MacOS/Tolk"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
-# Optional extras (icon etc.) placed in Resources/ besides Info.plist.
+# Everything in Resources/ besides Info.plist (AppIcon.icns etc.) goes to Contents/Resources.
 find "$ROOT/Resources" -mindepth 1 -maxdepth 1 ! -name Info.plist -exec cp -R {} "$APP/Contents/Resources/" \;
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 

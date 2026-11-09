@@ -5,7 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/build/Tolk.app"
-DEST_DIR="$HOME/Applications"
+DEST_DIR="/Applications"
 DEST="$DEST_DIR/Tolk.app"
 LABEL="local.vk.tolk"
 AGENT="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -35,6 +35,8 @@ if [ "${1:-}" != "--no-autostart" ]; then
 		<string>/usr/bin/open</string>
 		<string>-a</string>
 		<string>$DEST</string>
+		<string>--args</string>
+		<string>--background</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>

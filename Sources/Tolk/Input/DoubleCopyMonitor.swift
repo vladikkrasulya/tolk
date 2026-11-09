@@ -10,6 +10,8 @@ import ApplicationServices
 /// keeps working as a normal copy in every app. The tap is attached to the main run loop,
 /// so all state lives on the main thread and `onTrigger` is called there.
 final class DoubleCopyMonitor {
+    /// `eventSourceUserData` value on key events Tolk posts itself (quick actions, popup "Insert").
+    static let syntheticMarker: Int64 = 0x544F4C4B
     var onTrigger: ((_ text: String, _ mouseLocation: NSPoint) -> Void)?
     let interval: TimeInterval
 
@@ -86,6 +88,9 @@ final class DoubleCopyMonitor {
         default:
             return
         }
+
+        // Synthetic Cmd+C/Cmd+V from Tolk's own quick actions are marked 'TOLK' — never count them.
+        if event.getIntegerValueField(.eventSourceUserData) == Self.syntheticMarker { return }
 
         guard event.getIntegerValueField(.keyboardEventKeycode) == Self.keyCodeC else {
             lastCopyTime = nil // any other key breaks the sequence

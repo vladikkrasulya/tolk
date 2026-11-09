@@ -27,6 +27,47 @@ enum NotesPrompt {
 }
 
 extension OllamaProvider {
+    /// One short JSON request; shared by notes and alternatives.
+    func jsonChat(system: String, user: String, timeout: TimeInterval = 60) async -> [String: Any]? {
+        var req = URLRequest(url: baseURL.appendingPathComponent("v1/chat/completions"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = timeout
+        let body: [String: Any] = [
+            "model": model, "stream": false, "reasoning_effort": "none", "temperature": 0.3,
+            "response_format": ["type": "json_object"],
+            "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
+        req.httpBody = data
+        guard let (resp, http) = try? await URLSession.shared.data(for: req),
+              (http as? HTTPURLResponse)?.statusCode == 200,
+              let obj = try? JSONSerialization.jsonObject(with: resp) as? [String: Any],
+              let choices = obj["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              var content = message["content"] as? String
+        else { return nil }
+        if let a = content.firstIndex(of: "{"), let b = content.lastIndex(of: "}") { content = String(content[a...b]) }
+        return (try? JSONSerialization.jsonObject(with: Data(content.utf8))) as? [String: Any]
+    }
+
+    func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String] {
+        let system = """
+        You help a translator from \(from.englishName) to \(to.englishName) working in adtech.
+        Give 3 or 4 alternative ways to render the FRAGMENT inside the TRANSLATION, in \(to.englishName),
+        each fitting the sentence grammatically (same case/number/tense) so it can replace the fragment as is.
+        Prefer natural industry wording. Do not repeat the fragment itself.
+        Answer JSON only: {"alternatives":["...","..."]}
+        """
+        let user = "SOURCE:\n\(source)\n\nTRANSLATION:\n\(translation)\n\nFRAGMENT:\n\(fragment)"
+        guard let obj = await jsonChat(system: system, user: user, timeout: 30),
+              let list = obj["alternatives"] as? [String] else { return [] }
+        var seen = Set<String>()
+        return list.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.lowercased() != fragment.lowercased() && seen.insert($0.lowercased()).inserted }
+            .prefix(4).map { $0 }
+    }
+
     func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote] {
         var req = URLRequest(url: baseURL.appendingPathComponent("v1/chat/completions"))
         req.httpMethod = "POST"

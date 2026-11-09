@@ -8,6 +8,8 @@
 	<string>Tolk</string>
 	<key>CFBundleExecutable</key>
 	<string>Tolk</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>local.vk.tolk</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -17,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1</string>
+	<string>0.3</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
@@ -31,6 +33,8 @@
 	</dict>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Личный переводчик Tolk</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Tolk connects to the translation server on your local network.</string>
 </dict>

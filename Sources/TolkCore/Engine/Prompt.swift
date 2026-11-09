@@ -2,6 +2,7 @@ import Foundation
 
 enum Prompt {
     static func system(for r: ResolvedRequest, rules: String) -> String {
+        if r.mode == .polish { return polish(for: r, rules: rules) }
         var s = """
         You are a professional translator. Translate the user's text from \(r.source.englishName) to \(r.target.englishName).
         Output ONLY the translation: no explanations, notes, quotes, alternatives or transliteration.
@@ -18,6 +19,21 @@ enum Prompt {
         if r.target == .ukrainian {
             s += " Use proper Ukrainian (not Russian, no surzhyk); the glossary above is Russian — use the Ukrainian equivalents of its slang (e.g. «капа» stays «капа», not «капка»; «постбеки», «апрув»)."
         }
+        return s
+    }
+
+    /// Same-language rewrite: the user's own draft, made correct and native-sounding.
+    static func polish(for r: ResolvedRequest, rules: String) -> String {
+        var s = """
+        You are an editor. The user wrote a draft in \(r.source.englishName) for work in adtech.
+        Rewrite it in \(r.source.englishName) so it reads like a native-speaking industry professional wrote it:
+        fix grammar, articles, prepositions, word order and awkward phrasing; use natural industry terms.
+        Keep the meaning, facts, IDs, numbers, URLs, names and formatting. Do not add new information, greetings or sign-offs
+        that are not in the draft. Do not translate into another language.
+        Output ONLY the rewritten text, no comments.
+        """
+        if !rules.isEmpty { s += "\n\n# User's rules and glossary\n" + rules }
+        s += "\n\n# Tone\n" + tone(r.tone)
         return s
     }
 

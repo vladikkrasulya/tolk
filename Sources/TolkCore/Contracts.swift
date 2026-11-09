@@ -60,15 +60,22 @@ public enum Tone: String, CaseIterable, Codable, Sendable {
     case formal  // polite business email
 }
 
-/// What the app asks for. `source`/`target` nil = detect automatically.
+/// What the engine does with the text.
+public enum TextMode: String, CaseIterable, Codable, Sendable {
+    case translate   // translate into `target`
+    case polish      // rewrite in the SAME language: fix grammar, make it sound native and professional
+}
+
+/// What the app asks for. `source`/`target` nil = detect automatically. For `.polish` the target is the source.
 public struct TranslationRequest: Sendable, Equatable {
     public var text: String
     public var source: Language?
     public var target: Language?
     public var tone: Tone
+    public var mode: TextMode
 
-    public init(text: String, source: Language? = nil, target: Language? = nil, tone: Tone = .auto) {
-        self.text = text; self.source = source; self.target = target; self.tone = tone
+    public init(text: String, source: Language? = nil, target: Language? = nil, tone: Tone = .auto, mode: TextMode = .translate) {
+        self.text = text; self.source = source; self.target = target; self.tone = tone; self.mode = mode
     }
 }
 
@@ -78,9 +85,10 @@ public struct ResolvedRequest: Sendable, Equatable {
     public var source: Language
     public var target: Language
     public var tone: Tone
+    public var mode: TextMode
 
-    public init(text: String, source: Language, target: Language, tone: Tone) {
-        self.text = text; self.source = source; self.target = target; self.tone = tone
+    public init(text: String, source: Language, target: Language, tone: Tone, mode: TextMode = .translate) {
+        self.text = text; self.source = source; self.target = target; self.tone = tone; self.mode = mode
     }
 }
 
@@ -130,10 +138,13 @@ public protocol TranslationEngine: AnyObject, Sendable {
     /// Up to 3 notes on debatable industry terms in a finished translation. Empty when nothing is debatable
     /// or the model is unavailable (notes are optional, never an error the user has to see).
     func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote]
+    /// 3–4 alternative renderings of `fragment` (a word/phrase of `translation`) that fit the context. Empty if unavailable.
+    func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String]
 }
 
 public extension TranslationEngine {
     func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote] { [] }
+    func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String] { [] }
 }
 
 /// App settings. Stored as JSON at `TolkConfig.defaultPath`; missing file = defaults.
@@ -153,12 +164,20 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public var remoteURL: String = ""
     /// Extra HTTP headers for `remoteURL` (e.g. Cloudflare Access service-token headers).
     public var remoteHeaders: [String: String] = [:]
+    /// Tone chosen automatically by the frontmost app's bundle id (quick actions, popup when tone = auto).
+    public var toneByApp: [String: Tone] = TolkConfig.defaultToneByApp
+
+    public static let defaultToneByApp: [String: Tone] = [
+        "com.tinyspeck.slackmacgap": .chat, "ru.keepcoder.Telegram": .chat, "com.hnc.Discord": .chat,
+        "net.whatsapp.WhatsApp": .chat, "com.microsoft.teams2": .chat,
+        "com.apple.mail": .formal, "com.microsoft.Outlook": .formal, "com.readdle.smartemail-Mac": .formal,
+    ]
 
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
         case ollamaURL, model, rulesPath, primaryLanguage, secondaryLanguage, doubleCopyInterval, useGoogleFallback
-        case remoteURL, remoteHeaders
+        case remoteURL, remoteHeaders, toneByApp
     }
 
     /// Every key is optional: `{"model": "x"}` keeps all other defaults.
@@ -174,7 +193,11 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         useGoogleFallback = try c.decodeIfPresent(Bool.self, forKey: .useGoogleFallback) ?? d.useGoogleFallback
         remoteURL = try c.decodeIfPresent(String.self, forKey: .remoteURL) ?? d.remoteURL
         remoteHeaders = try c.decodeIfPresent([String: String].self, forKey: .remoteHeaders) ?? d.remoteHeaders
+        toneByApp = try c.decodeIfPresent([String: Tone].self, forKey: .toneByApp) ?? d.toneByApp
     }
+
+    /// Tone for an app (bundle id), `.auto` if not configured.
+    public func tone(forApp bundleID: String?) -> Tone { bundleID.flatMap { toneByApp[$0] } ?? .auto }
 
     public static let defaultPath = "~/Translate/tolk.json"
 

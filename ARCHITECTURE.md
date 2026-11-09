@@ -23,3 +23,18 @@ Build: `swift build` (Swift 6.2 CLT, no Xcode). Language mode Swift 5.
 | Glossary editor | `Sources/Tolk/Glossary/**`, `Sources/TolkCore/Glossary/**` | glossary session |
 | Image / screenshot translate (OCR) | `Sources/Tolk/ImageTranslate/**` | image session |
 | Popup, engine, contracts, wiring | `UI/TranslationPopupController.swift`, `UI/UIShared.swift`, `TolkCore/Engine/**`, `Contracts.swift`, `AppDelegate.swift` | coordinator |
+
+## Models (Ollama on vkbox) — known quirks
+Both models are switched in Settings → «Модель» (`TolkConfig.model`); the engine treats them the same.
+| | `qwen-translate` (qwen3.6:35b-a3b) | `gemma-translate` (gemma4:26b) |
+|---|---|---|
+| Thinking | ON by default (~1 min per answer). Off only via `reasoning_effort: "none"` on /v1; `think:false` and `/no_think` do NOT work | same: ON by default (~150 s with load); `reasoning_effort: "none"` turns it off |
+| Params in model | num_ctx 32768, temp 0.3, top_p 0.95, top_k 20, presence_penalty 1.5 | num_ctx 32768, temp 0.3, top_p 0.95, top_k 64 (no presence penalty) |
+| Architecture | MoE ~3B active, hybrid attention: KV 32k ≈ 64 MB/slot | MoE 128 experts / 8 active (~4B), sliding window 1024: KV also small |
+| Speed (warm, 16 texts, 2026-11-09) | 2.96 s avg | 3.45 s avg |
+| JSON (notes, alternatives) | works | works (fewer notes, more conservative) |
+Display name in UI comes from the model id (`OllamaProvider.displayName`). Requests always send `temperature: 0.1`
+(translation) / 0.2–0.3 (notes, alternatives) — overrides the model default.
+Server: `OLLAMA_NUM_PARALLEL=2` (tested: 6 concurrent → median wait 5.5 s vs 8.6 s with 1; 4 slots was worse: 27 s total,
+model is partly on CPU). Single request ~0.8 s slower than with 1 slot.
+Only one big model fits the 6 GB GPU; switching models costs a reload (first request after switch: 30–150 s).

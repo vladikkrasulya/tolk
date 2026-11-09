@@ -73,7 +73,9 @@ final class TranslationRunner {
 enum UIText {
     static func providerName(_ raw: String) -> String {
         let s = raw.lowercased()
-        if s.contains("qwen") || s.contains("ollama") { return "Qwen" }
+        if s.contains("qwen") { return "Qwen" }
+        if s.contains("gemma") { return "Gemma" }
+        if s.contains("ollama") { return "Ollama" }
         if s.contains("google") { return "Google" }
         return raw.isEmpty ? "—" : raw.prefix(1).uppercased() + raw.dropFirst()
     }

@@ -16,8 +16,8 @@ final class PopupPanel: NSPanel {
 
 /// DeepL-style floating popup near the cursor that renders a streaming translation.
 @MainActor
-final class TranslationPopupController: NSObject, NSTextFieldDelegate {
-    let engine: TranslationEngine
+final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextViewDelegate {
+    private(set) var engine: TranslationEngine
 
     // Layout
     private let width: CGFloat = 460
@@ -26,7 +26,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     private let maxTextHeight: CGFloat = 340
 
     private var panel: PopupPanel!
-    private let runner: TranslationRunner
+    private var runner: TranslationRunner
 
     // Views
     private var directionButton: NSButton!
@@ -55,6 +55,12 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
 
     /// Called with the source text when the user expands the popup into the input window.
     var onExpand: ((String) -> Void)?
+    /// Tone for the app the user copied from (bundle id); used when the tone switch is "Авто".
+    var toneForApp: ((String?) -> Tone)?
+    private var frontApp: String?
+    private var altBox: NSStackView!
+    private var altTask: Task<Void, Never>?
+    private var altWork: DispatchWorkItem?
 
     // State
     private var sourceText = ""
@@ -66,7 +72,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     private var fellBackFrom: String?
     private var showsPlaceholder = false
     private var mainFinished = false
-    private let backRunner: TranslationRunner
+    private var backRunner: TranslationRunner
     private var backTranslation = ""
     /// Back-translation toggle (remembered): after each translation, translate it back to check meaning.
     private var backEnabled: Bool {
@@ -111,6 +117,16 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         MainActor.assumeIsolated { self.present(text: text, at: point) }
     }
 
+    /// Swaps the engine after settings change (cancels anything running).
+    func replaceEngine(_ new: TranslationEngine) {
+        dismiss()
+        engine = new
+        runner = TranslationRunner(engine: new)
+        backRunner = TranslationRunner(engine: new)
+        runner.onUpdate = { [weak self] in self?.handle($0) }
+        backRunner.onUpdate = { [weak self] in self?.handleBack($0) }
+    }
+
     nonisolated func hide() {
         MainActor.assumeIsolated { self.dismiss() }
     }
@@ -122,6 +138,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         removeMonitors()
 
         sourceText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        frontApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         requestedSource = nil
         requestedTarget = nil
         detectedSource = nil
@@ -145,6 +162,8 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         runner.cancel()
         backRunner.cancel()
         notesTask?.cancel()
+        altTask?.cancel()
+        altWork?.cancel()
         removeMonitors()
         copyResetWork?.cancel()
         panel?.orderOut(nil)
@@ -164,6 +183,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         glossaryButton.isEnabled = false
         resetBack()
         resetNotes()
+        hideAlternatives()
         resetCopyButton()
 
         guard !sourceText.isEmpty else {
@@ -178,8 +198,11 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         showMessage("Перевожу…", color: .tertiaryLabelColor)
         showsPlaceholder = true
         runner.start(TranslationRequest(text: sourceText, source: requestedSource,
-                                        target: requestedTarget, tone: tone))
+                                        target: requestedTarget, tone: effectiveTone))
     }
+
+    /// Manual tone wins; "Авто" picks the tone configured for the app the text came from (Slack → chat, Mail → formal).
+    private var effectiveTone: Tone { tone == .auto ? (toneForApp?(frontApp) ?? .auto) : tone }
 
     private func handle(_ update: TranslationRunner.Update) {
         switch update {
@@ -348,6 +371,8 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
             let up = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
             down?.flags = .maskCommand
             up?.flags = .maskCommand
+            down?.setIntegerValueField(.eventSourceUserData, value: DoubleCopyMonitor.syntheticMarker)
+            up?.setIntegerValueField(.eventSourceUserData, value: DoubleCopyMonitor.syntheticMarker)
             down?.post(tap: .cghidEventTap)
             up?.post(tap: .cghidEventTap)
         }
@@ -357,6 +382,75 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         let text = sourceText
         dismiss()
         onExpand?(text)
+    }
+
+    // MARK: - Alternatives (select a word/phrase in the translation)
+
+    func textViewDidChangeSelection(_ notification: Notification) {
+        altWork?.cancel()
+        guard mainFinished, !showsPlaceholder, !UIText.isFallbackProvider(lastProvider) else { return }
+        let range = textView.selectedRange()
+        guard range.length > 0, range.length <= 60, NSMaxRange(range) <= (textView.string as NSString).length else {
+            hideAlternatives(); return
+        }
+        let fragment = (textView.string as NSString).substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fragment.isEmpty, fragment.count >= 2 else { hideAlternatives(); return }
+        // Wait until the user stops dragging the selection.
+        let work = DispatchWorkItem { [weak self] in self?.loadAlternatives(fragment: fragment, range: range) }
+        altWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+    }
+
+    private func loadAlternatives(fragment: String, range: NSRange) {
+        guard let src = detectedSource, let dst = detectedTarget else { return }
+        altTask?.cancel()
+        showAlternatives(fragment: fragment, range: range, options: nil)
+        let engine = self.engine, source = sourceText, translated = translation
+        altTask = Task { @MainActor [weak self] in
+            let options = await engine.alternatives(for: fragment, in: translated, source: source, from: src, to: dst)
+            guard let self, !Task.isCancelled, self.translation == translated,
+                  self.textView.selectedRange() == range else { return }
+            self.showAlternatives(fragment: fragment, range: range, options: options)
+        }
+    }
+
+    private func showAlternatives(fragment: String, range: NSRange, options: [String]?) {
+        altBox.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let title = UIFactory.label("«\(fragment)»:", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
+        title.lineBreakMode = .byTruncatingMiddle
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        altBox.addArrangedSubview(title)
+        if let options {
+            if options.isEmpty {
+                altBox.addArrangedSubview(UIFactory.label("вариантов нет", size: 11.5, color: .tertiaryLabelColor))
+            }
+            for o in options {
+                let b = ClosureButton(title: o) { [weak self] in self?.applyAlternative(o, range: range) }
+                b.toolTip = "Заменить «\(fragment)» на «\(o)»"
+                altBox.addArrangedSubview(b)
+            }
+        } else {
+            altBox.addArrangedSubview(UIFactory.label("подбираю варианты…", size: 11.5, color: .tertiaryLabelColor))
+        }
+        altBox.addArrangedSubview(UIFactory.spacer())
+        altBox.isHidden = false
+        updateSize()
+    }
+
+    private func hideAlternatives() {
+        altTask?.cancel()
+        guard altBox != nil, !altBox.isHidden else { return }
+        altBox.isHidden = true
+        updateSize()
+    }
+
+    private func applyAlternative(_ text: String, range: NSRange) {
+        guard NSMaxRange(range) <= (textView.string as NSString).length else { return }
+        textView.textStorage?.replaceCharacters(in: range, with: NSAttributedString(string: text, attributes: textAttributes))
+        translation = textView.string
+        hideAlternatives()
+        textView.setSelectedRange(NSRange(location: range.location, length: (text as NSString).length))
+        showNotice("Заменено. ⌘C или «Копировать» — уже с этим вариантом.", color: .secondaryLabelColor)
     }
 
     // MARK: - Footnotes
@@ -469,6 +563,11 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         } else {
             backRunner.cancel()
             backBox.isHidden = true
+
+        altBox = NSStackView()
+        altBox.orientation = .horizontal
+        altBox.spacing = 6
+        altBox.isHidden = true
 
         notesBox = NSStackView()
         notesBox.orientation = .vertical
@@ -746,6 +845,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         textView.textContainer?.lineFragmentPadding = 0
         textView.font = .systemFont(ofSize: 16)
         textView.setAccessibilityLabel("Перевод")
+        textView.delegate = self
         textHeight = scrollView.heightAnchor.constraint(equalToConstant: minTextHeight)
         textHeight.isActive = true
 
@@ -842,7 +942,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         let separator = NSBox()
         separator.boxType = .separator
 
-        let root = NSStackView(views: [header, noticeLabel, scrollView, notesBox, backBox, glossaryForm, separator, footer])
+        let root = NSStackView(views: [header, noticeLabel, scrollView, altBox, notesBox, backBox, glossaryForm, separator, footer])
         root.orientation = .vertical
         root.alignment = .leading
         root.spacing = 8
@@ -857,7 +957,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
             root.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
             effect.widthAnchor.constraint(equalToConstant: width),
         ])
-        for v in [header, noticeLabel!, scrollView!, notesBox!, backBox!, glossaryForm!, separator, footer] {
+        for v in [header, noticeLabel!, scrollView!, altBox!, notesBox!, backBox!, glossaryForm!, separator, footer] {
             v.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -inset * 2).isActive = true
         }
         noticeLabel.preferredMaxLayoutWidth = width - inset * 2

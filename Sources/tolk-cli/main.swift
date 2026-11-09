@@ -10,6 +10,8 @@ func fail(_ s: String) -> Never { err(s); exit(2) }
 
 var source: Language?, target: Language?, tone = Tone.auto
 var providerName = "auto", showRules = false, wantNotes = false
+var mode = TextMode.translate
+var modelOverride: String?
 var cancelAfter: Double?, addTerm: String?
 var words: [String] = []
 var args = CommandLine.arguments.dropFirst().makeIterator()
@@ -30,6 +32,8 @@ while let a = args.next() {
         tone = t
     case "--provider": providerName = value()
     case "--show-rules": showRules = true
+    case "--model": modelOverride = value()                  // e.g. gemma-translate
+    case "--polish": mode = .polish                          // rewrite in the same language
     case "--notes": wantNotes = true                         // also print footnotes on debatable terms
     case "--cancel-after": cancelAfter = Double(value())   // dev: test consumer cancellation
     case "--add-term": addTerm = value()                    // "source => translation"
@@ -53,9 +57,10 @@ if text.isEmpty, isatty(0) == 0 {
 }
 if text.isEmpty { fail("no text; see --help") }
 
-let config = TolkConfig.load()
+var config = TolkConfig.load()
+if let modelOverride { config.model = modelOverride }
 let engine = DefaultTranslationEngine(config: config)
-let request = TranslationRequest(text: text, source: source, target: target, tone: tone)
+let request = TranslationRequest(text: text, source: source, target: target, tone: tone, mode: mode)
 if showRules { err("--- rules block ---\n" + engine.rules.promptBlock(for: text) + "\n-------------------") }
 
 /// Runs one provider directly (no fallback), wrapped into engine-like events.

@@ -2,7 +2,8 @@ import Foundation
 
 /// Qwen on vkbox via Ollama's OpenAI-compatible endpoint, streamed over SSE.
 public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
-    public let name = "Qwen"
+    /// Display name from the model id: "qwen-translate" -> "Qwen", "gemma-translate" -> "Gemma".
+    public let name: String
     let baseURL: URL
     let model: String
     let rules: RulesStore
@@ -14,12 +15,22 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
         if base.hasSuffix("/v1") { base.removeLast(3) }
         self.baseURL = URL(string: base) ?? URL(string: "http://127.0.0.1:11434")!
         self.model = config.model
+        self.name = OllamaProvider.displayName(for: config.model)
         self.rules = rules
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = 90   // max silence between bytes (cold model load can take a while)
         cfg.timeoutIntervalForResource = 600
         cfg.waitsForConnectivity = false
         self.session = URLSession(configuration: cfg)
+    }
+
+    public static func displayName(for model: String) -> String {
+        let m = model.lowercased()
+        for (key, title) in [("qwen", "Qwen"), ("gemma", "Gemma"), ("llama", "Llama"), ("mistral", "Mistral")] where m.contains(key) {
+            return title
+        }
+        let base = model.split(separator: ":").first.map(String.init) ?? model
+        return base.prefix(1).uppercased() + base.dropFirst()
     }
 
     public func isAvailable() async -> Bool {
