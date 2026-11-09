@@ -21,7 +21,9 @@ public final class RulesStore: @unchecked Sendable {
     public init(path: String) { self.path = expandPath(path) }
 
     /// Rules block for the system prompt: style always, glossary only lines matching `text`.
-    public func promptBlock(for text: String) -> String {
+    /// With `target`, every glossary pair is turned to point INTO the target language
+    /// (the file mixes «en → ru» and «ru → en»; Gemma copied the wrong side otherwise).
+    public func promptBlock(for text: String, target: Language? = nil) -> String {
         let p = current()
         var parts: [String] = []
         if !p.style.isEmpty { parts.append(p.style) }
@@ -30,10 +32,41 @@ public final class RulesStore: @unchecked Sendable {
             line.patterns.contains { $0.firstMatch(in: text, range: range) != nil }
         }
         if !hits.isEmpty {
-            parts.append(([p.glossaryHeader.isEmpty ? "## Glossary" : p.glossaryHeader] + hits.map(\.text))
-                .joined(separator: "\n"))
+            if let target {
+                let toCyrillic = target == .russian || target == .ukrainian || target == .bulgarian || target == .kazakh
+                let header = toCyrillic ? "## Glossary: English → how to write it in the translation"
+                                        : "## Glossary: Russian → how to write it in English"
+                parts.append(([header] + hits.map { Self.orient($0.text, toCyrillic: toCyrillic) }).joined(separator: "\n"))
+            } else {
+                parts.append(([p.glossaryHeader.isEmpty ? "## Glossary" : p.glossaryHeader] + hits.map(\.text))
+                    .joined(separator: "\n"))
+            }
         }
         return parts.joined(separator: "\n\n")
+    }
+
+    /// "- без жести → nothing explicit; a → b" turned so that each pair points into the target script.
+    static func orient(_ line: String, toCyrillic: Bool) -> String {
+        var body = line.trimmingCharacters(in: .whitespaces)
+        if body.hasPrefix("- ") { body.removeFirst(2) }
+        let pairs = body.components(separatedBy: ";").map { pair -> String in
+            let sides = pair.components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard sides.count == 2 else { return pair.trimmingCharacters(in: .whitespaces) }
+            let (a, b) = (sides[0], sides[1])
+            let aCyr = isMostlyCyrillic(a), bCyr = isMostlyCyrillic(b)
+            let swap = toCyrillic ? (aCyr && !bCyr) : (!aCyr && bCyr)
+            return swap ? "\(b) → \(a)" : "\(a) → \(b)"
+        }
+        return "- " + pairs.joined(separator: "; ")
+    }
+
+    static func isMostlyCyrillic(_ s: String) -> Bool {
+        var cyr = 0, lat = 0
+        for u in s.unicodeScalars {
+            if (0x0400...0x04FF).contains(u.value) { cyr += 1 }
+            else if (0x41...0x5A).contains(u.value) || (0x61...0x7A).contains(u.value) { lat += 1 }
+        }
+        return cyr > lat
     }
 
     /// Appends `- source → translation` to the end of the glossary section (or of the file).

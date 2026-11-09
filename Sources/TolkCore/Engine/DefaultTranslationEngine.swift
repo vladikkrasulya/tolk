@@ -113,7 +113,7 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
     /// Dev: the exact system prompt a request would get (CLI --show-prompt).
     public func debugSystemPrompt(for request: TranslationRequest) -> String {
         let r = LanguageDetector.resolve(request, config: config)
-        return Prompt.system(for: r, rules: rules.promptBlock(for: r.text + "\n" + (r.replyTo ?? "")))
+        return Prompt.system(for: r, rules: rules.promptBlock(for: r.text + "\n" + (r.replyTo ?? ""), target: r.target))
     }
 
     public func addGlossaryTerm(source: String, translation: String) throws {

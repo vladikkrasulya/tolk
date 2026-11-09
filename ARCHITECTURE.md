@@ -67,3 +67,13 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - `TranslationEvent.stats(TranslationStats)` before `.finished` (route, first chunk, exact tokens via
   `stream_options.include_usage` → `UsageBox` task-local); `StatusLineView` under translations
   (popup, translate page, reply). `TranslationRunner.onStats`.
+
+## v0.5.2 — tuned for Gemma (default model)
+- Translation requests send `seed: 42` (with temperature 0.1): the same text gets the same translation every time
+  (Gemma: 3/3 identical with a seed, 3 different without). Notes/alternatives keep variety (no seed).
+- `RulesStore.promptBlock(for:target:)` turns every glossary pair to point into the target language
+  (the file mixes «en → ru» and «ru → en»; Gemma copied the wrong side otherwise).
+- Prompt consistency rules: number format of the target language, no doubled currency, transliterate first names,
+  one form of address («Вы»), «Добрый день» → Hello / Hi <Name>; chat tone keeps slang but never adds swearing.
+- Measured on ~/Translate/test-corpus (50 Kadam texts): Gemma vs Qwen 21/11/18 (wins/losses/ties);
+  Gemma with rules vs without: 26 better, 3 worse, 20 same.

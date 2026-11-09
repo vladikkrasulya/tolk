@@ -89,10 +89,12 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
             "stream_options": ["include_usage": true],
             // Without this Qwen 3.6 thinks for a minute; think:false and /no_think don't work.
             "reasoning_effort": "none",
-            // Low temperature: the same phrase should translate the same way every time.
+            // Low temperature + fixed seed: the same text gets the same translation every time
+            // (verified with Gemma: 3/3 identical with a seed, 3 different without).
             "temperature": 0.1,
+            "seed": 42,
             "messages": [
-                ["role": "system", "content": Prompt.system(for: r, rules: rules.promptBlock(for: r.text + "\n" + (r.replyTo ?? "")))],
+                ["role": "system", "content": Prompt.system(for: r, rules: rules.promptBlock(for: r.text + "\n" + (r.replyTo ?? ""), target: r.target))],
                 ["role": "user", "content": r.text],
             ],
         ]
