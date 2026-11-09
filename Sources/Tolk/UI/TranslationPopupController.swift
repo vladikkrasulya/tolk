@@ -52,6 +52,8 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     private var notesButton: NSButton!
     private var notesTask: Task<Void, Never>?
     private var lastProvider = ""
+    private var presentGeneration = 0
+    private var resizeScheduled = false
 
     /// Called with the source text when the user expands the popup into the input window.
     var onExpand: ((String) -> Void)?
@@ -132,6 +134,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     }
 
     private func present(text: String, at point: NSPoint) {
+        presentGeneration += 1
         buildIfNeeded()
         runner.cancel()
         backRunner.cancel()
@@ -152,7 +155,14 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         startTranslation()
         placeInitially()
 
+        // Soft appearance instead of popping in.
+        panel.alphaValue = 0
         panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.14
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
+        }
         panel.makeKey() // .nonactivatingPanel: takes keystrokes, the other app stays active
         panel.makeFirstResponder(textView)
         installMonitors()
@@ -166,7 +176,19 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         altWork?.cancel()
         removeMonitors()
         copyResetWork?.cancel()
-        panel?.orderOut(nil)
+        guard let panel, panel.isVisible else { return }
+        let generation = presentGeneration
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.1
+            panel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            // A new show() during the fade wins — don't hide the fresh popup.
+            MainActor.assumeIsolated {
+                guard let self, self.presentGeneration == generation else { return }
+                panel.orderOut(nil)
+                panel.alphaValue = 1
+            }
+        })
     }
 
     var isVisible: Bool { panel?.isVisible ?? false }
@@ -563,21 +585,6 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         } else {
             backRunner.cancel()
             backBox.isHidden = true
-
-        altBox = NSStackView()
-        altBox.orientation = .horizontal
-        altBox.spacing = 6
-        altBox.isHidden = true
-
-        notesBox = NSStackView()
-        notesBox.orientation = .vertical
-        notesBox.alignment = .leading
-        notesBox.spacing = 8
-        notesBox.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
-        notesBox.wantsLayer = true
-        notesBox.layer?.cornerRadius = 8
-        notesBox.layer?.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.08).cgColor
-        notesBox.isHidden = true
         }
         updateSize()
     }
@@ -748,7 +755,20 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         return min(max(h, minTextHeight), cap)
     }
 
+    /// Streaming calls this on every chunk; resize at most once per ~frame and animate it, so the
+    /// popup grows smoothly instead of jumping on each word.
     private func updateSize() {
+        guard !resizeScheduled else { return }
+        resizeScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            MainActor.assumeIsolated {
+                self?.resizeScheduled = false
+                self?.applySize()
+            }
+        }
+    }
+
+    private func applySize() {
         guard let panel, panel.isVisible || panel.frame.width > 0 else { return }
         let size = fittingSize()
         var frame = panel.frame
@@ -759,7 +779,18 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
             frame.size = size
         }
         let newFrame = clamped(frame, in: screen(for: anchor).visibleFrame)
-        if newFrame != panel.frame { panel.setFrame(newFrame, display: true) }
+        if newFrame != panel.frame {
+            if panel.isVisible, abs(newFrame.height - panel.frame.height) < 400 {
+                NSAnimationContext.runAnimationGroup { ctx in
+                    ctx.duration = 0.12
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    ctx.allowsImplicitAnimation = true
+                    panel.animator().setFrame(newFrame, display: true)
+                }
+            } else {
+                panel.setFrame(newFrame, display: true)
+            }
+        }
         if !showsPlaceholder { textView.scrollToEndOfDocument(nil) }
     }
 
@@ -896,6 +927,21 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         backBox.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05).cgColor
         backBox.isHidden = true
 
+        altBox = NSStackView()
+        altBox.orientation = .horizontal
+        altBox.spacing = 6
+        altBox.isHidden = true
+
+        notesBox = NSStackView()
+        notesBox.orientation = .vertical
+        notesBox.alignment = .leading
+        notesBox.spacing = 8
+        notesBox.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+        notesBox.wantsLayer = true
+        notesBox.layer?.cornerRadius = 8
+        notesBox.layer?.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.08).cgColor
+        notesBox.isHidden = true
+
         // Footer: tone … glossary, copy
         toneControl = UIFactory.toneControl(target: self, action: #selector(toneChanged(_:)))
         glossaryButton = NSButton(title: "В глоссарий", target: self, action: #selector(toggleGlossaryForm))
@@ -910,10 +956,10 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
         glossaryButton.imagePosition = .imageLeading
         copyButton.imagePosition = .imageLeading
-        backButton = NSButton(title: "Обратно", target: self, action: #selector(toggleBack))
+        backButton = NSButton(title: "", target: self, action: #selector(toggleBack))
         backButton.setButtonType(.pushOnPushOff)
         backButton.image = NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: nil)
-        backButton.toolTip = "Показывать обратный перевод — проверить, что смысл не потерялся"
+        backButton.toolTip = "Обратный перевод — проверить, что смысл не потерялся"
         notesButton = NSButton(title: "", target: self, action: #selector(toggleNotes))
         notesButton.setButtonType(.pushOnPushOff)
         notesButton.image = NSImage(systemSymbolName: "lightbulb", accessibilityDescription: nil)
@@ -921,7 +967,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         notesButton.toolTip = "Сноски: пояснения к спорным отраслевым терминам"
         notesButton.controlSize = .small
         notesButton.bezelStyle = .push
-        insertButton = NSButton(title: "Вставить", target: self, action: #selector(insertTranslation))
+        insertButton = NSButton(title: "", target: self, action: #selector(insertTranslation))
         insertButton.image = NSImage(systemSymbolName: "text.insert", accessibilityDescription: nil)
         insertButton.toolTip = "Заменить выделенный текст переводом (⌘↩)"
         insertButton.keyEquivalent = ""
@@ -935,6 +981,10 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         glossaryButton.imagePosition = .imageOnly
         glossaryButton.toolTip = "Добавить термин в глоссарий"
         copyButton.toolTip = "Копировать перевод (⌘C)"
+        for b in [backButton!, insertButton!] { b.imagePosition = .imageOnly }
+        // The tone switch must never be squeezed into «А… Чат П…».
+        toneControl.setContentCompressionResistancePriority(.required, for: .horizontal)
+        toneControl.setContentHuggingPriority(.required, for: .horizontal)
         let footer = NSStackView(views: [toneControl, UIFactory.spacer(), backButton, notesButton, glossaryButton, copyButton, insertButton])
         footer.orientation = .horizontal
         footer.spacing = 6

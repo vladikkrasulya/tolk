@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var accessItem: NSMenuItem!
     private var accessibilityTimer: Timer?
     private var healthTimer: Timer?
+    private var lastHealth: Bool?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         engine = DefaultTranslationEngine(config: config)
@@ -45,7 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popup.toneForApp = { [weak self] in self?.config.tone(forApp: $0) ?? .auto }
 
         monitor = DoubleCopyMonitor(interval: config.doubleCopyInterval)
-        monitor.onTrigger = { [weak self] text, point in self?.popup.show(text: text, at: point) }
+        monitor.onTrigger = { [weak self] text, point in
+            Diagnostics.log("double Cmd+C: \(text.count) chars")
+            self?.popup.show(text: text, at: point)
+        }
 
         quickActions = QuickActionsController(engine: engine, config: config)
         if !quickActions.start() { NSLog("Tolk: hotkeys taken: \(quickActions.failedActions.map(\.title))") }
@@ -65,7 +69,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Launched by hand (Dock, Launchpad, Finder) -> show the window. At login (LaunchAgent passes
         // --background) stay quietly in the menu bar.
         if !CommandLine.arguments.contains("--background") { mainWindow.show() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Diagnostics.offerReportIfCrashed() }
+
+        #if DEBUG
+        // Dev: TOLK_TEST_CRASH=1 crashes on purpose (checks the crash report path).
+        if ProcessInfo.processInfo.environment["TOLK_TEST_CRASH"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                let missing: String? = nil
+                Diagnostics.log("test crash")
+                _ = missing!.count
+            }
+        }
+        // Dev: TOLK_TEST_POPUP="text" opens the popup on launch (reproduce popup issues without clicking).
+        if let text = ProcessInfo.processInfo.environment["TOLK_TEST_POPUP"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.popup.show(text: text, at: NSPoint(x: 600, y: 600))
+            }
+        }
+        #endif
     }
+
+    func applicationWillTerminate(_ notification: Notification) { Diagnostics.markCleanExit() }
 
     /// Click on the Dock / Launchpad icon while Tolk is already running.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -77,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func configChanged() {
         config = TolkConfig.load()
+        Diagnostics.log("settings changed: model=\(config.model) server=\(config.ollamaURL)")
         engine = DefaultTranslationEngine(config: config)
         popup.replaceEngine(engine)
         translatePage.engine = engine
@@ -114,6 +139,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let primary = engine.primary
         Task { @MainActor [weak self] in
             let ok = await primary.isAvailable()
+            if self?.lastHealth != ok { Diagnostics.log("vkbox \(primary.name): \(ok ? "available" : "unavailable")") }
+            self?.lastHealth = ok
             self?.showHealth(ok)
         }
     }
@@ -150,6 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(item("Глоссарий", #selector(openGlossary)))
         menu.addItem(item("Настройки…", #selector(openSettings)))
+        menu.addItem(item("Сообщить о проблеме…", #selector(reportProblem)))
         menu.addItem(.separator())
         menu.addItem(withTitle: "Выйти из Tolk", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
@@ -164,6 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openMain() { mainWindow.show() }
+    @objc private func reportProblem() { Diagnostics.copyProblemReport() }
     @objc private func openGlossary() { mainWindow.show(.glossary) }
     @objc private func openSettings() { mainWindow.show(.settings) }
     // Async: let the status menu close first, so it is not in the screenshot.
@@ -174,6 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func translateClipboard() {
         guard let text = NSPasteboard.general.string(forType: .string),
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        Diagnostics.log("translate clipboard: \(text.count) chars")
         popup.show(text: text, at: NSEvent.mouseLocation)
     }
 

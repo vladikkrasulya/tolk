@@ -1,5 +1,7 @@
 import AppKit
 
+Diagnostics.install() // first: log + crash capture for everything that follows
+
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()

@@ -190,6 +190,14 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             return
         }
         awaitingFirstDelta = true
+        // Like DeepL: keep the previous translation visible but dimmed until the new one starts;
+        // an empty pane says «Перевожу…».
+        if outputView.string.isEmpty {
+            outputPlaceholderView.placeholder = "Перевожу…"
+        } else if let storage = outputView.textStorage {
+            storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor,
+                                 range: NSRange(location: 0, length: storage.length))
+        }
         spinner.startAnimation(nil)
         runner.start(request)
     }
