@@ -12,6 +12,8 @@ var source: Language?, target: Language?, tone = Tone.auto
 var providerName = "auto", showRules = false, wantNotes = false
 var mode = TextMode.translate
 var modelOverride: String?
+var replyTo: String?
+var showPrompt = false
 var cancelAfter: Double?, addTerm: String?
 var words: [String] = []
 var args = CommandLine.arguments.dropFirst().makeIterator()
@@ -32,6 +34,8 @@ while let a = args.next() {
         tone = t
     case "--provider": providerName = value()
     case "--show-rules": showRules = true
+    case "--show-prompt": showPrompt = true
+    case "--reply-to": replyTo = value()                     // partner's message the text answers
     case "--model": modelOverride = value()                  // e.g. gemma-translate
     case "--polish": mode = .polish                          // rewrite in the same language
     case "--notes": wantNotes = true                         // also print footnotes on debatable terms
@@ -60,7 +64,8 @@ if text.isEmpty { fail("no text; see --help") }
 var config = TolkConfig.load()
 if let modelOverride { config.model = modelOverride }
 let engine = DefaultTranslationEngine(config: config)
-let request = TranslationRequest(text: text, source: source, target: target, tone: tone, mode: mode)
+let request = TranslationRequest(text: text, source: source, target: target, tone: tone, mode: mode, replyTo: replyTo)
+if showPrompt { print(DefaultTranslationEngine(config: config).debugSystemPrompt(for: request)); exit(0) }
 if showRules { err("--- rules block ---\n" + engine.rules.promptBlock(for: text) + "\n-------------------") }
 
 /// Runs one provider directly (no fallback), wrapped into engine-like events.

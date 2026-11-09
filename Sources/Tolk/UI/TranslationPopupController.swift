@@ -60,7 +60,11 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     var onExpand: ((String) -> Void)?
     /// Tone for the app the user copied from (bundle id); used when the tone switch is "Авто".
     var toneForApp: ((String?) -> Tone)?
+    /// «Ответить» (R): the app opens the reply window with this message.
+    var onReply: ((ReplyContext) -> Void)?
     private var frontApp: String?
+    private var frontAppRef: NSRunningApplication?
+    private var replyButton: NSButton!
     private var altBox: NSStackView!
     private var altTask: Task<Void, Never>?
     private var altWork: DispatchWorkItem?
@@ -120,6 +124,15 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         MainActor.assumeIsolated { self.present(text: text, at: point) }
     }
 
+    #if DEBUG
+    /// Dev: render the current popup to PNG.
+    func renderForReview(to path: String) {
+        guard let view = panel?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+    #endif
+
     /// Swaps the engine after settings change (cancels anything running).
     func replaceEngine(_ new: TranslationEngine) {
         dismiss()
@@ -152,7 +165,8 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         removeMonitors()
 
         sourceText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        frontApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        frontAppRef = NSWorkspace.shared.frontmostApplication
+        frontApp = frontAppRef?.bundleIdentifier
         requestedSource = nil
         requestedTarget = nil
         detectedSource = nil
@@ -215,6 +229,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         noticeLabel.isHidden = true
         copyButton.isEnabled = false
         insertButton.isEnabled = false
+        replyButton.isEnabled = false
         glossaryButton.isEnabled = false
         notesAfterBack = false
         resetBack()
@@ -262,6 +277,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
             textView.textStorage?.append(NSAttributedString(string: chunk, attributes: textAttributes))
             copyButton.isEnabled = true
             insertButton.isEnabled = frontApp != Bundle.main.bundleIdentifier
+            replyButton.isEnabled = true
             glossaryButton.isEnabled = true
             updateSize()
         case let .fellBack(from, reason):
@@ -388,14 +404,14 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     @objc private func copyTranslation() {
         guard !translation.isEmpty else { return }
         Clipboard.copy(translation)
-        copyButton.title = "Скопировано ✓"
+        copyButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Скопировано")
         copyResetWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.resetCopyButton() }
         copyResetWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.3, execute: work)
     }
 
-    private func resetCopyButton() { copyButton?.title = "Копировать" }
+    private func resetCopyButton() { copyButton?.title = ""; copyButton?.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil) }
 
     /// DeepL's "Insert": put the translation in place of the selection in the app the user copied from.
     @objc private func insertTranslation() {
@@ -414,6 +430,16 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
             down?.post(tap: .cghidEventTap)
             up?.post(tap: .cghidEventTap)
         }
+    }
+
+    /// Partner's message → reply window (their text stays on top while you write the answer).
+    @objc private func replyClicked() {
+        guard !translation.isEmpty, let src = detectedSource else { return }
+        let ctx = ReplyContext(partnerText: sourceText, partnerTranslation: translation, partnerLanguage: src,
+                               app: frontApp == Bundle.main.bundleIdentifier ? nil : frontAppRef,
+                               anchor: NSPoint(x: panel.frame.minX + 24, y: panel.frame.maxY + 18))
+        dismiss()
+        onReply?(ctx)
     }
 
     @objc private func expandClicked() {
@@ -712,6 +738,9 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
             guard let self, self.panel.isVisible, event.window === self.panel else { return event }
             if event.keyCode == 36, event.modifierFlags.contains(.command) { self.insertTranslation(); return nil }
+            // R — reply (only when not typing in the glossary form).
+            if event.keyCode == 15, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+               self.glossaryForm.isHidden, self.replyButton.isEnabled { self.replyClicked(); return nil }
             if event.keyCode == 8, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                self.textView.selectedRange().length == 0 { self.copyTranslation(); return nil }
             guard event.keyCode == 53 else { return event }
@@ -1009,7 +1038,20 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         // The tone switch must never be squeezed into «А… Чат П…».
         toneControl.setContentCompressionResistancePriority(.required, for: .horizontal)
         toneControl.setContentHuggingPriority(.required, for: .horizontal)
-        let footer = NSStackView(views: [toneControl, UIFactory.spacer(), backButton, notesButton, glossaryButton, copyButton, insertButton])
+        replyButton = NSButton(title: "Ответить", target: self, action: #selector(replyClicked))
+        replyButton.image = NSImage(systemSymbolName: "arrowshape.turn.up.left", accessibilityDescription: nil)
+        replyButton.imagePosition = .imageLeading
+        replyButton.bezelStyle = .push
+        replyButton.controlSize = .small
+        replyButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        replyButton.toolTip = "Ответить партнёру: пишите по-своему, перевод — на его язык (R)"
+        replyButton.isEnabled = false
+        copyButton.title = ""
+        copyButton.imagePosition = .imageOnly
+        for b in [backButton!, notesButton!, glossaryButton!, copyButton!, insertButton!] {
+            b.widthAnchor.constraint(equalToConstant: 34).isActive = true  // equal icon buttons
+        }
+        let footer = NSStackView(views: [toneControl, UIFactory.spacer(), backButton, notesButton, glossaryButton, copyButton, insertButton, replyButton])
         footer.orientation = .horizontal
         footer.spacing = 6
 

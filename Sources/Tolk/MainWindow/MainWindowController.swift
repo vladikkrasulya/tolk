@@ -7,7 +7,7 @@ import TolkCore
 @MainActor
 final class MainWindowController: NSWindowController, NSWindowDelegate {
     enum Section: String, CaseIterable {
-        case translate, image, glossary, settings
+        case translate, image, glossary, settings, help
 
         var title: String {
             switch self {
@@ -15,6 +15,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             case .image: "Фото и скриншоты"
             case .glossary: "Глоссарий"
             case .settings: "Настройки"
+            case .help: "Как пользоваться"
             }
         }
 
@@ -24,12 +25,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             case .image: "text.viewfinder"
             case .glossary: "book.closed"
             case .settings: "gearshape"
+            case .help: "questionmark.circle"
             }
         }
 
         /// ⌘1…⌘4 in the "Окно" menu.
         var keyEquivalent: String {
-            switch self { case .translate: "1"; case .image: "2"; case .glossary: "3"; case .settings: "4" }
+            switch self { case .translate: "1"; case .image: "2"; case .glossary: "3"; case .settings: "4"; case .help: "5" }
         }
     }
 
@@ -47,7 +49,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     /// Pages are built by AppDelegate and handed in, so each area owns its own view controller.
     init(translate: NSViewController, image: NSViewController, glossary: NSViewController, settings: NSViewController) {
-        pages = [.translate: translate, .image: image, .glossary: glossary, .settings: settings]
+        pages = [.translate: translate, .image: image, .glossary: glossary, .settings: settings, .help: HelpViewController()]
         current = Section(rawValue: UserDefaults.standard.string(forKey: Self.sectionKey) ?? "") ?? .translate
         sidebar = SidebarViewController(sections: Section.allCases)
 

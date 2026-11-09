@@ -13,6 +13,20 @@ enum Prompt {
         if !rules.isEmpty {
             s += "\n\n# Extra translation rules and glossary (follow strictly)\n" + rules
         }
+        if let reply = r.replyTo?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty {
+            s += """
+
+
+            # Conversation context
+            The user's text is their REPLY to the message below from a work partner. Translate only the reply.
+            Reuse the partner's own words for the same things (product names, terms like payout/cap/offer, numbers, names),
+            address the partner the same way they wrote (first name, formality), and keep it a natural reply in this thread.
+            Partner's message:
+            \"\"\"
+            \(reply.prefix(4000))
+            \"\"\"
+            """
+        }
         // Last, so an explicit tone choice wins over "keep the tone" style rules.
         s += "\n\n# Tone\n" + tone(r.tone)
         s += "\n\n# Output language\nWrite the translation in \(r.target.englishName)."

@@ -44,3 +44,12 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   `CFBundleShortVersionString`, sets `CFBundleVersion` = commit count and `TolkGitCommit` = short hash
   (`-dirty` if there were uncommitted changes). Settings → «О программе» and crash reports show all three.
 - Each release: bump `VERSION`, commit, `git tag vX.Y.Z`, then build/install. Tags: v0.1 … v0.3.1.
+
+## v0.4.0 — reply mode and in-app help
+- `UI/ReplyPanelController.swift`: «Ответ» window from the popup («Ответить» / R). Partner's message (full, scrolls
+  when long) + reply input + live translation into the partner's language with `TranslationRequest.replyTo`
+  (prompt «Conversation context»: reuse partner's terms/register). «Вставить в чат ⌘↩» activates the source app
+  and pastes (never sends). Drafts kept per partner message while the app runs.
+- `MainWindow/HelpViewController.swift`: «Как пользоваться» page (⌘5, menu). Cards animate only on hover
+  (all-at-once loops cost 16–24 % CPU on 120 Hz).
+- DEBUG render hooks: `TOLK_RENDER_REPLY=dir`, `TOLK_RENDER_POPUP=dir` write PNGs (no screen-recording needed).

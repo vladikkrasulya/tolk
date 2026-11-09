@@ -73,9 +73,14 @@ public struct TranslationRequest: Sendable, Equatable {
     public var target: Language?
     public var tone: Tone
     public var mode: TextMode
+    /// The message this text replies to (partner's original). The translation then keeps the partner's
+    /// terms, names and register so the conversation reads as one thread.
+    public var replyTo: String?
 
-    public init(text: String, source: Language? = nil, target: Language? = nil, tone: Tone = .auto, mode: TextMode = .translate) {
+    public init(text: String, source: Language? = nil, target: Language? = nil, tone: Tone = .auto,
+                mode: TextMode = .translate, replyTo: String? = nil) {
         self.text = text; self.source = source; self.target = target; self.tone = tone; self.mode = mode
+        self.replyTo = replyTo
     }
 }
 
@@ -86,9 +91,12 @@ public struct ResolvedRequest: Sendable, Equatable {
     public var target: Language
     public var tone: Tone
     public var mode: TextMode
+    public var replyTo: String?
 
-    public init(text: String, source: Language, target: Language, tone: Tone, mode: TextMode = .translate) {
+    public init(text: String, source: Language, target: Language, tone: Tone, mode: TextMode = .translate,
+                replyTo: String? = nil) {
         self.text = text; self.source = source; self.target = target; self.tone = tone; self.mode = mode
+        self.replyTo = replyTo
     }
 }
 

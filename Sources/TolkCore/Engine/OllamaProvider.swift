@@ -88,7 +88,7 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
             // Low temperature: the same phrase should translate the same way every time.
             "temperature": 0.1,
             "messages": [
-                ["role": "system", "content": Prompt.system(for: r, rules: rules.promptBlock(for: r.text))],
+                ["role": "system", "content": Prompt.system(for: r, rules: rules.promptBlock(for: r.text + "\n" + (r.replyTo ?? "")))],
                 ["role": "user", "content": r.text],
             ],
         ]

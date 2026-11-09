@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Features
     private var monitor: DoubleCopyMonitor!          // strong ref: the event tap only holds a weak one
     private var popup: TranslationPopupController!
+    private var reply: ReplyPanelController!
     private var inputWindow: InputWindowController!
     private var quickActions: QuickActionsController!
     private var screenCapture: ScreenCaptureController!
@@ -46,6 +47,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.translatePage.load(text: text)
         }
         popup.toneForApp = { [weak self] in self?.config.tone(forApp: $0) ?? .auto }
+        reply = ReplyPanelController(engine: engine)
+        reply.toneForApp = { [weak self] in self?.config.tone(forApp: $0) ?? .auto }
+        popup.onReply = { [weak self] ctx in self?.reply.show(ctx) }
 
         monitor = DoubleCopyMonitor(interval: config.doubleCopyInterval)
         monitor.onTrigger = { [weak self] text, point in self?.doubleCopy(text, at: point) }
@@ -84,6 +88,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 _ = missing!.count
             }
         }
+        // Dev: TOLK_RENDER_REPLY=dir renders the reply window (light + dark) to PNG and quits.
+        if let dir = ProcessInfo.processInfo.environment["TOLK_RENDER_REPLY"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                let ctx = ReplyContext(
+                    partnerText: "Hey, how are you? At the start of the integration, we delivered a chunk of requests on your end to let your demand show. It's ECPM. Afterward, our system started optimizing and delivering requests to streams with a better CPA. Then we went into the weekend, and we capped things to stay moderated. As it's an owned and operated website, its visitor volume depends on different metrics and different parameters. So I can't predict whether you'll see similar volume on your end this week.",
+                    partnerTranslation: "Привет! Как дела? В начале интеграции мы отдали пачку запросов на вашей стороне, чтобы ваш demand показывался. Это было по eCPM. Потом наша система начала оптимизировать и отдавать запросы в потоки с лучшим CPA. Затем начались выходные, и мы поставили капу, чтобы всё было умеренно. Так как это собственный сайт, его объём посетителей зависит от разных метрик и параметров. Поэтому я не могу предсказать, увидите ли вы похожий объём на своей стороне на этой неделе.",
+                    partnerLanguage: .english, app: NSWorkspace.shared.frontmostApplication, anchor: NSPoint(x: 400, y: 800))
+                for (name, look) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                    NSApp.appearance = NSAppearance(named: look)
+                    let r = ReplyPanelController(engine: self.engine)
+                    r.renderForReview(ctx, reply: "Да, видим падение конверсии, похоже на плохие сабы — отключим их сегодня и пришлём новый список",
+                                      translated: "Yeah, we see the CR drop too — looks like bad subs. We'll disable them today and send over a new list.",
+                                      to: "\(dir)/reply-\(name).png")
+                    r.close()
+                }
+                exit(0)
+            }
+        }
+        // Dev: TOLK_RENDER_POPUP=dir shows the popup with a sample, waits for the translation, renders PNG, quits.
+        if let dir = ProcessInfo.processInfo.environment["TOLK_RENDER_POPUP"] {
+            UserDefaults.standard.set(false, forKey: "tolk.popup.notes")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
+                popup.show(text: "Hey Vlad, our CR on your push zones dropped to 0.4%. Can you check the sub IDs?", at: NSPoint(x: 500, y: 700))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 9) { [self] in
+                    popup.renderForReview(to: "\(dir)/popup.png")
+                    UserDefaults.standard.removeObject(forKey: "tolk.popup.notes")
+                    exit(0)
+                }
+            }
+        }
         // Dev: TOLK_TEST_POPUP="text" opens the popup on launch (reproduce popup issues without clicking).
         if let text = ProcessInfo.processInfo.environment["TOLK_TEST_POPUP"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
@@ -108,6 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Diagnostics.log("settings changed: model=\(config.model) server=\(config.ollamaURL)")
         engine = DefaultTranslationEngine(config: config)
         popup.replaceEngine(engine)
+        reply.replaceEngine(engine)
         translatePage.engine = engine
         imagePage.engine = engine
         inputWindow.engine = engine
@@ -182,6 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(item("Глоссарий", #selector(openGlossary)))
         menu.addItem(item("Настройки…", #selector(openSettings)))
+        menu.addItem(item("Как пользоваться", #selector(openHelp)))
         menu.addItem(item("Сообщить о проблеме…", #selector(reportProblem)))
         menu.addItem(.separator())
         menu.addItem(withTitle: "Выйти из Tolk", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -197,6 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openMain() { mainWindow.show() }
+    @objc private func openHelp() { mainWindow.show(.help) }
     @objc private func reportProblem() { Diagnostics.copyProblemReport() }
     @objc private func openGlossary() { mainWindow.show(.glossary) }
     @objc private func openSettings() { mainWindow.show(.settings) }
@@ -227,7 +264,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func doubleCopy(_ text: String, at point: NSPoint) {
         // Inside Tolk (main window, or the popup itself — copying its translation twice must not
         // replace it with a translation of the translation) it is just copying.
-        if popupWindow?.isKeyWindow == true || (NSApp.isActive && NSApp.keyWindow != nil) {
+        if popupWindow?.isKeyWindow == true || reply.window?.isKeyWindow == true || (NSApp.isActive && NSApp.keyWindow != nil) {
             Diagnostics.log("double Cmd+C inside Tolk (\(NSApp.keyWindow?.title ?? "popup")) — ignored")
             return
         }

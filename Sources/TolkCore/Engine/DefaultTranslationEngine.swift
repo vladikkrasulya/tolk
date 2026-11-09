@@ -79,6 +79,12 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
         return await ollama.alternatives(for: fragment, in: translation, source: source, from: from, to: to)
     }
 
+    /// Dev: the exact system prompt a request would get (CLI --show-prompt).
+    public func debugSystemPrompt(for request: TranslationRequest) -> String {
+        let r = LanguageDetector.resolve(request, config: config)
+        return Prompt.system(for: r, rules: rules.promptBlock(for: r.text + "\n" + (r.replyTo ?? "")))
+    }
+
     public func addGlossaryTerm(source: String, translation: String) throws {
         try rules.addTerm(source: source, translation: translation)
     }
