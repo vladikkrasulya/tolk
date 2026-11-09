@@ -29,6 +29,19 @@ cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 find "$ROOT/Resources" -mindepth 1 -maxdepth 1 ! -name Info.plist -exec cp -R {} "$APP/Contents/Resources/" \;
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
+# Version: VERSION file is the single source of truth. Build number = commit count (always grows),
+# TolkGitCommit = short hash (+ "-dirty" with uncommitted changes) — shown in Settings and crash reports.
+VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+BUILD="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 0)"
+COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if [ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then COMMIT="$COMMIT-dirty"; fi
+PLIST="$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" "$PLIST"
+/usr/libexec/PlistBuddy -c "Delete :TolkGitCommit" "$PLIST" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :TolkGitCommit string $COMMIT" "$PLIST"
+echo "==> version $VERSION (build $BUILD, $COMMIT)"
+
 if security find-identity -v -p codesigning | grep -qF "\"$SIGN_ID\""; then
     echo "==> signing with \"$SIGN_ID\""
     codesign --force --deep --options runtime --sign "$SIGN_ID" "$APP"

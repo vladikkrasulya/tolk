@@ -23,7 +23,10 @@ enum Diagnostics {
 
     static var version: String {
         let i = Bundle.main.infoDictionary
-        return "\(i?["CFBundleShortVersionString"] as? String ?? "dev") (\(i?["CFBundleVersion"] as? String ?? "-"))"
+        let v = i?["CFBundleShortVersionString"] as? String ?? "dev"
+        let b = i?["CFBundleVersion"] as? String ?? "-"
+        let c = i?["TolkGitCommit"] as? String ?? "local"
+        return "\(v) (сборка \(b), \(c))"
     }
 
     // MARK: - Install

@@ -303,6 +303,7 @@ struct SettingsView: View {
             behaviorSection
             rulesSection
             accessSection
+            aboutSection
         }
         .formStyle(.grouped)
         .safeAreaInset(edge: .bottom) { footer }
@@ -477,6 +478,29 @@ struct SettingsView: View {
             }
         } header: {
             Text("Разрешения")
+        }
+    }
+
+    // О программе
+
+    private var aboutSection: some View {
+        Section {
+            HStack {
+                if let icon = NSApp.applicationIconImage {
+                    Image(nsImage: icon).resizable().frame(width: 36, height: 36)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tolk \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")")
+                    Text(Diagnostics.version)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                Spacer()
+                Button("Сообщить о проблеме…") { Diagnostics.copyProblemReport() }
+            }
+        } header: {
+            Text("О программе")
         }
     }
 

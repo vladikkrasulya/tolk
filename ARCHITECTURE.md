@@ -38,3 +38,9 @@ Display name in UI comes from the model id (`OllamaProvider.displayName`). Reque
 Server: `OLLAMA_NUM_PARALLEL=2` (tested: 6 concurrent → median wait 5.5 s vs 8.6 s with 1; 4 slots was worse: 27 s total,
 model is partly on CPU). Single request ~0.8 s slower than with 1 slot.
 Only one big model fits the 6 GB GPU; switching models costs a reload (first request after switch: 30–150 s).
+
+## Versioning
+- `VERSION` (e.g. `0.3.1`) is the only place to change the version. `scripts/build-app.sh` writes it to
+  `CFBundleShortVersionString`, sets `CFBundleVersion` = commit count and `TolkGitCommit` = short hash
+  (`-dirty` if there were uncommitted changes). Settings → «О программе» and crash reports show all three.
+- Each release: bump `VERSION`, commit, `git tag vX.Y.Z`, then build/install. Tags: v0.1 … v0.3.1.
