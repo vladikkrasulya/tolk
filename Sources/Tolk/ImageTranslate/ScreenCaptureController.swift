@@ -8,6 +8,9 @@ import ScreenCaptureKit
 @MainActor
 final class ScreenCaptureController {
     var onText: ((_ text: String, _ point: NSPoint) -> Void)?
+    /// When set, the hotkey calls this instead of `captureNow()` — lets the app route the capture
+    /// (main window open → image page, otherwise → popup).
+    var onHotKey: (() -> Void)?
 
     /// Carbon virtual key code and modifiers (`optionKey | shiftKey` …). Change with `setHotKey`.
     private(set) var keyCode = UInt32(kVK_ANSI_S)
@@ -20,7 +23,7 @@ final class ScreenCaptureController {
     /// Registers the global hotkey; returns false if registration failed (e.g. taken by another app).
     @discardableResult func start() -> Bool {
         ImageOCR.warmUp()
-        hotKey = GlobalHotKey(keyCode: keyCode, modifiers: modifiers) { [weak self] in self?.captureNow() }
+        hotKey = GlobalHotKey(keyCode: keyCode, modifiers: modifiers) { [weak self] in self?.hotKeyPressed() }
         return hotKey != nil
     }
 
@@ -31,12 +34,16 @@ final class ScreenCaptureController {
         let wasRunning = hotKey != nil
         guard wasRunning else { self.keyCode = keyCode; self.modifiers = modifiers; return true }
         hotKey = nil
-        if let hk = GlobalHotKey(keyCode: keyCode, modifiers: modifiers, handler: { [weak self] in self?.captureNow() }) {
+        if let hk = GlobalHotKey(keyCode: keyCode, modifiers: modifiers, handler: { [weak self] in self?.hotKeyPressed() }) {
             hotKey = hk; self.keyCode = keyCode; self.modifiers = modifiers
             return true
         }
-        hotKey = GlobalHotKey(keyCode: self.keyCode, modifiers: self.modifiers) { [weak self] in self?.captureNow() }
+        hotKey = GlobalHotKey(keyCode: self.keyCode, modifiers: self.modifiers) { [weak self] in self?.hotKeyPressed() }
         return false
+    }
+
+    private func hotKeyPressed() {
+        if let onHotKey { onHotKey() } else { captureNow() }
     }
 
     /// "⌥⇧S" — for menus and hints.
@@ -148,12 +155,13 @@ final class GlobalHotKey {
     private static var handlers: [UInt32: () -> Void] = [:]
     private static var nextID: UInt32 = 1
     private static var eventHandler: EventHandlerRef?
+    nonisolated static let signature = OSType(0x544F_4C4B) // 'TOLK'
 
     init?(keyCode: UInt32, modifiers: UInt32, handler: @escaping () -> Void) {
         Self.installHandlerIfNeeded()
         id = Self.nextID
         Self.nextID += 1
-        let hkID = EventHotKeyID(signature: OSType(0x544F_4C4B), id: id) // 'TOLK'
+        let hkID = EventHotKeyID(signature: Self.signature, id: id)
         var ref: EventHotKeyRef?
         let status = RegisterEventHotKey(keyCode, modifiers, hkID, GetApplicationEventTarget(), 0, &ref)
         guard status == noErr, let ref else { return nil }
@@ -175,6 +183,8 @@ final class GlobalHotKey {
             let err = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                                         nil, MemoryLayout<EventHotKeyID>.size, nil, &hk)
             guard err == noErr else { return err }
+            // Other hotkeys of this app (quick actions, 'TlkQ') are not ours — let their handler run.
+            guard hk.signature == GlobalHotKey.signature else { return OSStatus(eventNotHandledErr) }
             let id = hk.id
             DispatchQueue.main.async { MainActor.assumeIsolated { GlobalHotKey.handlers[id]?() } }
             return noErr

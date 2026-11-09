@@ -51,7 +51,8 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
     var screenHotKeyDisplay = "⌥⇧S" { didSet { if isViewLoaded { updateHotKeyHint() } } }
 
     private var translator: ChunkedTranslator
-    private lazy var screenCapture = ScreenCaptureController()
+    /// Shared with the app's ⌥⇧S hotkey (set by AppDelegate), so two selection overlays can never run at once.
+    var screenCapture = ScreenCaptureController()
 
     // State
     private var pages: [ImagePage] = []
@@ -584,6 +585,9 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         showNotice("В буфере обмена нет картинки. Скопируйте фото или сделайте снимок ⌘⌃⇧4.")
     }
 
+    /// Main window closed: stop translating a long document so it doesn't hold an Ollama slot.
+    func cancelWork() { translator.cancel() }
+
     @objc func captureArea(_ sender: Any?) {
         let window = view.window
         window?.orderOut(nil)
@@ -591,9 +595,13 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self else { return }
             self.screenCapture.selectImage { [weak self] image, _ in
+                guard let self, let image else {
+                    // Cancelled (Esc, ⌘Tab…): put the window back, but don't pull focus from where the user went.
+                    window?.orderFront(nil)
+                    return
+                }
                 window?.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
-                guard let self, let image else { return }
                 self.load(image: image, name: "Снимок области экрана")
             }
         }

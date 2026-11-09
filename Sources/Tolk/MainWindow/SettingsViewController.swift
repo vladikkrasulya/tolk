@@ -436,7 +436,10 @@ struct SettingsView: View {
         Section {
             LabeledContent("Файл правил") {
                 HStack {
-                    TextField("", text: $model.config.rulesPath, prompt: Text("~/Translate/rules.md"))
+                    Text(model.config.rulesPath)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
                     Button("Выбрать…") { model.chooseRulesFile() }

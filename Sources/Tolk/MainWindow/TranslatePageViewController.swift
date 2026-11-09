@@ -46,7 +46,10 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             runner = TranslationRunner(engine: engine)
             runner.onUpdate = { [weak self] in self?.handle($0) }
             lastTranslatedRequest = nil
-            if isViewLoaded { spinner.stopAnimation(nil) }
+            if isViewLoaded {
+                spinner.stopAnimation(nil)
+                DispatchQueue.main.async { [weak self] in self?.translateNow(force: true) }
+            }
         }
     }
     private var runner: TranslationRunner

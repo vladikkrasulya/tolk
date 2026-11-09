@@ -109,7 +109,11 @@ final class QuickActionsController {
     // MARK: - Running
 
     /// Runs an action on the current selection (hotkey, or a menu item).
+    /// Called right before an action grabs the selection (the app hides the translation popup here).
+    var onWillPerform: (() -> Void)?
+
     func perform(_ action: QuickAction) {
+        onWillPerform?()
         guard !isBusy else { hud.showMessage(QuickActionText.busy, kind: .info, at: NSEvent.mouseLocation); return }
         let mouse = NSEvent.mouseLocation
         guard AXIsProcessTrusted() else { hud.showMessage(QuickActionText.noAccessibility, kind: .error, at: mouse); return }

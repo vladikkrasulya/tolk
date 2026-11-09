@@ -40,6 +40,7 @@ extension OllamaProvider {
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
         req.httpBody = data
+        authorize(&req)
         guard let (resp, http) = try? await URLSession.shared.data(for: req),
               (http as? HTTPURLResponse)?.statusCode == 200,
               let obj = try? JSONSerialization.jsonObject(with: resp) as? [String: Any],
@@ -86,6 +87,7 @@ extension OllamaProvider {
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return [] }
         req.httpBody = data
+        authorize(&req)
         guard let (resp, http) = try? await URLSession.shared.data(for: req),
               (http as? HTTPURLResponse)?.statusCode == 200,
               let obj = try? JSONSerialization.jsonObject(with: resp) as? [String: Any],

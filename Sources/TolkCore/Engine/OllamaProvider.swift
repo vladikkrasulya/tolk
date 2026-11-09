@@ -4,16 +4,22 @@ import Foundation
 public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
     /// Display name from the model id: "qwen-translate" -> "Qwen", "gemma-translate" -> "Gemma".
     public let name: String
-    let baseURL: URL
+    /// Home address (LAN) and, optionally, the same Ollama from outside (e.g. a Cloudflare Tunnel) with access headers.
+    let lanURL: URL
+    let remoteURL: URL?
+    let remoteHeaders: [String: String]
+    private let lock = NSLock()
+    private var usingRemote = false
+    /// The address that answered the last availability check.
+    var baseURL: URL { lock.withLock { usingRemote ? (remoteURL ?? lanURL) : lanURL } }
     let model: String
     let rules: RulesStore
     private let session: URLSession
 
     public init(config: TolkConfig, rules: RulesStore) {
-        var base = config.ollamaURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        while base.hasSuffix("/") { base.removeLast() }
-        if base.hasSuffix("/v1") { base.removeLast(3) }
-        self.baseURL = URL(string: base) ?? URL(string: "http://127.0.0.1:11434")!
+        self.lanURL = Self.normalize(config.ollamaURL) ?? URL(string: "http://127.0.0.1:11434")!
+        self.remoteURL = Self.normalize(config.remoteURL)
+        self.remoteHeaders = config.remoteHeaders.filter { !$0.key.isEmpty }
         self.model = config.model
         self.name = OllamaProvider.displayName(for: config.model)
         self.rules = rules
@@ -33,12 +39,40 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
         return base.prefix(1).uppercased() + base.dropFirst()
     }
 
+    static func normalize(_ raw: String) -> URL? {
+        var base = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else { return nil }
+        while base.hasSuffix("/") { base.removeLast() }
+        if base.hasSuffix("/v1") { base.removeLast(3) }
+        return URL(string: base)
+    }
+
+    /// Home first (fast, 0.8 s); if it does not answer and a remote address is set, try that (2 s).
     public func isAvailable() async -> Bool {
-        var req = URLRequest(url: baseURL.appendingPathComponent("api/version"))
-        req.timeoutInterval = 0.8
+        if await ping(lanURL, timeout: 0.8, headers: [:]) {
+            lock.withLock { usingRemote = false }
+            return true
+        }
+        if let remoteURL, await ping(remoteURL, timeout: 2, headers: remoteHeaders) {
+            lock.withLock { usingRemote = true }
+            return true
+        }
+        return false
+    }
+
+    private func ping(_ base: URL, timeout: TimeInterval, headers: [String: String]) async -> Bool {
+        var req = URLRequest(url: base.appendingPathComponent("api/version"))
+        req.timeoutInterval = timeout
         req.cachePolicy = .reloadIgnoringLocalCacheData
+        headers.forEach { req.setValue($0.value, forHTTPHeaderField: $0.key) }
         guard let (_, resp) = try? await session.data(for: req) else { return false }
         return (resp as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    /// Adds the access headers when talking to the remote address.
+    func authorize(_ req: inout URLRequest) {
+        guard lock.withLock({ usingRemote }) else { return }
+        remoteHeaders.forEach { req.setValue($0.value, forHTTPHeaderField: $0.key) }
     }
 
     func makeRequest(_ r: ResolvedRequest) throws -> URLRequest {
@@ -59,6 +93,7 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
             ],
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        authorize(&req)
         return req
     }
 

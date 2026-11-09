@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainWindow: MainWindowController!
     private var translatePage: TranslatePageViewController!
     private var imagePage: ImageTranslateViewController!
+    private var glossaryPage: GlossaryViewController!
 
     // Menu bar
     private var statusItem: NSStatusItem!
@@ -34,9 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         inputWindow = InputWindowController(engine: engine)
         translatePage = TranslatePageViewController(engine: engine)
         imagePage = ImageTranslateViewController(engine: engine)
+        glossaryPage = GlossaryViewController(rulesPath: config.rulesPath)
         mainWindow = MainWindowController(translate: translatePage,
                                           image: imagePage,
-                                          glossary: GlossaryViewController(rulesPath: config.rulesPath),
+                                          glossary: glossaryPage,
                                           settings: SettingsViewController(config: config))
 
         popup.onExpand = { [weak self] text in
@@ -46,18 +48,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popup.toneForApp = { [weak self] in self?.config.tone(forApp: $0) ?? .auto }
 
         monitor = DoubleCopyMonitor(interval: config.doubleCopyInterval)
-        monitor.onTrigger = { [weak self] text, point in
-            Diagnostics.log("double Cmd+C: \(text.count) chars")
-            self?.popup.show(text: text, at: point)
-        }
+        monitor.onTrigger = { [weak self] text, point in self?.doubleCopy(text, at: point) }
 
         quickActions = QuickActionsController(engine: engine, config: config)
+        quickActions.onWillPerform = { [weak self] in self?.popup.hideNow() }
         if !quickActions.start() { NSLog("Tolk: hotkeys taken: \(quickActions.failedActions.map(\.title))") }
 
         screenCapture = ScreenCaptureController()
+        imagePage.screenCapture = screenCapture // one controller → never two selection overlays
         screenCapture.onText = { [weak self] text, point in self?.popup.show(text: text, at: point) }
+        screenCapture.onHotKey = { [weak self] in self?.captureScreen() }
         screenCapture.start()
         imagePage.screenHotKeyDisplay = screenCapture.hotKeyDisplay
+        // Closing the main window stops a long document translation (it would hold an Ollama slot).
+        mainWindow.onClose = { [weak self] in self?.imagePage.cancelWork() }
 
         setupMenu()
         startMonitor()
@@ -107,10 +111,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         translatePage.engine = engine
         imagePage.engine = engine
         inputWindow.engine = engine
+        glossaryPage.switchFile(to: config.rulesPath)
         quickActions.update(engine: engine, config: config)
         monitor.stop()
         monitor = DoubleCopyMonitor(interval: config.doubleCopyInterval)
-        monitor.onTrigger = { [weak self] text, point in self?.popup.show(text: text, at: point) }
+        monitor.onTrigger = { [weak self] text, point in self?.doubleCopy(text, at: point) }
         startMonitor()
         checkHealth()
     }
@@ -195,8 +200,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func reportProblem() { Diagnostics.copyProblemReport() }
     @objc private func openGlossary() { mainWindow.show(.glossary) }
     @objc private func openSettings() { mainWindow.show(.settings) }
-    // Async: let the status menu close first, so it is not in the screenshot.
-    @objc private func captureScreen() { DispatchQueue.main.async { self.screenCapture.captureNow() } }
+    /// Screen area capture (⌥⇧S or menu): main window open → the image page gets the picture
+    /// (preview, paragraphs, translation); otherwise → OCR text in the popup.
+    @objc private func captureScreen() {
+        // Async: let the status menu close first, so it is not in the screenshot.
+        DispatchQueue.main.async { [self] in
+            if mainWindowOnScreen {
+                Diagnostics.log("capture → image page")
+                mainWindow.show(.image)
+                imagePage.captureArea(nil)
+            } else {
+                Diagnostics.log("capture → popup")
+                screenCapture.captureNow()
+            }
+        }
+    }
+
+    private var mainWindowOnScreen: Bool {
+        guard let w = mainWindow.window else { return false }
+        // isVisible is also true on another Space — then the capture must not drag the user there.
+        return w.isVisible && !w.isMiniaturized && w.isOnActiveSpace
+    }
+
+    /// Double Cmd+C anywhere → popup. Inside Tolk's own windows it is just copying (you are already
+    /// in the translator), so no popup there.
+    private func doubleCopy(_ text: String, at point: NSPoint) {
+        // Inside Tolk (main window, or the popup itself — copying its translation twice must not
+        // replace it with a translation of the translation) it is just copying.
+        if popupWindow?.isKeyWindow == true || (NSApp.isActive && NSApp.keyWindow != nil) {
+            Diagnostics.log("double Cmd+C inside Tolk (\(NSApp.keyWindow?.title ?? "popup")) — ignored")
+            return
+        }
+        Diagnostics.log("double Cmd+C: \(text.count) chars")
+        popup.show(text: text, at: point)
+    }
+
+    private var popupWindow: NSWindow? { popup.window }
     @objc private func quickTranslate() { quickActions.perform(.translateReplace) }
     @objc private func quickPolish() { quickActions.perform(.polishReplace) }
 

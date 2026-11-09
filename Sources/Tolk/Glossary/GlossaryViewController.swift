@@ -8,8 +8,8 @@ import TolkCore
 import UniformTypeIdentifiers
 
 final class GlossaryViewController: NSViewController {
-    let rulesPath: String
-    private let file: GlossaryFile
+    private(set) var rulesPath: String
+    private var file: GlossaryFile
     private var watcher: GlossaryFileWatcher?
     private(set) var doc: GlossaryDocument
 
@@ -422,6 +422,25 @@ final class GlossaryViewController: NSViewController {
             }
         } catch {
             setStatus(.error("Не удалось сохранить: \(error.localizedDescription)"))
+        }
+    }
+
+    /// Settings changed the rules file: save pending edits to the old one, then show the new one.
+    func switchFile(to path: String) {
+        let expanded = (path as NSString).expandingTildeInPath
+        guard expanded != rulesPath else { return }
+        if dirty { save() }
+        watcher?.stop(); watcher = nil
+        rulesPath = expanded
+        file = GlossaryFile(path: expanded)
+        doc = file.load()
+        guard isViewLoaded else { return }
+        applyDocumentToUI()
+        rebuildVisible(keepSelection: [])
+        if view.window != nil {
+            watcher = GlossaryFileWatcher(path: rulesPath) { [weak self] in
+                MainActor.assumeIsolated { self?.fileChangedOutside() }
+            }
         }
     }
 

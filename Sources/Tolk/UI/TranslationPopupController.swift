@@ -53,6 +53,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     private var notesTask: Task<Void, Never>?
     private var lastProvider = ""
     private var presentGeneration = 0
+    private var notesAfterBack = false
     private var resizeScheduled = false
 
     /// Called with the source text when the user expands the popup into the input window.
@@ -129,6 +130,16 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         backRunner.onUpdate = { [weak self] in self?.handleBack($0) }
     }
 
+    /// Hide at once, no fade: a quick action is about to send ⌘C/⌘V to the app underneath.
+    func hideNow() {
+        guard let panel, panel.isVisible else { return }
+        presentGeneration += 1
+        runner.cancel(); backRunner.cancel(); notesTask?.cancel(); altTask?.cancel(); altWork?.cancel()
+        removeMonitors()
+        panel.orderOut(nil)
+        panel.alphaValue = 1
+    }
+
     nonisolated func hide() {
         MainActor.assumeIsolated { self.dismiss() }
     }
@@ -192,6 +203,8 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     }
 
     var isVisible: Bool { panel?.isVisible ?? false }
+    /// The popup's panel (nil until first shown) — lets the app tell it apart from other windows.
+    var window: NSWindow? { panel }
 
     // MARK: - Translation
 
@@ -203,6 +216,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         copyButton.isEnabled = false
         insertButton.isEnabled = false
         glossaryButton.isEnabled = false
+        notesAfterBack = false
         resetBack()
         resetNotes()
         hideAlternatives()
@@ -247,7 +261,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
             translation += chunk
             textView.textStorage?.append(NSAttributedString(string: chunk, attributes: textAttributes))
             copyButton.isEnabled = true
-            insertButton.isEnabled = true
+            insertButton.isEnabled = frontApp != Bundle.main.bundleIdentifier
             glossaryButton.isEnabled = true
             updateSize()
         case let .fellBack(from, reason):
@@ -263,8 +277,10 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
             mainFinished = true
             if translation.isEmpty { showMessage("Пустой перевод.", color: .secondaryLabelColor) }
             else {
-                if backEnabled { startBack() }
-                if notesEnabled { startNotes() }
+                // Two Ollama slots: back-translation first, footnotes after it — so a word-alternatives
+                // request or another user is not stuck behind both.
+                if backEnabled { notesAfterBack = notesEnabled; startBack() }
+                else if notesEnabled { startNotes() }
             }
         case let .failed(message):
             spinner.stopAnimation(nil)
@@ -615,9 +631,17 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
             setBack(title: nil, text: backTranslation, color: .secondaryLabelColor)
         case .finished:
             if backTranslation.isEmpty { setBack(title: nil, text: "—", color: .tertiaryLabelColor) }
+            startPendingNotes()
         case let .failed(message):
             setBack(title: nil, text: message, color: .systemRed)
+            startPendingNotes()
         }
+    }
+
+    private func startPendingNotes() {
+        guard notesAfterBack else { return }
+        notesAfterBack = false
+        if notesEnabled { startNotes() }
     }
 
     private func setBack(title: String?, text: String, color: NSColor) {
