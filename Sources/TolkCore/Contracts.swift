@@ -3,12 +3,53 @@
 import Foundation
 
 public enum Language: String, CaseIterable, Codable, Sendable {
-    case russian = "ru", ukrainian = "uk", english = "en"
+    // Order = order in menus: main working languages first, then the rest.
+    case english = "en", russian = "ru", ukrainian = "uk"
+    case german = "de", french = "fr", spanish = "es", italian = "it", portuguese = "pt"
+    case polish = "pl", czech = "cs", dutch = "nl", romanian = "ro", bulgarian = "bg"
+    case turkish = "tr", kazakh = "kk", georgian = "ka", hebrew = "he", arabic = "ar"
+    case chinese = "zh", japanese = "ja", korean = "ko", hindi = "hi", indonesian = "id", vietnamese = "vi"
 
     /// Name used inside LLM prompts.
     public var englishName: String {
-        switch self { case .russian: "Russian"; case .ukrainian: "Ukrainian"; case .english: "English" }
+        switch self {
+        case .english: "English"; case .russian: "Russian"; case .ukrainian: "Ukrainian"
+        case .german: "German"; case .french: "French"; case .spanish: "Spanish"; case .italian: "Italian"
+        case .portuguese: "Portuguese"; case .polish: "Polish"; case .czech: "Czech"; case .dutch: "Dutch"
+        case .romanian: "Romanian"; case .bulgarian: "Bulgarian"; case .turkish: "Turkish"; case .kazakh: "Kazakh"
+        case .georgian: "Georgian"; case .hebrew: "Hebrew"; case .arabic: "Arabic"
+        case .chinese: "Chinese (Simplified)"; case .japanese: "Japanese"; case .korean: "Korean"
+        case .hindi: "Hindi"; case .indonesian: "Indonesian"; case .vietnamese: "Vietnamese"
+        }
     }
+
+    /// Russian name for the UI, nominative, lower case: "немецкий".
+    public var russianName: String {
+        switch self {
+        case .english: "английский"; case .russian: "русский"; case .ukrainian: "украинский"
+        case .german: "немецкий"; case .french: "французский"; case .spanish: "испанский"; case .italian: "итальянский"
+        case .portuguese: "португальский"; case .polish: "польский"; case .czech: "чешский"; case .dutch: "нидерландский"
+        case .romanian: "румынский"; case .bulgarian: "болгарский"; case .turkish: "турецкий"; case .kazakh: "казахский"
+        case .georgian: "грузинский"; case .hebrew: "иврит"; case .arabic: "арабский"
+        case .chinese: "китайский"; case .japanese: "японский"; case .korean: "корейский"
+        case .hindi: "хинди"; case .indonesian: "индонезийский"; case .vietnamese: "вьетнамский"
+        }
+    }
+
+    /// Flag emoji for compact UI.
+    public var flag: String {
+        switch self {
+        case .english: "🇬🇧"; case .russian: "🇷🇺"; case .ukrainian: "🇺🇦"; case .german: "🇩🇪"; case .french: "🇫🇷"
+        case .spanish: "🇪🇸"; case .italian: "🇮🇹"; case .portuguese: "🇵🇹"; case .polish: "🇵🇱"; case .czech: "🇨🇿"
+        case .dutch: "🇳🇱"; case .romanian: "🇷🇴"; case .bulgarian: "🇧🇬"; case .turkish: "🇹🇷"; case .kazakh: "🇰🇿"
+        case .georgian: "🇬🇪"; case .hebrew: "🇮🇱"; case .arabic: "🇸🇦"; case .chinese: "🇨🇳"; case .japanese: "🇯🇵"
+        case .korean: "🇰🇷"; case .hindi: "🇮🇳"; case .indonesian: "🇮🇩"; case .vietnamese: "🇻🇳"
+        }
+    }
+
+    /// Code for Google Translate.
+    public var googleCode: String { self == .chinese ? "zh-CN" : (self == .hebrew ? "iw" : rawValue) }
+
     /// Short label for the UI.
     public var label: String { rawValue.uppercased() }
 }
@@ -62,11 +103,37 @@ public protocol TranslationProvider: Sendable {
     func translate(_ request: ResolvedRequest) -> AsyncThrowingStream<String, Error>
 }
 
+/// "Footnote" on a debatable term in a finished translation (industry jargon, ambiguity).
+public struct TranslationNote: Sendable, Equatable, Codable {
+    /// The term as written in the source text.
+    public var term: String
+    /// How the translation rendered it.
+    public var used: String
+    /// A better / more idiomatic industry variant, if the model thinks there is one.
+    public var suggestion: String?
+    /// Short explanation in Russian.
+    public var note: String
+
+    public init(term: String, used: String, suggestion: String?, note: String) {
+        self.term = term; self.used = used; self.suggestion = suggestion; self.note = note
+    }
+
+    /// What goes into the glossary when the user saves the note.
+    public var preferred: String { (suggestion?.isEmpty == false ? suggestion : nil) ?? used }
+}
+
 /// Entry point used by the app.
 public protocol TranslationEngine: AnyObject, Sendable {
     func translate(_ request: TranslationRequest) -> AsyncThrowingStream<TranslationEvent, Error>
     /// Adds a term to the user's glossary (rules file). Used by the UI's "add term" action.
     func addGlossaryTerm(source: String, translation: String) throws
+    /// Up to 3 notes on debatable industry terms in a finished translation. Empty when nothing is debatable
+    /// or the model is unavailable (notes are optional, never an error the user has to see).
+    func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote]
+}
+
+public extension TranslationEngine {
+    func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote] { [] }
 }
 
 /// App settings. Stored as JSON at `TolkConfig.defaultPath`; missing file = defaults.
@@ -75,17 +142,23 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public var model: String = "qwen-translate"
     /// Rules + glossary in Markdown, injected into the system prompt.
     public var rulesPath: String = "~/Translate/rules.md"
-    /// Text in `secondary` (or Ukrainian) goes to... see engine rules; default: RU/UA -> EN, EN -> RU.
+    /// Default direction: `primary`/Ukrainian -> `secondary`; any other language -> `primary`.
     public var primaryLanguage: Language = .russian
     public var secondaryLanguage: Language = .english
     /// Max seconds between the two Cmd+C presses.
     public var doubleCopyInterval: Double = 0.4
     public var useGoogleFallback: Bool = true
+    /// Remote access to the same Ollama from outside the home network (e.g. a Cloudflare Tunnel URL).
+    /// Empty = LAN only. The engine tries `ollamaURL` first, then `remoteURL`.
+    public var remoteURL: String = ""
+    /// Extra HTTP headers for `remoteURL` (e.g. Cloudflare Access service-token headers).
+    public var remoteHeaders: [String: String] = [:]
 
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
         case ollamaURL, model, rulesPath, primaryLanguage, secondaryLanguage, doubleCopyInterval, useGoogleFallback
+        case remoteURL, remoteHeaders
     }
 
     /// Every key is optional: `{"model": "x"}` keeps all other defaults.
@@ -99,9 +172,24 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         secondaryLanguage = try c.decodeIfPresent(Language.self, forKey: .secondaryLanguage) ?? d.secondaryLanguage
         doubleCopyInterval = try c.decodeIfPresent(Double.self, forKey: .doubleCopyInterval) ?? d.doubleCopyInterval
         useGoogleFallback = try c.decodeIfPresent(Bool.self, forKey: .useGoogleFallback) ?? d.useGoogleFallback
+        remoteURL = try c.decodeIfPresent(String.self, forKey: .remoteURL) ?? d.remoteURL
+        remoteHeaders = try c.decodeIfPresent([String: String].self, forKey: .remoteHeaders) ?? d.remoteHeaders
     }
 
     public static let defaultPath = "~/Translate/tolk.json"
+
+    /// Writes the config as pretty JSON (creates the folder). Posts `TolkConfig.didChange`.
+    public func save(to path: String = defaultPath) throws {
+        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try enc.encode(self).write(to: url, options: .atomic)
+        NotificationCenter.default.post(name: TolkConfig.didChange, object: nil)
+    }
+
+    /// Posted after `save`; the app rebuilds the engine with the new settings.
+    public static let didChange = Notification.Name("TolkConfigDidChange")
 
     public static func load(from path: String = defaultPath) -> TolkConfig {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)

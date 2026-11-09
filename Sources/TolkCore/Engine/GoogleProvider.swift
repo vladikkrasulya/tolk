@@ -31,7 +31,7 @@ public final class GoogleProvider: TranslationProvider, @unchecked Sendable {
     }
 
     func fetch(_ r: ResolvedRequest) async throws -> String {
-        let params = [("client", "gtx"), ("sl", r.source.rawValue), ("tl", r.target.rawValue), ("dt", "t")]
+        let params = [("client", "gtx"), ("sl", r.source.googleCode), ("tl", r.target.googleCode), ("dt", "t")]
         var comps = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
         comps.queryItems = params.map { URLQueryItem(name: $0.0, value: $0.1) }
         var req: URLRequest

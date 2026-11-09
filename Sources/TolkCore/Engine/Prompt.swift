@@ -24,8 +24,8 @@ enum Prompt {
     static func tone(_ t: Tone) -> String {
         switch t {
         case .auto: "keep the tone and register of the original (chat stays casual, email stays formal)."
-        case .chat: "The user chose CHAT tone — this overrides the tone of the original and any tone rule above: short, informal, natural, like colleagues in Slack/Telegram; informal address (ты in Russian/Ukrainian), no stiff phrases."
-        case .formal: "The user chose FORMAL tone — this overrides the tone of the original and any tone rule above: polite business email, courteous and professional; formal address (Вы in Russian/Ukrainian, e.g. «Здравствуйте», «не могли бы Вы»); no slang greetings like «Привет»/«hey»."
+        case .chat: "The user chose CHAT tone — this overrides the tone of the original and any tone rule above: short, informal, natural, like colleagues in Slack/Telegram; informal address (ты in Russian/Ukrainian, du in German, tu in French, etc.), no stiff phrases."
+        case .formal: "The user chose FORMAL tone — this overrides the tone of the original and any tone rule above: polite business email, courteous and professional; formal address (Вы in Russian/Ukrainian, Sie in German, vous in French, etc.; e.g. «Здравствуйте», «не могли бы Вы»); no slang greetings like «Привет»/«hey»."
         }
     }
 }

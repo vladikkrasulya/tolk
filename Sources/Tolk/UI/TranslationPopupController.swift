@@ -20,8 +20,8 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     let engine: TranslationEngine
 
     // Layout
-    private let width: CGFloat = 440
-    private let inset: CGFloat = 14
+    private let width: CGFloat = 460
+    private let inset: CGFloat = 16
     private let minTextHeight: CGFloat = 22
     private let maxTextHeight: CGFloat = 340
 
@@ -43,6 +43,18 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     private var toneControl: NSSegmentedControl!
     private var glossaryButton: NSButton!
     private var copyButton: NSButton!
+    private var insertButton: NSButton!
+    private var backButton: NSButton!
+    private var backBox: NSStackView!
+    private var backTitle: NSTextField!
+    private var backText: NSTextField!
+    private var notesBox: NSStackView!
+    private var notesButton: NSButton!
+    private var notesTask: Task<Void, Never>?
+    private var lastProvider = ""
+
+    /// Called with the source text when the user expands the popup into the input window.
+    var onExpand: ((String) -> Void)?
 
     // State
     private var sourceText = ""
@@ -53,6 +65,24 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     private var detectedTarget: Language?
     private var fellBackFrom: String?
     private var showsPlaceholder = false
+    private var mainFinished = false
+    private let backRunner: TranslationRunner
+    private var backTranslation = ""
+    /// Back-translation toggle (remembered): after each translation, translate it back to check meaning.
+    private var backEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "tolk.popup.back") }
+        set { UserDefaults.standard.set(newValue, forKey: "tolk.popup.back") }
+    }
+    /// Footnotes toggle (remembered, on by default): notes on debatable industry terms.
+    private var notesEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "tolk.popup.notes") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "tolk.popup.notes") }
+    }
+    /// Recently chosen target languages, newest first.
+    private var recentTargets: [Language] {
+        get { (UserDefaults.standard.stringArray(forKey: "tolk.recentTargets") ?? []).compactMap(Language.init) }
+        set { UserDefaults.standard.set(newValue.prefix(4).map(\.rawValue), forKey: "tolk.recentTargets") }
+    }
     private var tone: Tone {
         get { Tone(rawValue: UserDefaults.standard.string(forKey: "tolk.popup.tone") ?? "") ?? .auto }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "tolk.popup.tone") }
@@ -67,8 +97,10 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     init(engine: TranslationEngine) {
         self.engine = engine
         self.runner = TranslationRunner(engine: engine)
+        self.backRunner = TranslationRunner(engine: engine)
         super.init()
         runner.onUpdate = { [weak self] in self?.handle($0) }
+        backRunner.onUpdate = { [weak self] in self?.handleBack($0) }
     }
 
     // MARK: - Public API
@@ -86,6 +118,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     private func present(text: String, at point: NSPoint) {
         buildIfNeeded()
         runner.cancel()
+        backRunner.cancel()
         removeMonitors()
 
         sourceText = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -110,6 +143,8 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
 
     private func dismiss() {
         runner.cancel()
+        backRunner.cancel()
+        notesTask?.cancel()
         removeMonitors()
         copyResetWork?.cancel()
         panel?.orderOut(nil)
@@ -122,9 +157,13 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     private func startTranslation() {
         translation = ""
         fellBackFrom = nil
+        mainFinished = false
         noticeLabel.isHidden = true
         copyButton.isEnabled = false
+        insertButton.isEnabled = false
         glossaryButton.isEnabled = false
+        resetBack()
+        resetNotes()
         resetCopyButton()
 
         guard !sourceText.isEmpty else {
@@ -148,6 +187,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
             detectedSource = source
             detectedTarget = target
             updateDirectionTitle()
+            lastProvider = provider
             providerBadge.text = UIText.providerName(provider)
             providerBadge.tint = UIText.isFallbackProvider(provider) ? .systemOrange : .secondaryLabelColor
             if let from = fellBackFrom {
@@ -162,6 +202,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
             translation += chunk
             textView.textStorage?.append(NSAttributedString(string: chunk, attributes: textAttributes))
             copyButton.isEnabled = true
+            insertButton.isEnabled = true
             glossaryButton.isEnabled = true
             updateSize()
         case let .fellBack(from, reason):
@@ -174,7 +215,12 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
             noticeLabel.toolTip = reason
         case .finished:
             spinner.stopAnimation(nil)
+            mainFinished = true
             if translation.isEmpty { showMessage("Пустой перевод.", color: .secondaryLabelColor) }
+            else {
+                if backEnabled { startBack() }
+                if notesEnabled { startNotes() }
+            }
         case let .failed(message):
             spinner.stopAnimation(nil)
             if translation.isEmpty {
@@ -188,7 +234,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     private var textAttributes: [NSAttributedString.Key: Any] {
         let p = NSMutableParagraphStyle()
         p.lineSpacing = 2
-        return [.font: NSFont.systemFont(ofSize: 15), .foregroundColor: NSColor.labelColor, .paragraphStyle: p]
+        return [.font: NSFont.systemFont(ofSize: 16), .foregroundColor: NSColor.labelColor, .paragraphStyle: p]
     }
 
     private func showMessage(_ text: String, color: NSColor) {
@@ -209,9 +255,9 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     // MARK: - Direction & tone
 
     private func updateDirectionTitle() {
-        let src = (requestedSource ?? detectedSource)?.label ?? "Авто"
-        let dst = (requestedTarget ?? detectedTarget)?.label ?? "…"
-        directionButton.title = "\(src) → \(dst)"
+        let src = (requestedSource ?? detectedSource).map { "\($0.flag) \(UIText.capitalized($0))" } ?? "Авто"
+        let dst = (requestedTarget ?? detectedTarget).map { "\($0.flag) \(UIText.capitalized($0))" } ?? "…"
+        directionButton.title = "\(src)  →  \(dst)"
         directionButton.toolTip = requestedTarget == nil
             ? "Направление определяется автоматически. Нажмите, чтобы выбрать."
             : "Направление выбрано вручную"
@@ -224,13 +270,21 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         auto.state = requestedTarget == nil ? .on : .off
         menu.addItem(auto)
         menu.addItem(.separator())
-        for lang in Language.allCases {
-            let item = NSMenuItem(title: UIText.intoLanguage(lang), action: #selector(chooseTarget(_:)), keyEquivalent: "")
+        func addLanguage(_ lang: Language) {
+            let item = NSMenuItem(title: "\(lang.flag)  \(UIText.capitalized(lang))", action: #selector(chooseTarget(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = lang.rawValue
             item.state = requestedTarget == lang ? .on : .off
             menu.addItem(item)
         }
+        let recents = recentTargets
+        if !recents.isEmpty {
+            menu.addItem(NSMenuItem.sectionHeader(title: "Недавние"))
+            recents.forEach(addLanguage)
+            menu.addItem(.separator())
+        }
+        menu.addItem(NSMenuItem.sectionHeader(title: "Перевести на"))
+        Language.allCases.sorted { $0.russianName < $1.russianName }.forEach(addLanguage)
         menu.addItem(.separator())
         let swap = NSMenuItem(title: "Поменять направление", action: #selector(swapDirection), keyEquivalent: "")
         swap.target = self
@@ -248,6 +302,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     @objc private func chooseTarget(_ item: NSMenuItem) {
         guard let raw = item.representedObject as? String, let lang = Language(rawValue: raw) else { return }
         requestedTarget = lang
+        recentTargets = [lang] + recentTargets.filter { $0 != lang }
         // Keep the detected source unless it equals the new target (then let the engine detect).
         requestedSource = (requestedSource == lang) ? nil : requestedSource
         startTranslation()
@@ -280,6 +335,191 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
     }
 
     private func resetCopyButton() { copyButton?.title = "Копировать" }
+
+    /// DeepL's "Insert": put the translation in place of the selection in the app the user copied from.
+    @objc private func insertTranslation() {
+        guard !translation.isEmpty else { return }
+        Clipboard.copy(translation)
+        dismiss()
+        // The popup never activated our app, so the source app is still frontmost: paste there.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            let src = CGEventSource(stateID: .combinedSessionState)
+            let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)   // kVK_ANSI_V
+            let up = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
+            down?.flags = .maskCommand
+            up?.flags = .maskCommand
+            down?.post(tap: .cghidEventTap)
+            up?.post(tap: .cghidEventTap)
+        }
+    }
+
+    @objc private func expandClicked() {
+        let text = sourceText
+        dismiss()
+        onExpand?(text)
+    }
+
+    // MARK: - Footnotes
+
+    @objc private func toggleNotes() {
+        notesEnabled = notesButton.state == .on
+        if notesEnabled { if mainFinished, !translation.isEmpty { startNotes() } }
+        else { resetNotes() }
+    }
+
+    private func resetNotes() {
+        notesTask?.cancel()
+        notesTask = nil
+        notesButton.state = notesEnabled ? .on : .off
+        notesBox.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        notesBox.isHidden = true
+        updateSize()
+    }
+
+    private func startNotes() {
+        // Notes come from Qwen; with the Google fallback there is no model to ask.
+        guard !UIText.isFallbackProvider(lastProvider), let src = detectedSource, let dst = detectedTarget else { return }
+        let source = sourceText, translated = translation, engine = self.engine
+        notesTask?.cancel()
+        showNotesLoading()
+        notesTask = Task { @MainActor [weak self] in
+            let notes = await engine.notes(source: source, translation: translated, from: src, to: dst)
+            guard let self, !Task.isCancelled, self.translation == translated else { return }
+            self.showNotes(notes)
+        }
+    }
+
+    private func showNotesLoading() {
+        notesBox.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let l = UIFactory.label("Ищу спорные термины…", size: 11.5, color: .tertiaryLabelColor)
+        notesBox.addArrangedSubview(l)
+        notesBox.isHidden = false
+        updateSize()
+    }
+
+    private func showNotes(_ notes: [TranslationNote]) {
+        notesBox.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard !notes.isEmpty else { notesBox.isHidden = true; updateSize(); return }
+        let title = UIFactory.label("Сноски", size: 11, weight: .semibold, color: .tertiaryLabelColor)
+        notesBox.addArrangedSubview(title)
+        for (i, n) in notes.enumerated() {
+            notesBox.addArrangedSubview(noteRow(n, index: i + 1))
+        }
+        notesBox.isHidden = false
+        updateSize()
+    }
+
+    private func noteRow(_ n: TranslationNote, index: Int) -> NSView {
+        let text = NSMutableAttributedString()
+        let small = NSFont.systemFont(ofSize: 12.5)
+        text.append(NSAttributedString(string: "\(index). ", attributes: [.font: small, .foregroundColor: NSColor.tertiaryLabelColor]))
+        text.append(NSAttributedString(string: n.term, attributes: [.font: NSFont.systemFont(ofSize: 12.5, weight: .semibold), .foregroundColor: NSColor.labelColor]))
+        text.append(NSAttributedString(string: " → «\(n.used)»", attributes: [.font: small, .foregroundColor: NSColor.labelColor]))
+        text.append(NSAttributedString(string: "\n" + n.note, attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
+        let label = NSTextField(labelWithAttributedString: text)
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
+        label.preferredMaxLayoutWidth = width - inset * 2 - 20
+        label.isSelectable = true
+
+        var buttons: [NSView] = []
+        let keep = ClosureButton(title: "Так и оставить", symbol: "checkmark") { [weak self] in
+            self?.saveNote(term: n.term, value: n.used, retranslate: false)
+        }
+        keep.toolTip = "Сохранить «\(n.term) → \(n.used)» в глоссарий"
+        buttons.append(keep)
+        if let sug = n.suggestion {
+            let use = ClosureButton(title: "«\(sug)»", symbol: "arrow.triangle.2.circlepath") { [weak self] in
+                self?.saveNote(term: n.term, value: sug, retranslate: true)
+            }
+            use.toolTip = "Сохранить «\(n.term) → \(sug)» в глоссарий и перевести заново"
+            buttons.append(use)
+        }
+        let row = NSStackView(views: buttons + [UIFactory.spacer()])
+        row.orientation = .horizontal
+        row.spacing = 6
+        let box = NSStackView(views: [label, row])
+        box.orientation = .vertical
+        box.alignment = .leading
+        box.spacing = 4
+        return box
+    }
+
+    private func saveNote(term: String, value: String, retranslate: Bool) {
+        do {
+            try engine.addGlossaryTerm(source: term, translation: value)
+            if retranslate {
+                startTranslation()
+                showNotice("В глоссарии: «\(term)» → «\(value)». Перевожу заново.", color: .systemGreen)
+            } else {
+                showNotice("В глоссарии: «\(term)» → «\(value)»", color: .systemGreen)
+            }
+        } catch {
+            showNotice("Не удалось сохранить в глоссарий: \(error.localizedDescription)", color: .systemRed)
+        }
+    }
+
+    // MARK: - Back-translation
+
+    @objc private func toggleBack() {
+        backEnabled = backButton.state == .on
+        if backEnabled {
+            backBox.isHidden = false
+            if mainFinished, !translation.isEmpty { startBack() } else { setBack(title: "Обратный перевод", text: "Появится после перевода…", color: .tertiaryLabelColor) }
+        } else {
+            backRunner.cancel()
+            backBox.isHidden = true
+
+        notesBox = NSStackView()
+        notesBox.orientation = .vertical
+        notesBox.alignment = .leading
+        notesBox.spacing = 8
+        notesBox.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+        notesBox.wantsLayer = true
+        notesBox.layer?.cornerRadius = 8
+        notesBox.layer?.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.08).cgColor
+        notesBox.isHidden = true
+        }
+        updateSize()
+    }
+
+    private func resetBack() {
+        backRunner.cancel()
+        backTranslation = ""
+        backButton.state = backEnabled ? .on : .off
+        backBox.isHidden = !backEnabled
+        if backEnabled { setBack(title: "Обратный перевод", text: "Появится после перевода…", color: .tertiaryLabelColor) }
+    }
+
+    private func startBack() {
+        guard let src = detectedTarget, let dst = detectedSource else { return }
+        backTranslation = ""
+        backBox.isHidden = false
+        setBack(title: "Обратно: \(src.flag) → \(dst.flag) \(UIText.capitalized(dst))", text: "Перевожу обратно…", color: .tertiaryLabelColor)
+        updateSize()
+        backRunner.start(TranslationRequest(text: translation, source: src, target: dst, tone: .auto))
+    }
+
+    private func handleBack(_ update: TranslationRunner.Update) {
+        switch update {
+        case .started, .fellBack:
+            backTranslation = ""
+        case let .delta(chunk):
+            backTranslation += chunk
+            setBack(title: nil, text: backTranslation, color: .secondaryLabelColor)
+        case .finished:
+            if backTranslation.isEmpty { setBack(title: nil, text: "—", color: .tertiaryLabelColor) }
+        case let .failed(message):
+            setBack(title: nil, text: message, color: .systemRed)
+        }
+    }
+
+    private func setBack(title: String?, text: String, color: NSColor) {
+        if let title { backTitle.stringValue = title }
+        backText.stringValue = text
+        backText.textColor = color
+        updateSize()
+    }
 
     @objc private func closeClicked() { dismiss() }
 
@@ -340,7 +580,11 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
 
     private func installMonitors() {
         if let m = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
-            guard let self, self.panel.isVisible, event.window === self.panel, event.keyCode == 53 else { return event }
+            guard let self, self.panel.isVisible, event.window === self.panel else { return event }
+            if event.keyCode == 36, event.modifierFlags.contains(.command) { self.insertTranslation(); return nil }
+            if event.keyCode == 8, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+               self.textView.selectedRange().length == 0 { self.copyTranslation(); return nil }
+            guard event.keyCode == 53 else { return event }
             if !self.glossaryForm.isHidden { self.cancelGlossary() } else { self.dismiss() }
             return nil
         }) { monitors.append(m) }
@@ -476,8 +720,10 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
         let close = UIFactory.symbolButton("xmark", tooltip: "Закрыть (Esc)", target: self, action: #selector(closeClicked))
+        let expand = UIFactory.symbolButton("arrow.up.left.and.arrow.down.right", tooltip: "Открыть в окне перевода",
+                                            target: self, action: #selector(expandClicked))
 
-        let header = NSStackView(views: [directionButton, swapButton, providerBadge, spinner, UIFactory.spacer(), close])
+        let header = NSStackView(views: [directionButton, swapButton, providerBadge, spinner, UIFactory.spacer(), expand, close])
         header.orientation = .horizontal
         header.spacing = 6
 
@@ -498,7 +744,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         textView.drawsBackground = false
         textView.textContainerInset = NSSize(width: 0, height: 2)
         textView.textContainer?.lineFragmentPadding = 0
-        textView.font = .systemFont(ofSize: 15)
+        textView.font = .systemFont(ofSize: 16)
         textView.setAccessibilityLabel("Перевод")
         textHeight = scrollView.heightAnchor.constraint(equalToConstant: minTextHeight)
         textHeight.isActive = true
@@ -535,6 +781,21 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         formButtons.widthAnchor.constraint(equalTo: glossaryForm.widthAnchor).isActive = true
         glossaryForm.isHidden = true
 
+        // Back-translation: the translation translated back, to check the meaning survived.
+        backTitle = UIFactory.label("Обратный перевод", size: 11, weight: .semibold, color: .tertiaryLabelColor)
+        backText = UIFactory.wrappingLabel("", size: 13, color: .secondaryLabelColor)
+        backText.isSelectable = true
+        backText.preferredMaxLayoutWidth = width - inset * 2 - 20
+        backBox = NSStackView(views: [backTitle, backText])
+        backBox.orientation = .vertical
+        backBox.alignment = .leading
+        backBox.spacing = 4
+        backBox.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+        backBox.wantsLayer = true
+        backBox.layer?.cornerRadius = 8
+        backBox.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05).cgColor
+        backBox.isHidden = true
+
         // Footer: tone … glossary, copy
         toneControl = UIFactory.toneControl(target: self, action: #selector(toneChanged(_:)))
         glossaryButton = NSButton(title: "В глоссарий", target: self, action: #selector(toggleGlossaryForm))
@@ -549,18 +810,43 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
         copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
         glossaryButton.imagePosition = .imageLeading
         copyButton.imagePosition = .imageLeading
-        let footer = NSStackView(views: [toneControl, UIFactory.spacer(), glossaryButton, copyButton])
+        backButton = NSButton(title: "Обратно", target: self, action: #selector(toggleBack))
+        backButton.setButtonType(.pushOnPushOff)
+        backButton.image = NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: nil)
+        backButton.toolTip = "Показывать обратный перевод — проверить, что смысл не потерялся"
+        notesButton = NSButton(title: "", target: self, action: #selector(toggleNotes))
+        notesButton.setButtonType(.pushOnPushOff)
+        notesButton.image = NSImage(systemSymbolName: "lightbulb", accessibilityDescription: nil)
+        notesButton.imagePosition = .imageOnly
+        notesButton.toolTip = "Сноски: пояснения к спорным отраслевым терминам"
+        notesButton.controlSize = .small
+        notesButton.bezelStyle = .push
+        insertButton = NSButton(title: "Вставить", target: self, action: #selector(insertTranslation))
+        insertButton.image = NSImage(systemSymbolName: "text.insert", accessibilityDescription: nil)
+        insertButton.toolTip = "Заменить выделенный текст переводом (⌘↩)"
+        insertButton.keyEquivalent = ""
+        for b in [backButton!, insertButton!] {
+            b.controlSize = .small
+            b.bezelStyle = .push
+            b.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            b.imagePosition = .imageLeading
+        }
+        glossaryButton.title = ""
+        glossaryButton.imagePosition = .imageOnly
+        glossaryButton.toolTip = "Добавить термин в глоссарий"
+        copyButton.toolTip = "Копировать перевод (⌘C)"
+        let footer = NSStackView(views: [toneControl, UIFactory.spacer(), backButton, notesButton, glossaryButton, copyButton, insertButton])
         footer.orientation = .horizontal
         footer.spacing = 6
 
         let separator = NSBox()
         separator.boxType = .separator
 
-        let root = NSStackView(views: [header, noticeLabel, scrollView, glossaryForm, separator, footer])
+        let root = NSStackView(views: [header, noticeLabel, scrollView, notesBox, backBox, glossaryForm, separator, footer])
         root.orientation = .vertical
         root.alignment = .leading
         root.spacing = 8
-        root.edgeInsets = NSEdgeInsets(top: 10, left: inset, bottom: 10, right: inset)
+        root.edgeInsets = NSEdgeInsets(top: 12, left: inset, bottom: 12, right: inset)
         root.setCustomSpacing(10, after: scrollView)
         root.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(root)
@@ -571,7 +857,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate {
             root.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
             effect.widthAnchor.constraint(equalToConstant: width),
         ])
-        for v in [header, noticeLabel!, scrollView!, glossaryForm!, separator, footer] {
+        for v in [header, noticeLabel!, scrollView!, notesBox!, backBox!, glossaryForm!, separator, footer] {
             v.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -inset * 2).isActive = true
         }
         noticeLabel.preferredMaxLayoutWidth = width - inset * 2

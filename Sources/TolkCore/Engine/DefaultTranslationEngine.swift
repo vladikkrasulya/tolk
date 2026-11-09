@@ -68,6 +68,11 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
         }
     }
 
+    public func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote] {
+        guard let ollama = primary as? OllamaProvider, await ollama.isAvailable() else { return [] }
+        return await ollama.notes(source: source, translation: translation, from: from, to: to)
+    }
+
     public func addGlossaryTerm(source: String, translation: String) throws {
         try rules.addTerm(source: source, translation: translation)
     }

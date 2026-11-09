@@ -15,3 +15,11 @@ when vkbox is off or busy with a game.
 | Wiring | `Sources/Tolk/AppDelegate.swift`, `main.swift`, `Package.swift` | coordinator |
 
 Build: `swift build` (Swift 6.2 CLT, no Xcode). Language mode Swift 5.
+
+## v0.3 — full app (parallel sessions, same rules: own files only, no commits)
+| Area | Files | Owner |
+|---|---|---|
+| Main window, Dock, translate page, settings, app icon | `Sources/Tolk/MainWindow/**`, `Sources/Tolk/UI/InputWindowController.swift`, `Resources/**`, `scripts/**` | main-window session |
+| Glossary editor | `Sources/Tolk/Glossary/**`, `Sources/TolkCore/Glossary/**` | glossary session |
+| Image / screenshot translate (OCR) | `Sources/Tolk/ImageTranslate/**` | image session |
+| Popup, engine, contracts, wiring | `UI/TranslationPopupController.swift`, `UI/UIShared.swift`, `TolkCore/Engine/**`, `Contracts.swift`, `AppDelegate.swift` | coordinator |

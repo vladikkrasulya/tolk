@@ -322,9 +322,9 @@ final class InputWindowController: NSObject, NSTextViewDelegate, NSWindowDelegat
 
         // Top bar: [source] ⇄ [target]   tone   …   EN → RU [Qwen] spinner
         sourcePopup = NSPopUpButton(frame: .zero, pullsDown: false)
-        sourcePopup.addItems(withTitles: ["Определить язык"] + Language.allCases.map { $0.label + " — " + UIText.languageName($0) })
+        sourcePopup.addItems(withTitles: ["Определить язык"] + Language.allCases.map { "\($0.flag)  " + UIText.capitalized($0) })
         targetPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-        targetPopup.addItems(withTitles: ["Авто"] + Language.allCases.map { $0.label + " — " + UIText.languageName($0) })
+        targetPopup.addItems(withTitles: ["Авто"] + Language.allCases.map { "\($0.flag)  " + UIText.capitalized($0) })
         for p in [sourcePopup!, targetPopup!] {
             p.target = self
             p.action = #selector(directionChanged(_:))

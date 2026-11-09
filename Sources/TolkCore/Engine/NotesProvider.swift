@@ -1,0 +1,76 @@
+import Foundation
+
+/// Second, short Qwen request after a translation: finds debatable industry terms ("scale up",
+/// "разжать QPS") and explains the choice, so the user can pin the right variant in the glossary.
+enum NotesPrompt {
+    static func system(from: Language, to: Language, rules: String) -> String {
+        var s = """
+        You review a \(from.englishName) → \(to.englishName) translation made for a person working in adtech
+        (ad network, RTB/oRTB, SSP/DSP, publishers, advertisers, traffic, fraud, payouts, integrations, QPS).
+        Find at most 3 terms or phrases in the SOURCE that are industry jargon, slang or ambiguous, where a generic
+        translator often gets it wrong or inconsistent (e.g. "scale up", "cap", "bid", "разжать QPS", "залить трафик").
+        Skip ordinary words, names, IDs and numbers.
+        The user's glossary below is authoritative: never suggest anything that contradicts it, and skip terms it already covers.
+        Suggest only what a native-speaking adtech professional would really write in a work chat or email;
+        if you are not sure a variant is better, leave "suggestion" empty — a confirmed correct choice is a useful note too.
+        If nothing is debatable, return an empty list — do not invent notes.
+        For each note:
+        - "term": exact phrase from the source;
+        - "used": how the translation rendered it (exact words from the translation);
+        - "suggestion": a clearly better industry variant in \(to.englishName), or "";
+        - "note": in Russian, at most 15 words: what it means in adtech and why this variant.
+        Answer with JSON only: {"notes":[{"term":"","used":"","suggestion":"","note":""}]}
+        """
+        if !rules.isEmpty { s += "\n\n# User's rules and glossary\n" + rules }
+        return s
+    }
+}
+
+extension OllamaProvider {
+    func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote] {
+        var req = URLRequest(url: baseURL.appendingPathComponent("v1/chat/completions"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 60
+        let body: [String: Any] = [
+            "model": model,
+            "stream": false,
+            "reasoning_effort": "none",
+            "temperature": 0.2,
+            "response_format": ["type": "json_object"],
+            "messages": [
+                ["role": "system", "content": NotesPrompt.system(from: from, to: to, rules: rules.promptBlock(for: source))],
+                ["role": "user", "content": "SOURCE:\n\(source)\n\nTRANSLATION:\n\(translation)"],
+            ],
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return [] }
+        req.httpBody = data
+        guard let (resp, http) = try? await URLSession.shared.data(for: req),
+              (http as? HTTPURLResponse)?.statusCode == 200,
+              let obj = try? JSONSerialization.jsonObject(with: resp) as? [String: Any],
+              let choices = obj["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              let content = message["content"] as? String
+        else { return [] }
+        return Self.parseNotes(content, source: source)
+    }
+
+    static func parseNotes(_ content: String, source: String) -> [TranslationNote] {
+        var json = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let a = json.firstIndex(of: "{"), let b = json.lastIndex(of: "}") { json = String(json[a...b]) }
+        struct Wrapper: Decodable { var notes: [TranslationNote]? }
+        guard let d = json.data(using: .utf8), let w = try? JSONDecoder().decode(Wrapper.self, from: d) else { return [] }
+        let lowered = source.lowercased()
+        return (w.notes ?? []).compactMap { n in
+            var n = n
+            n.term = n.term.trimmingCharacters(in: .whitespacesAndNewlines)
+            n.used = n.used.trimmingCharacters(in: .whitespacesAndNewlines)
+            n.note = n.note.trimmingCharacters(in: .whitespacesAndNewlines)
+            n.suggestion = n.suggestion?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if n.suggestion?.isEmpty == true || n.suggestion?.lowercased() == n.used.lowercased() { n.suggestion = nil }
+            // Drop hallucinated terms that are not in the source.
+            guard !n.term.isEmpty, !n.note.isEmpty, lowered.contains(n.term.lowercased()) else { return nil }
+            return n
+        }.prefix(3).map { $0 }
+    }
+}

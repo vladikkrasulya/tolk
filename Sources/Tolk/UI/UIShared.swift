@@ -94,13 +94,17 @@ enum UIText {
         }
     }
 
+    static func capitalized(_ l: Language) -> String {
+        l.russianName.prefix(1).uppercased() + l.russianName.dropFirst()
+    }
+
     static func languageName(_ l: Language) -> String {
-        switch l { case .russian: "русский"; case .ukrainian: "украинский"; case .english: "английский" }
+        l.russianName
     }
 
     /// "на русский" etc.
     static func intoLanguage(_ l: Language) -> String {
-        switch l { case .russian: "На русский"; case .ukrainian: "На украинский"; case .english: "На английский" }
+        "На " + l.russianName
     }
 
     static func errorMessage(_ error: Error) -> String {
@@ -242,4 +246,25 @@ enum Clipboard {
         pb.clearContents()
         pb.setString(text, forType: .string)
     }
+}
+
+// MARK: - Closure button
+
+/// Small push button with a closure action (for dynamically built rows like footnotes).
+final class ClosureButton: NSButton {
+    private var handler: () -> Void
+
+    init(title: String, symbol: String? = nil, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(frame: .zero)
+        self.title = title
+        bezelStyle = .push
+        controlSize = .small
+        font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        if let symbol { image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); imagePosition = .imageLeading }
+        target = self
+        action = #selector(fire)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    @objc private func fire() { handler() }
 }

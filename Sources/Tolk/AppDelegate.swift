@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         engine = DefaultTranslationEngine(config: config)
         popup = TranslationPopupController(engine: engine)
         inputWindow = InputWindowController(engine: engine)
+        popup.onExpand = { [weak self] text in self?.inputWindow.show(text: text) }
 
         monitor = DoubleCopyMonitor(interval: config.doubleCopyInterval)
         monitor.onTrigger = { [weak self] text, point in self?.popup.show(text: text, at: point) }

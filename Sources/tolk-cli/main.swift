@@ -1,5 +1,5 @@
 // Dev tool for the engine.
-// swift run tolk-cli [--from ru|uk|en] [--to ru|uk|en] [--tone auto|chat|formal]
+// swift run tolk-cli [--from CODE] [--to CODE]  (CODE: en ru uk de fr es it pt pl cs nl ro bg tr kk ka he ar zh ja ko hi id vi) [--tone auto|chat|formal]
 //                    [--provider auto|ollama|google] [--show-rules] "text"
 // Translation goes to stdout, service info to stderr. Text can also come from stdin.
 import Foundation
@@ -9,7 +9,7 @@ func err(_ s: String) { FileHandle.standardError.write((s + "\n").data(using: .u
 func fail(_ s: String) -> Never { err(s); exit(2) }
 
 var source: Language?, target: Language?, tone = Tone.auto
-var providerName = "auto", showRules = false
+var providerName = "auto", showRules = false, wantNotes = false
 var cancelAfter: Double?, addTerm: String?
 var words: [String] = []
 var args = CommandLine.arguments.dropFirst().makeIterator()
@@ -20,16 +20,17 @@ while let a = args.next() {
     }
     switch a {
     case "--from":
-        guard let l = Language(rawValue: value()) else { fail("--from: ru|uk|en") }
+        guard let l = Language(rawValue: value()) else { fail("--from: " + Language.allCases.map(\.rawValue).joined(separator: "|")) }
         source = l
     case "--to":
-        guard let l = Language(rawValue: value()) else { fail("--to: ru|uk|en") }
+        guard let l = Language(rawValue: value()) else { fail("--to: " + Language.allCases.map(\.rawValue).joined(separator: "|")) }
         target = l
     case "--tone":
         guard let t = Tone(rawValue: value()) else { fail("--tone: auto|chat|formal") }
         tone = t
     case "--provider": providerName = value()
     case "--show-rules": showRules = true
+    case "--notes": wantNotes = true                         // also print footnotes on debatable terms
     case "--cancel-after": cancelAfter = Double(value())   // dev: test consumer cancellation
     case "--add-term": addTerm = value()                    // "source => translation"
     case "-h", "--help":
@@ -81,6 +82,8 @@ default: fail("--provider: auto|ollama|google")
 }
 
 let start = Date()
+var translated = "", resolvedPair: (Language, Language)?
+let engineForNotes: DefaultTranslationEngine? = engine
 func ms() -> String { String(format: "%.2fs", Date().timeIntervalSince(start)) }
 let done = DispatchSemaphore(value: 0)
 var status: Int32 = 0
@@ -89,13 +92,20 @@ let consumer = Task {
     do {
         for try await e in stream {
             switch e {
-            case let .started(p, s, t): err("[\(p) \(s.label)->\(t.label)] \(ms())"); first = true
+            case let .started(p, s, t): err("[\(p) \(s.label)->\(t.label)] \(ms())"); first = true; resolvedPair = (s, t); translated = ""
             case let .delta(d):
                 if first { err("[first chunk \(ms())]"); first = false }
+                translated += d
                 print(d, terminator: ""); fflush(stdout)
             case let .fellBack(from, reason): err("[fallback from \(from): \(reason)] \(ms())")
             case .finished: print(); fflush(stdout); err("[done \(ms())]")
             }
+        }
+        if wantNotes, let (s, t) = resolvedPair, let eng = engineForNotes {
+            let notes = await eng.notes(source: text, translation: translated, from: s, to: t)
+            err("[notes \(ms())]")
+            for n in notes { print("  • \(n.term) → «\(n.used)»" + (n.suggestion.map { " (лучше: «\($0)»)" } ?? "") + " — \(n.note)") }
+            if notes.isEmpty { print("  (нет спорных терминов)") }
         }
     } catch {
         err("error: \((error as? LocalizedError)?.errorDescription ?? "\(error)")")
