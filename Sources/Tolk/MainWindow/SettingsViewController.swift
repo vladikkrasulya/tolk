@@ -32,6 +32,25 @@ final class SettingsViewController: NSViewController {
     }
 }
 
+// MARK: - Tabs
+
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case translate, autocomplete, general
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .translate: "Перевод"; case .autocomplete: "Автодополнение"; case .general: "Общие" }
+    }
+    static let key = "settingsTab"
+    static var saved: SettingsTab {
+        var t: SettingsTab = .translate
+        if let r = UserDefaults.standard.string(forKey: key), let v = SettingsTab(rawValue: r) { t = v }
+        #if DEBUG
+        if let e = ProcessInfo.processInfo.environment["TOLK_SETTINGS_TAB"], let v = SettingsTab(rawValue: e) { t = v }
+        #endif
+        return t
+    }
+}
+
 // MARK: - Model
 
 struct HeaderRow: Identifiable, Equatable {
@@ -50,6 +69,7 @@ enum CheckState: Equatable {
 final class SettingsModel: ObservableObject {
     @Published var config: TolkConfig { didSet { if config != oldValue { scheduleSave() } } }
     @Published var headers: [HeaderRow] { didSet { if headers != oldValue { syncHeaders() } } }
+    @Published var tab: SettingsTab = SettingsTab.saved { didSet { UserDefaults.standard.set(tab.rawValue, forKey: SettingsTab.key) } }
     @Published var saveStatus = ""
     @Published var saveFailed = false
     @Published var lanCheck: CheckState = .idle
@@ -264,8 +284,19 @@ final class SettingsModel: ObservableObject {
         }
     }
 
+    /// Names for apps that are often not installed (the system lookup fails for them).
+    static let knownAppNames: [String: String] = [
+        "com.apple.Terminal": "Terminal", "com.googlecode.iterm2": "iTerm2", "com.apple.dt.Xcode": "Xcode",
+        "com.microsoft.VSCode": "Visual Studio Code", "com.todesktop.230313mzl4w4u92": "Cursor",
+        "com.microsoft.Outlook": "Outlook", "com.readdle.smartemail-Mac": "Spark", "net.whatsapp.WhatsApp": "WhatsApp",
+        "com.microsoft.teams2": "Microsoft Teams", "com.tinyspeck.slackmacgap": "Slack", "ru.keepcoder.Telegram": "Telegram",
+        "com.hnc.Discord": "Discord", "com.apple.mail": "Mail",
+    ]
+
     static func appName(_ bundleID: String) -> String {
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return bundleID }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            return knownAppNames[bundleID] ?? bundleID
+        }
         return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
     }
 
@@ -387,28 +418,60 @@ struct SettingsView: View {
     private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        Form {
-            serverSection
-            remoteSection
-            languageSection
-            behaviorSection
-            autocompleteSection
-            toneSection
-            rulesSection
-            accessSection
-            aboutSection
+        VStack(spacing: 0) {
+            Picker("", selection: $model.tab) {
+                ForEach(SettingsTab.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 22)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
+            Form {
+                switch model.tab {
+                case .translate:
+                    serverSection
+                    fallbackSection
+                    remoteSection
+                    languageSection
+                    rulesSection
+                    toneSection
+                    copySection
+                case .autocomplete:
+                    autocompleteSection
+                    acInstructionsSection
+                    acContextSection
+                    acTypingSection
+                    acStyleSection
+                    acOffAppsSection
+                case .general:
+                    launchSection
+                    accessSection
+                    aboutSection
+                }
+            }
+            .formStyle(.grouped)
         }
-        .formStyle(.grouped)
+        .background(Color(nsColor: .windowBackgroundColor))
         .safeAreaInset(edge: .bottom) { footer }
         .onReceive(timer) { _ in model.refreshStatus() }
     }
 
-    // Сервер
+    /// Short explanation under a setting.
+    private func hint(_ text: String) -> some View {
+        Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: Перевод
 
     private var serverSection: some View {
         Section {
             TextField("Адрес в домашней сети", text: $model.config.ollamaURL, prompt: Text("http://192.168.1.13:11434"))
-            ModelPicker(title: "Модель", selection: $model.config.model, models: model.translateModels)
+            hint("Где работает Ollama с моделью перевода. Сначала Tolk пробует этот адрес, затем адрес вне дома.")
+            ModelPicker(title: "Модель перевода", selection: $model.config.model, models: model.translateModels)
+            hint("Какая модель переводит. Для профиля глоссария можно выбрать свою (см. «Профили глоссария»).")
             HStack(alignment: .firstTextBaseline) {
                 Button("Проверить соединение") { model.checkConnection() }
                 Spacer()
@@ -420,19 +483,29 @@ struct SettingsView: View {
                 }
             }
         } header: {
-            Text("Сервер перевода")
+            Text("Сервер и модель перевода")
                 .onAppear { if model.availableModels.isEmpty { model.checkConnection() } }
-        } footer: {
-            Text("Ollama на домашнем сервере. Сначала Tolk пробует этот адрес, затем — адрес вне дома.")
-                .foregroundStyle(.secondary)
         }
     }
 
-    // Вне дома
+    private var fallbackSection: some View {
+        Section {
+            Picker("Если сервер недоступен", selection: $model.config.fallback) {
+                ForEach(FallbackProvider.allCases, id: \.self) { f in
+                    Text(f.title).tag(f)
+                        .disabled(f == .apple && !AppleTranslationProvider.isSupportedOnThisMac)
+                }
+            }
+            hint(fallbackHint(model.config.fallback))
+        } header: {
+            Text("Запасной перевод")
+        }
+    }
 
     private var remoteSection: some View {
         Section {
             TextField("Адрес вне дома", text: $model.config.remoteURL, prompt: Text("https://tolk.example.com"))
+            hint("Необязательно. Например, адрес Cloudflare Tunnel. Пустой адрес — только домашняя сеть.")
             ForEach($model.headers) { $row in
                 HStack(spacing: 8) {
                     TextField("", text: $row.key, prompt: Text("Заголовок"))
@@ -455,15 +528,11 @@ struct SettingsView: View {
                 Label("Добавить заголовок доступа", systemImage: "plus")
             }
             .buttonStyle(.borderless)
+            hint("Заголовки для адреса вне дома, например CF-Access-Client-Id и CF-Access-Client-Secret.")
         } header: {
-            Text("Доступ вне дома")
-        } footer: {
-            Text("Необязательно. Например, адрес Cloudflare Tunnel и заголовки CF-Access-Client-Id / CF-Access-Client-Secret. Пустой адрес — только домашняя сеть.")
-                .foregroundStyle(.secondary)
+            Text("Доступ из дома")
         }
     }
-
-    // Языки
 
     private var languageSection: some View {
         Section {
@@ -473,17 +542,13 @@ struct SettingsView: View {
             Picker("Второй язык", selection: $model.config.secondaryLanguage) {
                 ForEach(Language.allCases, id: \.self) { Text("\($0.flag)  \(UIText.capitalized($0))").tag($0) }
             }
+            hint("Текст на основном языке (и на украинском) переводится на второй, всё остальное — на основной.")
         } header: {
-            Text("Языки")
-        } footer: {
-            Text("Текст на основном языке (и на украинском) переводится на второй, всё остальное — на основной.")
-                .foregroundStyle(.secondary)
+            Text("Языки по умолчанию")
         }
     }
 
-    // Поведение
-
-    private var behaviorSection: some View {
+    private var copySection: some View {
         Section {
             LabeledContent("Двойное ⌘C") {
                 HStack {
@@ -495,34 +560,35 @@ struct SettingsView: View {
                         .frame(width: 52, alignment: .trailing)
                 }
             }
-            Picker("Если сервер недоступен", selection: $model.config.fallback) {
-                ForEach(FallbackProvider.allCases, id: \.self) { f in
-                    Text(f.title).tag(f)
-                        .disabled(f == .apple && !AppleTranslationProvider.isSupportedOnThisMac)
-                }
-            }
-            Text(fallbackHint(model.config.fallback))
-                .font(.callout).foregroundStyle(.secondary)
+            hint("Сколько секунд может пройти между двумя нажатиями ⌘C, чтобы Tolk показал перевод выделенного.")
+        } header: {
+            Text("Двойной ⌘C")
+        }
+    }
+
+    // MARK: Общие
+
+    private var launchSection: some View {
+        Section {
             Toggle("Запускать при входе в систему", isOn: Binding(
                 get: { model.launchAtLogin },
                 set: { model.setLaunchAtLogin($0) }))
             .disabled(!LaunchAgent.canEnable && !model.launchAtLogin)
+            hint("Tolk сам запустится в строке меню после входа в систему.")
             if let err = model.launchError {
                 Text(err).font(.callout).foregroundStyle(.red)
             }
         } header: {
-            Text("Поведение")
-        } footer: {
-            Text("Интервал — сколько секунд может пройти между двумя нажатиями ⌘C.")
-                .foregroundStyle(.secondary)
+            Text("Запуск")
         }
     }
 
-    // Автодополнение
+    // MARK: Автодополнение
 
     private var autocompleteSection: some View {
         Section {
             Toggle("Автодополнение (Tab)", isOn: $model.config.autocomplete)
+            hint("Серый текст у курсора в любой программе: Tab принимает слово, → всё, Esc скрывает. Модель работает локально на этом Mac.")
             HStack {
                 Picker("Модель", selection: $model.config.autocompleteModel) {
                     ForEach(model.ggufModels(), id: \.self) { path in
@@ -531,6 +597,100 @@ struct SettingsView: View {
                 }
                 Button("Показать в Finder") { model.revealAutocompleteModel() }
             }
+            hint("Файлы .gguf из папки ~/Library/Application Support/Tolk/models.")
+            Picker("Длина подсказки", selection: $model.config.autocompleteLength) {
+                Text("Короткая (до 3 слов)").tag("short")
+                Text("Средняя (до 6)").tag("medium")
+                Text("Длинная (до 12)").tag("long")
+            }
+            hint("Чем длиннее подсказка, тем дольше модель её считает.")
+            Picker("Частота подсказок", selection: $model.config.autocompleteFrequency) {
+                Text("Реже, но точнее").tag("rare")
+                Text("Обычно").tag("normal")
+                Text("Чаще").tag("often")
+            }
+            hint("Реже — подсказка появляется, только когда модель уверена (около 2 из 3 первых слов верные). Чаще — подсказок больше, но больше промахов.")
+        } header: {
+            Text("Основное")
+        }
+    }
+
+    private var acInstructionsSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Общие инструкции").font(.callout)
+                TextEditor(text: $model.config.autocompleteInstructions)
+                    .font(.body).frame(minHeight: 54, maxHeight: 90)
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.3)))
+                hint("Например: «пиши коротко», «на Вы», «без эмодзи». Действуют везде.")
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Инструкции по программам").font(.callout)
+                    Spacer()
+                    Menu("Добавить программу") {
+                        ForEach(SettingsModel.runningApps(), id: \.id) { app in
+                            Button(app.name) { model.addAppInstruction(app.id) }
+                                .disabled(model.config.autocompleteAppInstructions[app.id] != nil)
+                        }
+                    }
+                    .fixedSize()
+                }
+                if model.config.autocompleteAppInstructions.isEmpty {
+                    hint("Нет. Выберите запущенную программу, чтобы задать ей свои инструкции.")
+                }
+                ForEach(model.config.autocompleteAppInstructions.keys.sorted(), id: \.self) { id in
+                    HStack {
+                        Text(SettingsModel.appName(id)).frame(width: 120, alignment: .leading).lineLimit(1)
+                        TextField("Инструкции для этой программы", text: Binding(
+                            get: { model.config.autocompleteAppInstructions[id] ?? "" },
+                            set: { model.config.autocompleteAppInstructions[id] = $0 }))
+                        Button(role: .destructive) {
+                            model.config.autocompleteAppInstructions[id] = nil
+                        } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+        } header: {
+            Text("Инструкции")
+        }
+    }
+
+    private var acContextSection: some View {
+        Section {
+            Toggle("Глоссарий и тон", isOn: $model.config.autocompleteUseGlossary)
+            hint("Подсказки используют термины активного профиля глоссария и тон программы (см. вкладку «Перевод»).")
+            Toggle("Буфер обмена", isOn: $model.config.autocompleteClipboard)
+            hint("Недавно скопированный короткий текст попадает в подсказку. Пароли и ключи отбрасываются.")
+        } header: {
+            Text("Что учитывать")
+        }
+    }
+
+    private var acTypingSection: some View {
+        Section {
+            Toggle("Эмодзи (:fire → 🔥)", isOn: $model.config.autocompleteEmoji)
+            hint("Набрали двоеточие и слово, например :fire или :спасибо, — Tab вставит эмодзи.")
+            Toggle("Исправлять опечатки", isOn: $model.config.autocorrect)
+            hint("Опечатка в последнем слове показывается серым исправлением, Tab применяет.")
+        } header: {
+            Text("Помощь при наборе")
+        }
+    }
+
+    private var acStyleSection: some View {
+        Section {
+            Toggle("Учиться на моих сообщениях", isOn: $model.config.autocompleteLearnStyle)
+            hint("Принятые подсказки и отправленные сообщения запоминаются только на этом Mac и подсказывают модели ваш стиль.")
+            Button("Удалить выученное…", role: .destructive) { model.confirmDeleteLearned() }
+        } header: {
+            Text("Ваш стиль")
+        }
+    }
+
+    private var acOffAppsSection: some View {
+        Section {
             if model.config.autocompleteOffApps.isEmpty {
                 Text("Выключенных программ нет.").font(.callout).foregroundStyle(.secondary)
             } else {
@@ -546,59 +706,9 @@ struct SettingsView: View {
                     }
                 }
             }
-            Picker("Длина подсказки", selection: $model.config.autocompleteLength) {
-                Text("Короткая (до 3 слов)").tag("short")
-                Text("Средняя (до 6)").tag("medium")
-                Text("Длинная (до 12)").tag("long")
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Общие инструкции").font(.callout)
-                TextEditor(text: $model.config.autocompleteInstructions)
-                    .font(.body).frame(minHeight: 54, maxHeight: 90)
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.3)))
-                Text("Например: «пиши коротко», «на Вы», «без эмодзи». Действуют везде.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Инструкции по программам").font(.callout)
-                    Spacer()
-                    Menu("Добавить программу") {
-                        ForEach(SettingsModel.runningApps(), id: \.id) { app in
-                            Button(app.name) { model.addAppInstruction(app.id) }
-                                .disabled(model.config.autocompleteAppInstructions[app.id] != nil)
-                        }
-                    }
-                    .fixedSize()
-                }
-                if model.config.autocompleteAppInstructions.isEmpty {
-                    Text("Нет. Выберите запущенную программу, чтобы задать ей свои инструкции.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                ForEach(model.config.autocompleteAppInstructions.keys.sorted(), id: \.self) { id in
-                    HStack {
-                        Text(SettingsModel.appName(id)).frame(width: 120, alignment: .leading).lineLimit(1)
-                        TextField("Инструкции для этой программы", text: Binding(
-                            get: { model.config.autocompleteAppInstructions[id] ?? "" },
-                            set: { model.config.autocompleteAppInstructions[id] = $0 }))
-                        Button(role: .destructive) {
-                            model.config.autocompleteAppInstructions[id] = nil
-                        } label: { Image(systemName: "minus.circle") }
-                        .buttonStyle(.borderless)
-                    }
-                }
-            }
-            Toggle("Глоссарий и тон", isOn: $model.config.autocompleteUseGlossary)
-            Toggle("Буфер обмена", isOn: $model.config.autocompleteClipboard)
-            Toggle("Эмодзи (:fire → 🔥)", isOn: $model.config.autocompleteEmoji)
-            Toggle("Исправлять опечатки", isOn: $model.config.autocorrect)
-            Toggle("Учиться на моих сообщениях", isOn: $model.config.autocompleteLearnStyle)
-            Button("Удалить выученное…", role: .destructive) { model.confirmDeleteLearned() }
+            hint("В этих программах автодополнение молчит (терминалы, редакторы кода). Быстро выключить в текущей — в меню Tolk.")
         } header: {
-            Text("Автодополнение")
-        } footer: {
-            Text("Серый текст у курсора в любой программе: Tab принимает слово, → всё, Esc скрывает. Модель работает локально на этом Mac. «Глоссарий и тон» берёт термины из активного профиля и тон программы; «Буфер обмена» подмешивает недавно скопированный короткий текст (пароли и ключи отбрасываются). Список ниже — где автодополнение выключено.")
-                .foregroundStyle(.secondary)
+            Text("Выключено в программах")
         }
     }
 
@@ -636,7 +746,7 @@ struct SettingsView: View {
         } header: {
             Text("Тон по программам")
         } footer: {
-            Text("Какой тон использовать в переводе и в подсказках, когда активна эта программа: Чат — разговорно, Официально — вежливо.")
+            Text("Общее для перевода и подсказок автодополнения. Какой тон использовать, когда активна эта программа: Чат — разговорно, Официально — вежливо.")
                 .foregroundStyle(.secondary)
         }
     }

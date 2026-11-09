@@ -16,14 +16,16 @@ import TolkCore
 @MainActor
 enum MainWindowDemo {
     private static var keepAlive: [AnyObject] = []
+    private static var forced: NSAppearance?
 
     static func runIfRequested() {
         let env = ProcessInfo.processInfo.environment
         guard let raw = env["TOLK_MAIN_DEMO"], !raw.isEmpty, raw != "0" else { return }
+        // Forced look is set per window (never on NSApp), so nothing leaks into the app's own theme.
         switch env["TOLK_UI_APPEARANCE"] {
-        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
-        case "light": NSApp.appearance = NSAppearance(named: .aqua)
-        default: break
+        case "dark": forced = NSAppearance(named: .darkAqua)
+        case "light": forced = NSAppearance(named: .aqua)
+        default: forced = nil
         }
         let engine = DemoTranslationEngine(mode: .normal)
         let config = TolkConfig.load()
@@ -35,6 +37,7 @@ enum MainWindowDemo {
                                         glossary: GlossaryViewController(rulesPath: config.rulesPath),
                                         settings: SettingsViewController(config: config))
         keepAlive = [main, translate]
+        main.window?.appearance = forced
         let section = MainWindowController.Section(rawValue: raw) ?? .translate
         main.show(section)
         if section == .translate { translate.load(text: TolkUIDemo.sampleEnglish) }
@@ -60,6 +63,30 @@ enum MainWindowDemo {
             render(main.window, to: "\(dir)/main-\(section.rawValue)-\(suffix).png")
         }
 
+        // Every settings tab, full height, in an off-screen borderless window (the main window is clamped to the screen).
+        do {
+            let vc = SettingsViewController(config: TolkConfig.load())
+            let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 2300), styleMask: [.borderless],
+                               backing: .buffered, defer: false)
+            win.contentViewController = vc
+            win.setContentSize(NSSize(width: 860, height: 2300))
+            win.appearance = forced
+            for tab in SettingsTab.allCases {
+                vc.model.tab = tab
+                try? await Task.sleep(for: .milliseconds(1200))
+                let v = vc.view
+                v.layoutSubtreeIfNeeded(); v.displayIfNeeded()
+                if let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+                    v.cacheDisplay(in: v.bounds, to: rep)
+                    if let data = rep.representation(using: .png, properties: [:]) {
+                        try? data.write(to: URL(fileURLWithPath: "\(dir)/settings-\(tab.rawValue)-\(suffix).png"))
+                        print("[main-demo] wrote \(dir)/settings-\(tab.rawValue)-\(suffix).png")
+                    }
+                }
+            }
+            win.orderOut(nil)
+        }
+
         // Settings scrolled to the bottom part.
         main.show(.settings)
         try? await Task.sleep(for: .milliseconds(500))
@@ -75,6 +102,7 @@ enum MainWindowDemo {
         input.show(text: "Can you send the latest ads.txt and confirm the new seller IDs?")
         try? await Task.sleep(for: .seconds(2.5))
         let inputWindow = NSApp.windows.first { $0 is InputWindow }
+        inputWindow?.appearance = forced
         render(inputWindow, to: "\(dir)/input-window-\(suffix).png")
 
         print("[main-demo] shots in \(dir)")

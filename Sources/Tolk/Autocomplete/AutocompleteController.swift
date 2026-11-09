@@ -27,6 +27,10 @@ final class AutocompleteController {
     private var runLoopSource: CFRunLoopSource?
     private var retainedSelf: Unmanaged<AutocompleteController>?
     private var appObserver: NSObjectProtocol?
+    private let journal = SuggestionJournal.shared
+    private var lastContextSource = ""
+    /// Apps where typing synthetic key events did not change the field: insert through the pasteboard instead.
+    private var pasteApps: Set<String> = []
 
     /// Remaining (not yet accepted) suggestion; non-nil while the ghost text is visible.
     private var suggestion: String?
@@ -53,7 +57,8 @@ final class AutocompleteController {
 
     init(server: LocalModelServer) {
         self.server = server
-        screenContext.onUpdate = { source, chars, ms in
+        screenContext.onUpdate = { [weak self] source, chars, ms in
+            self?.lastContextSource = source.rawValue
             Diagnostics.log("autocomplete: context source=\(source.rawValue) chars=\(chars) ms=\(ms)")
         }
     }
@@ -110,7 +115,7 @@ final class AutocompleteController {
         self.tap = nil
         runLoopSource = nil
         cancelPending()
-        hide()
+        hide(reason: "stop")
         retainedSelf?.release()
         retainedSelf = nil
         Diagnostics.log("autocomplete: stopped")
@@ -127,7 +132,7 @@ final class AutocompleteController {
         case .leftMouseDown, .rightMouseDown:
             if event.getIntegerValueField(.eventSourceUserData) == DoubleCopyMonitor.syntheticMarker { return false }
             cancelPending()
-            hide()
+            hide(reason: "click")
             return false
         case .keyDown:
             break
@@ -151,8 +156,8 @@ final class AutocompleteController {
 
         if instant != nil {
             if mods.isEmpty, code == Key.tab || code == Key.rightArrow { acceptInstant(); return true }
-            if mods.isEmpty, code == Key.escape { cancelPending(); hide(); suppressed = true; return true }
-            hide()
+            if mods.isEmpty, code == Key.escape { cancelPending(); hide(reason: "esc"); suppressed = true; return true }
+            hide(reason: typed != nil ? "typed" : "key")
         } else if suggestion != nil {
             if mods.isEmpty {
                 switch code {
@@ -164,7 +169,7 @@ final class AutocompleteController {
                     return true
                 case Key.escape:
                     cancelPending()
-                    hide()
+                    hide(reason: "esc")
                     suppressed = true
                     return true
                 default: break
@@ -176,7 +181,7 @@ final class AutocompleteController {
                 consumed(typed.count)
                 return false
             }
-            hide()
+            hide(reason: typed != nil ? "typed" : "key")
         }
 
         cancelPending()
@@ -206,7 +211,11 @@ final class AutocompleteController {
 
     // MARK: - Showing and hiding
 
-    private func hide() {
+    private func hide(reason: String = "other", dismissed: Bool = true) {
+        if suggestion != nil || instant != nil {
+            Diagnostics.log("autocomplete: hidden reason=\(reason)")
+            if dismissed { journal.dismissed(reason: reason, bundleID: shownBundleID) }
+        }
         suggestion = nil
         instant = nil
         panel?.hide()
@@ -218,10 +227,11 @@ final class AutocompleteController {
         pending = nil
     }
 
-    private func display(_ text: String, caret: NSRect) {
+    private func display(_ text: String, caret: NSRect, fontSize: CGFloat? = nil, rightLimit: CGFloat? = nil) {
         if panel == nil { panel = GhostTextPanel() }
         suggestion = text
-        panel?.show(text, caret: caret)
+        panel?.show(text, caret: caret, fontSize: fontSize, rightLimit: rightLimit)
+        if panel?.isVisible != true { Diagnostics.log("autocomplete: panel not visible after show (no room or empty)"); suggestion = nil }
     }
 
     /// Part of the suggestion was typed by the user: shorten it and re-place the panel at the new caret.
@@ -230,7 +240,7 @@ final class AutocompleteController {
         let rest = String(s.dropFirst(count))
         cancelPending()
         if rest.isEmpty {
-            hide()
+            hide(reason: "consumed", dismissed: false)
             scheduleRequest(after: Self.debounce)
         } else {
             suggestion = rest
@@ -239,15 +249,24 @@ final class AutocompleteController {
     }
 
     /// Re-reads the caret shortly after the target app processed an edit and moves the ghost text there.
-    private func scheduleReposition() {
+    /// With `waitingForChangeFrom` (after our own insertion) it retries for up to ~350 ms until the app has
+    /// actually applied the edit, so the caret is not read from the old text.
+    private func scheduleReposition(waitingForChangeFrom old: String? = nil) {
         let gen = generation
         pending = Task { [weak self] in
-            try? await Task.sleep(for: Self.repositionDelay)
+            var tries = 0
+            var field: FocusedField?
+            repeat {
+                try? await Task.sleep(for: Self.repositionDelay)
+                guard let self, !Task.isCancelled, gen == self.generation, self.suggestion != nil else { return }
+                field = FocusedField.read()
+                tries += 1
+            } while old != nil && tries < 7 && field != nil && field?.textBefore == old
             guard let self, !Task.isCancelled, gen == self.generation, let s = self.suggestion else { return }
-            if let f = FocusedField.read(), f.pid != Self.ownPID {
-                self.display(s, caret: f.caret)
+            if let f = field, f.pid != Self.ownPID {
+                self.display(s, caret: f.caret, fontSize: f.fontSize, rightLimit: f.rightLimit)
             } else {
-                self.hide()
+                self.hide(reason: "reposition-read-nil")
             }
         }
     }
@@ -262,28 +281,28 @@ final class AutocompleteController {
         while i < chars.count, !chars[i].isWhitespace { i += 1 }
         let word = String(chars[..<i])
         let rest = String(chars[i...])
-        insert(word)
+        let beforeInsert = insertVerified(word, kind: "word")
         Diagnostics.log("autocomplete: accepted word len=\(word.count)")
         onAccepted?(AcceptedText(kind: .word, bundleID: shownBundleID, textBefore: shownTextBefore, accepted: word))
         shownTextBefore += word
 
         cancelPending()
         if rest.allSatisfy({ $0.isWhitespace }) {
-            hide()
+            hide(reason: "accepted-word-end", dismissed: false)
             scheduleRequest(after: .milliseconds(60))
         } else {
             suggestion = rest
-            scheduleReposition()
+            scheduleReposition(waitingForChangeFrom: beforeInsert)
         }
     }
 
     private func acceptAll() {
         guard let s = suggestion else { return }
-        insert(s)
+        insertVerified(s, kind: "all")
         Diagnostics.log("autocomplete: accepted all len=\(s.count)")
         onAccepted?(AcceptedText(kind: .all, bundleID: shownBundleID, textBefore: shownTextBefore, accepted: s))
         cancelPending()
-        hide()
+        hide(reason: "accepted-all", dismissed: false)
         suppressed = false
     }
 
@@ -293,8 +312,11 @@ final class AutocompleteController {
         deleteBackward(i.replaceCount)
         insert(i.text)
         Diagnostics.log("autocomplete: accepted instant replace=\(i.replaceCount) len=\(i.text.count)")
+        let pf = panel?.frame
+        journal.accepted(kind: "instant", text: i.text, bundleID: shownBundleID,
+                         caret: pf.map { NSRect(x: $0.minX, y: $0.minY, width: 1, height: $0.height) })
         cancelPending()
-        hide()
+        hide(reason: "accepted-instant", dismissed: false)
     }
 
     private func deleteBackward(_ count: Int) {
@@ -310,8 +332,70 @@ final class AutocompleteController {
         }
     }
 
-    /// Types `text` into the focused app with synthetic key events (marked so Tolk's own taps skip them).
+    /// Inserts `text`, then checks (200 ms later) that the field really changed. If it did not — Electron/Chromium
+    /// apps sometimes ignore synthetic unicode key events — remembers the app and pastes through the clipboard.
+    @discardableResult
+    private func insertVerified(_ text: String, kind: String) -> String? {
+        let app = NSWorkspace.shared.frontmostApplication
+        let field = FocusedField.read()
+        let before = field?.textBefore
+        let id = app?.bundleIdentifier ?? "?"
+        let method = pasteApps.contains(id) ? "paste" : "unicode"
+        let t0 = Date()
+        insert(text)
+        let ms = Int(Date().timeIntervalSince(t0) * 1000)
+        journal.accepted(kind: kind, text: text, bundleID: id, method: method, ms: ms, before: before, caret: field?.caret)
+        guard let before, let app else { return before }
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard let self else { return }
+            let f = FocusedField.read()
+            let same = f?.pid == app.processIdentifier
+            let changed = same && f?.textBefore != before
+            self.journal.insertChecked(bundleID: id, method: method, changed: changed, after: same ? f?.textBefore : nil)
+            guard same, let f, f.textBefore == before else { return }
+            if method == "paste" {
+                Diagnostics.log("autocomplete: insert had no effect even via paste app=\(id)")
+            } else {
+                Diagnostics.log("autocomplete: insert had no effect, switching to paste app=\(id)")
+                self.pasteApps.insert(id)
+                self.paste(text)
+            }
+        }
+        return before
+    }
+
     private func insert(_ text: String) {
+        if let id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier, pasteApps.contains(id) { paste(text); return }
+        typeUnicode(text)
+    }
+
+    /// Save the clipboard, put `text` there, press ⌘V, restore the clipboard (after 0.4 s, only if nobody else
+    /// changed it meanwhile). The clipboard watcher is told about both of our own changes.
+    private func paste(_ text: String) {
+        let pb = NSPasteboard.general
+        let saved = PasteboardSnapshot.capture(pb)
+        pb.clearContents()
+        pb.declareTypes([.string, .tolkTransient], owner: nil)
+        pb.setString(text, forType: .string)
+        pb.setData(Data(), forType: .tolkTransient)
+        let ours = pb.changeCount
+        ClipboardWatcher.shared.noteOwnChange(ours)
+        let source = CGEventSource(stateID: .privateState)
+        for down in [true, false] {
+            guard let ev = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: down) else { continue }
+            ev.flags = .maskCommand
+            ev.setIntegerValueField(.eventSourceUserData, value: DoubleCopyMonitor.syntheticMarker)
+            ev.post(tap: .cghidEventTap)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            guard pb.changeCount == ours else { return }
+            ClipboardWatcher.shared.noteOwnChange(saved.restore(to: pb))
+        }
+    }
+
+    /// Types `text` into the focused app with synthetic key events (marked so Tolk's own taps skip them).
+    private func typeUnicode(_ text: String) {
         let source = CGEventSource(stateID: .privateState)
         var chunk: [UniChar] = []
         func flush() {
@@ -358,7 +442,9 @@ final class AutocompleteController {
             if panel == nil { panel = GhostTextPanel() }
             suggestion = nil
             instant = s
-            panel?.show(s.display, caret: field.caret)
+            shownBundleID = field.bundleID
+            panel?.show(s.display, caret: field.caret, fontSize: field.fontSize, rightLimit: field.rightLimit)
+            journal.instant(bundleID: field.bundleID, before: field.textBefore, replaceCount: s.replaceCount, display: s.display, caret: field.caret, panel: panel)
             Diagnostics.log("autocomplete: instant replace=\(s.replaceCount) app=\(field.bundleID ?? "?")")
             if s.blocksModel { return }
             break
@@ -378,7 +464,15 @@ final class AutocompleteController {
         do {
             result = try await client.complete(prompt: prompt, maxTokens: AutocompletePrompt.maxTokens)
         } catch {
-            if !(error is CancellationError) { Diagnostics.log("autocomplete: request failed") }
+            if error is CancellationError { return }
+            if let e = error as? URLError {
+                if e.code == .cancelled { return }
+                Diagnostics.log("autocomplete: request failed URLError(\(e.code.rawValue))")
+            } else if let e = error as? HTTPStatusError {
+                Diagnostics.log("autocomplete: request failed http=\(e.status)")
+            } else {
+                Diagnostics.log("autocomplete: request failed \(type(of: error))")
+            }
             return
         }
         guard !Task.isCancelled, gen == generation else { return }
@@ -390,11 +484,13 @@ final class AutocompleteController {
             Diagnostics.log("autocomplete: empty suggestion ms=\(result.ms)")
             return
         }
-        display(text, caret: now.caret)
+        display(text, caret: now.caret, fontSize: now.fontSize, rightLimit: now.rightLimit)
         shownTextBefore = now.textBefore
         shownBundleID = now.bundleID
         let f = panel?.frame ?? .zero
-        Diagnostics.log("autocomplete: shown len=\(text.count) ms=\(result.ms) ctx=\(context?.count ?? 0) app=\(now.bundleID ?? "?") ax=\(now.caretInfo) caret=(\(Int(now.caret.minX)),\(Int(now.caret.minY)) \(Int(now.caret.width))x\(Int(now.caret.height))) panel=(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)))")
+        Diagnostics.log("autocomplete: shown len=\(text.count) ms=\(result.ms) ctx=\(context?.count ?? 0) app=\(now.bundleID ?? "?") fs=\(now.fontSize.map { String(Int($0 * 10)) } ?? "-")/10 ax=\(now.caretInfo) caret=(\(Int(now.caret.minX)),\(Int(now.caret.minY)) \(Int(now.caret.width))x\(Int(now.caret.height))) panel=(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)))")
+        journal.shown(bundleID: now.bundleID, before: now.textBefore, text: text, ms: result.ms, ctxChars: context?.count ?? 0,
+                      ctxSource: lastContextSource.isEmpty ? nil : lastContextSource, caret: now.caret, panel: panel)
         onSuggestionShown?(result.ms)
     }
 
@@ -403,7 +499,7 @@ final class AutocompleteController {
     private func activeAppChanged(_ app: NSRunningApplication?) {
         screenContext.reset()
         cancelPending()
-        hide()
+        hide(reason: "appSwitch")
         if let app { FocusedField.enableAccessibility(pid: app.processIdentifier) }
     }
 }

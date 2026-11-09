@@ -87,6 +87,9 @@ final class ClipboardWatcher {
         if c != count { count = c; changedAt = Date() }
     }
 
+    /// Tolk's own pasteboard change (paste-insert and restoring the clipboard): not a copy by the user.
+    func noteOwnChange(_ newCount: Int) { count = newCount }
+
     var currentText: String? { freshText(excluding: "") }
 
     func freshText(excluding typed: String) -> String? {

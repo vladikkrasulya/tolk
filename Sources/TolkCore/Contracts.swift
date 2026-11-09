@@ -293,6 +293,8 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public var autocorrect: Bool = true
     /// Remember accepted/sent phrases locally and use them as style examples.
     public var autocompleteLearnStyle: Bool = false
+    /// How often suggestions appear: "rare" (only confident), "normal", "often".
+    public var autocompleteFrequency: String = "normal"
 
     public static let defaultAutocompleteOffApps: [String] = [
         "com.apple.Terminal", "com.googlecode.iterm2", "com.apple.dt.Xcode",
@@ -307,7 +309,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         case remoteURL, remoteHeaders, toneByApp
         case autocomplete, autocompleteModel, autocompleteOffApps
         case autocompleteLength, autocompleteInstructions, autocompleteAppInstructions, autocompleteUseGlossary
-        case autocompleteClipboard, autocompleteEmoji, autocorrect, autocompleteLearnStyle
+        case autocompleteClipboard, autocompleteEmoji, autocorrect, autocompleteLearnStyle, autocompleteFrequency
     }
 
     /// Every key is optional: `{"model": "x"}` keeps all other defaults.
@@ -345,6 +347,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         autocompleteEmoji = try c.decodeIfPresent(Bool.self, forKey: .autocompleteEmoji) ?? d.autocompleteEmoji
         autocorrect = try c.decodeIfPresent(Bool.self, forKey: .autocorrect) ?? d.autocorrect
         autocompleteLearnStyle = try c.decodeIfPresent(Bool.self, forKey: .autocompleteLearnStyle) ?? d.autocompleteLearnStyle
+        autocompleteFrequency = try c.decodeIfPresent(String.self, forKey: .autocompleteFrequency) ?? d.autocompleteFrequency
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -372,6 +375,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         try c.encode(autocompleteEmoji, forKey: .autocompleteEmoji)
         try c.encode(autocorrect, forKey: .autocorrect)
         try c.encode(autocompleteLearnStyle, forKey: .autocompleteLearnStyle)
+        try c.encode(autocompleteFrequency, forKey: .autocompleteFrequency)
     }
 
     /// Tone for an app (bundle id), `.auto` if not configured.

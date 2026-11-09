@@ -8,7 +8,8 @@ final class Autocorrect: InstantSuggestionProvider {
     /// Words never corrected: adtech slang (always) + terms from the user's glossary file.
     private var ignored: Set<String> = Autocorrect.builtinSlang
     /// Words the user rejected for this session.
-    private var rejected: Set<String> = []
+    private var rejected: Set<String> = Set(UserDefaults.standard.stringArray(forKey: Autocorrect.rejectedKey) ?? [])
+    private static let rejectedKey = "autocorrectRejectedWords"
     /// word(lowercased) → fix, "" = nothing to fix.
     private var cache: [String: String] = [:]
     /// The last suggestion we returned (to notice an implicit Esc, see `suggestion(for:)`).
@@ -20,7 +21,10 @@ final class Autocorrect: InstantSuggestionProvider {
     }
 
     /// The controller may call this when the user dismisses an instant suggestion with Esc.
-    func reject(word: String) { rejected.insert(word.lowercased()) }
+    func reject(word: String) {
+        rejected.insert(word.lowercased())
+        UserDefaults.standard.set(Array(rejected), forKey: Autocorrect.rejectedKey)  // "don't correct" survives restarts
+    }
 
     // MARK: - InstantSuggestionProvider
 
@@ -28,12 +32,14 @@ final class Autocorrect: InstantSuggestionProvider {
         // Esc detection without a controller hook: after Esc the typo is still in the text and the
         // provider is asked again (the user typed on). After Tab it is gone (replaced by the fix).
         if let o = offered {
-            if field.textBefore.hasPrefix(o.textBefore) { rejected.insert(o.word.lowercased()) }
+            if field.textBefore.hasPrefix(o.textBefore) { reject(word: o.word) }
             offered = nil
         }
         guard let (word, sep) = Autocorrect.lastFinishedWord(in: field.textBefore) else { return nil }
         let key = word.lowercased()
         guard !rejected.contains(key), !ignored.contains(key) else { return nil }
+        // A word already used earlier in this text is the user's own (name, slang), not a typo.
+        if Autocorrect.occursEarlier(key, in: String(field.textBefore.dropLast(word.count + sep.count))) { return nil }
         guard let fix = fix(for: word) else { return nil }
         offered = (field.textBefore, word)
         return InstantSuggestion(replaceCount: word.count + sep.count, text: fix + sep,
@@ -58,6 +64,15 @@ final class Autocorrect: InstantSuggestionProvider {
         guard word.count >= 3, word.first!.isLetter, word.last!.isLetter else { return nil }
         // "foo.bar" typed as a domain: sep "." with something non-space coming later is not detectable; fine.
         return (word, String(sepChar))
+    }
+
+    static func occursEarlier(_ key: String, in text: String) -> Bool {
+        var cur = ""
+        func hit() -> Bool { defer { cur = "" }; return cur.lowercased() == key }
+        for ch in text {
+            if ch.isLetter || ch == "'" || ch == "’" || ch == "-" { cur.append(ch) } else if hit() { return true }
+        }
+        return hit()
     }
 
     // MARK: - Checking
@@ -126,9 +141,15 @@ final class Autocorrect: InstantSuggestionProvider {
             let c = cand.lowercased()
             guard c != w, !c.contains(" "), !cand.dropFirst().contains(where: { $0.isUppercase }),
                   script(of: c) == sc else { continue }
+            // Never change the first letter (or add/drop a char at the start).
+            guard c.first == w.first else { continue }
             let d = Autocorrect.editDistance(Array(w), Array(c))
-            // Conservative: one edit, or two for longer words.
-            if d == 1 || (d == 2 && w.count >= 6) { return c }
+            if w.count <= 5 {
+                // Short words: one substitution or one adjacent swap only (same length), no insert/delete.
+                if d == 1 && c.count == w.count { return c }
+            } else if d == 1 || d == 2 && w.count >= 6 {
+                return c
+            }
         }
         return nil
     }
@@ -167,6 +188,9 @@ final class Autocorrect: InstantSuggestionProvider {
         "выплата", "флор", "флоры", "апрув", "апрува", "апрувы", "фрод", "фрода", "фродовый", "фродовых", "вайтлист", "блэклист",
         "паблишер", "паблишеры", "паблишеров", "паблишера", "трекер", "трекеры", "рекламодатель", "кукиматчинг", "метрика",
         "ставка", "ставку", "ставки", "кап", "каппинг", "лить", "льем", "льём", "залить", "слить", "масштабировать", "разжать", "разжать",
+        "слак", "слаке", "слаку", "слака", "тимс", "тимсе", "телега", "телеге", "телегу", "телеги", "гугл", "гугле", "гугла", "фейсбук", "фейсбуке",
+        "тикток", "тиктоке", "ютуб", "ютубе", "инста", "инсте", "инсту", "вотсап", "вотсапе", "вацап", "зум", "зуме", "джира", "джире", "джиру",
+        "конфа", "конфе", "конфу", "конфы", "чатгпт", "клод", "клода", "клоде", "ватсап", "слэк",
         "ок", "окей", "спс", "пжл", "плиз", "хз", "имхо", "лол", "кек"
     ]
 

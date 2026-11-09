@@ -96,3 +96,18 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   terms), fresh clipboard, length; `StyleMemory` — opt-in, AES-GCM encrypted local store of sent/accepted phrases
   (key in Keychain), 2–3 similar ones as style examples; «Удалить выученное» wipes file and key.
 - Every switch is in Settings and in the menu bar submenu; nothing requires editing tolk.json.
+
+## v0.6.1 — autocomplete tuned on live use
+- Electron/WebView fields (Slack, Teams): text and caret read through AX text markers when CFRange attributes
+  are missing; every refusal is logged with its step. Ghost text sits on the app's baseline, uses the app's font
+  size when AX reports it, is clipped to the field/window, and always draws its leading space.
+- Confidence gating: `CompletionClient` asks llama-server for `n_probs`, `AutocompletePrompt.confidentPrefix` cuts the
+  suggestion at the first unsure token and never shows half a word. Frequency (menu/Settings): rare 0.6 / normal 0.4 /
+  often 0.25 first-token probability. A real word before the caret gets letters appended only at p ≥ 0.8.
+  Filters drop invented numbers, markup and header echoes; 3 short few-shot messages lead the prompt.
+- Measured (autocomplete-eval.md, rounds 2–3): Gemma 26B on vkbox via Ollama ≈1.35 s and over-confident — kept for
+  translation only; 26B on the Mac was rejected by the user (memory/heat).
+- Autocorrect is conservative: never changes the first letter, skips brands/slang and words already in the text,
+  remembers ignored fixes.
+- Debug journal (menu, 1 hour, local only): jsonl + screenshots around the caret on shown/accepted events.
+- Settings split into tabs: Перевод · Автодополнение · Общие.

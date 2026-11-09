@@ -41,10 +41,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var acAppItem: NSMenuItem!
     private var acFlagItems: [(item: NSMenuItem, keyPath: WritableKeyPath<TolkConfig, Bool>)] = []
     private var acLengthItems: [NSMenuItem] = []
+    private var acFreqItems: [NSMenuItem] = []
     private var acTimer: Timer?
     private var lastExternalApp: NSRunningApplication?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["TOLK_MAIN_DEMO"] != nil { MainWindowDemo.runIfRequested(); return }
+        #endif
         engine = DefaultTranslationEngine(config: config)
 
         popup = TranslationPopupController(engine: withHistory("popup"))
@@ -248,6 +252,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         acItem.state = config.autocomplete ? .on : .off
         acStatusItem.isHidden = !config.autocomplete
         for f in acFlagItems { f.item.state = config[keyPath: f.keyPath] ? .on : .off }
+        for it in acFreqItems { it.state = (it.representedObject as? String) == config.autocompleteFrequency ? .on : .off }
         for it in acLengthItems { it.state = (it.representedObject as? String) == config.autocompleteLength ? .on : .off }
         switch acServer.state {
         case .stopped: acStatusItem.title = "\(acServer.modelName): остановлена"
@@ -281,6 +286,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let key = sender.representedObject as? String else { return }
         var c = config
         c.autocompleteLength = key
+        try? c.save()
+    }
+
+    @objc private func setAutocompleteFrequency(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        var c = config
+        c.autocompleteFrequency = key
         try? c.save()
     }
 
@@ -372,9 +384,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         lengthItem.submenu = lengthMenu
         acMenu.addItem(lengthItem)
+        let freqItem = NSMenuItem(title: "Частота", action: nil, keyEquivalent: "")
+        let freqMenu = NSMenu()
+        for (key, title) in [("rare", "Реже, но точнее"), ("normal", "Обычно"), ("often", "Чаще")] {
+            let it = item(title, #selector(setAutocompleteFrequency(_:)))
+            it.representedObject = key
+            freqMenu.addItem(it)
+            acFreqItems.append(it)
+        }
+        freqItem.submenu = freqMenu
+        acMenu.addItem(freqItem)
         acMenu.addItem(.separator())
         acAppItem = item("", #selector(toggleAutocompleteForApp))
         acMenu.addItem(acAppItem)
+        SuggestionJournal.shared.menuItems().forEach(acMenu.addItem)
         acMenuItem.submenu = acMenu
         menu.addItem(acMenuItem)
         refreshAutocompleteMenu()

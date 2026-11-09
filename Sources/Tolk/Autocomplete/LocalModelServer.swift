@@ -114,6 +114,9 @@ final class LocalModelServer {
 }
 
 /// `/completion` of llama-server: raw text in, continuation out.
+/// llama-server answered with a non-2xx status (e.g. 503 while the slot is busy).
+struct HTTPStatusError: Error { let status: Int }
+
 struct CompletionClient {
     let baseURL: URL
 
@@ -131,11 +134,21 @@ struct CompletionClient {
             "top_k": 1,
             "stop": ["\n"],
             "cache_prompt": true,
+            "n_probs": 1,   // per-token probabilities → AutocompletePrompt.confidentPrefix
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let t0 = Date()
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { throw HTTPStatusError(status: http.statusCode) }
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        return Result(text: json?["content"] as? String ?? "", ms: Int(Date().timeIntervalSince(t0) * 1000))
+        var text = json?["content"] as? String ?? ""
+        if AutocompletePrompt.useConfidence, let probs = json?["completion_probabilities"] as? [[String: Any]], !probs.isEmpty {
+            let toks: [(text: String, prob: Double)] = probs.compactMap {
+                guard let t = $0["token"] as? String, let lp = $0["logprob"] as? Double else { return nil }
+                return (t, exp(lp))
+            }
+            if toks.count == probs.count { text = AutocompletePrompt.confidentPrefix(toks, textBefore: AutocompletePrompt.lastTextBefore) }
+        }
+        return Result(text: text, ms: Int(Date().timeIntervalSince(t0) * 1000))
     }
 }

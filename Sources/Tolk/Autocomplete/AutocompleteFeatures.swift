@@ -9,6 +9,14 @@ enum AutocompleteFeatures {
     static func configure(_ c: AutocompleteController, config: TolkConfig) {
         var providers: [InstantSuggestionProvider] = []
 
+        // Frequency → confidence thresholds (measured in autocomplete-eval.md, round 3):
+        // rare 0.6 ≈ 67 % right / 17 % shown; normal 0.4 ≈ 45 % / 30 %; often 0.25 ≈ 35 % / 45 %.
+        switch config.autocompleteFrequency {
+        case "rare":  AutocompletePrompt.firstTokenProb = 0.6;  AutocompletePrompt.minTokenProb = 0.35
+        case "often": AutocompletePrompt.firstTokenProb = 0.25; AutocompletePrompt.minTokenProb = 0.25
+        default:      AutocompletePrompt.firstTokenProb = 0.4;  AutocompletePrompt.minTokenProb = 0.3
+        }
+
         // MARK: [autocorrect] — typo fixes (section owned by the autocorrect feature)
         if config.autocorrect {
             providers.insert(Autocorrect(rulesPath: config.effectiveRulesPath), at: 0)
