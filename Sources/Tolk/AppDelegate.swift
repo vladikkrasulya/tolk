@@ -119,6 +119,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 exit(0)
             }
         }
+        // Dev: TOLK_RENDER_MENUICON=file.png renders the menu bar icon preview and quits.
+        if let path = ProcessInfo.processInfo.environment["TOLK_RENDER_MENUICON"] {
+            MenuBarIcon.renderPreview(to: path); exit(0)
+        }
         // Dev: TOLK_RENDER_POPUP=dir shows the popup with a sample, waits for the translation, renders PNG, quits.
         if let dir = ProcessInfo.processInfo.environment["TOLK_RENDER_POPUP"] {
             UserDefaults.standard.set(false, forKey: "tolk.popup.notes")
@@ -209,11 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showHealth(_ qwenOK: Bool) {
-        let symbol = qwenOK ? "character.bubble" : "exclamationmark.bubble"
-        if let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "Tolk") {
-            img.isTemplate = true
-            statusItem.button?.image = img
-        }
+        statusItem.button?.image = MenuBarIcon.image(qwenOK ? .ready : .unavailable)
         statusLine.title = qwenOK
             ? "● Переводит \(engine.primary.name) (vkbox)"
             : (config.fallback == .none ? "○ vkbox недоступен"
