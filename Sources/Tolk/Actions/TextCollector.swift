@@ -26,6 +26,7 @@ enum TextCollector {
             case let .started(provider, _, _): result.provider = provider; result.text = ""
             case let .delta(chunk): result.text += chunk
             case .fellBack: result.fellBack = true
+            case .stats: break
             case .finished: finished = true
             }
         }

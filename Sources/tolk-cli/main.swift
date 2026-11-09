@@ -108,6 +108,9 @@ let consumer = Task {
                 translated += d
                 print(d, terminator: ""); fflush(stdout)
             case let .fellBack(from, reason): err("[fallback from \(from): \(reason)] \(ms())")
+            case let .stats(st):
+                let speed = st.tokensPerSecond.map { String(format: "%.0f ток/с%@", $0, st.tokensExact ? "" : "≈") } ?? "—"
+                err("[\(st.routeTitle) · первое слово \(st.firstChunk.map { String(format: "%.2fs", $0) } ?? "—") · \(speed) · \(String(format: "%.2fs", st.total))\(st.fallbackReason.map { " · запасной: " + $0 } ?? "")]")
             case .finished: print(); fflush(stdout); err("[done \(ms())]")
             }
         }

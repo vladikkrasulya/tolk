@@ -9,10 +9,16 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
     public let fallback: TranslationProvider?
 
     public convenience init(config: TolkConfig) {
-        let rules = RulesStore(path: config.rulesPath)
+        let rules = RulesStore(path: config.effectiveRulesPath)
+        let fallback: TranslationProvider?
+        switch config.fallback {
+        case .google: fallback = GoogleProvider()
+        case .apple: fallback = AppleTranslationProvider()
+        case .none: fallback = nil
+        }
         self.init(config: config, rules: rules,
                   primary: OllamaProvider(config: config, rules: rules),
-                  fallback: config.useGoogleFallback ? GoogleProvider() : nil)
+                  fallback: fallback)
     }
 
     public init(config: TolkConfig, rules: RulesStore, primary: TranslationProvider, fallback: TranslationProvider?) {
@@ -24,6 +30,24 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
         let primary = self.primary, fallback = self.fallback
         return AsyncThrowingStream { continuation in
             let task = Task {
+                let t0 = Date()
+                var firstAt: Date?
+                var chunks = 0
+                let usage = UsageBox()
+                func stats(_ provider: TranslationProvider, reason: String?) -> TranslationStats {
+                    let route: TranslationStats.Route
+                    switch provider {
+                    case let o as OllamaProvider: route = o.isUsingRemote ? .remote : .home
+                    case is AppleTranslationProvider: route = .device
+                    default: route = .web
+                    }
+                    let exact = usage.completionTokens
+                    return TranslationStats(provider: provider.name, route: route,
+                                            firstChunk: firstAt.map { $0.timeIntervalSince(t0) },
+                                            total: Date().timeIntervalSince(t0),
+                                            outputTokens: exact ?? (provider is OllamaProvider ? chunks : nil),
+                                            tokensExact: exact != nil, fallbackReason: reason)
+                }
                 do {
                     guard !resolved.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                         continuation.yield(.started(provider: primary.name, source: resolved.source, target: resolved.target))
@@ -34,11 +58,16 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                         continuation.yield(.started(provider: primary.name, source: resolved.source, target: resolved.target))
                         var gotChunk = false
                         do {
-                            for try await chunk in primary.translate(resolved) {
-                                try Task.checkCancellation()
-                                gotChunk = true
-                                continuation.yield(.delta(chunk))
+                            try await UsageBox.$current.withValue(usage) {
+                                for try await chunk in primary.translate(resolved) {
+                                    try Task.checkCancellation()
+                                    if firstAt == nil { firstAt = Date() }
+                                    chunks += 1
+                                    gotChunk = true
+                                    continuation.yield(.delta(chunk))
+                                }
                             }
+                            continuation.yield(.stats(stats(primary, reason: nil)))
                             continuation.yield(.finished); continuation.finish(); return
                         } catch {
                             // Mid-stream failure or cancellation: nothing sensible to fall back to.
@@ -57,8 +86,10 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                     continuation.yield(.started(provider: fallback.name, source: resolved.source, target: resolved.target))
                     for try await chunk in fallback.translate(resolved) {
                         try Task.checkCancellation()
+                        if firstAt == nil { firstAt = Date() }
                         continuation.yield(.delta(chunk))
                     }
+                    continuation.yield(.stats(stats(fallback, reason: failure)))
                     continuation.yield(.finished)
                     continuation.finish()
                 } catch {

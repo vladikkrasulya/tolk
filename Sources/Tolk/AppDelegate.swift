@@ -31,17 +31,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var accessibilityTimer: Timer?
     private var healthTimer: Timer?
     private var lastHealth: Bool?
+    private var profileItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         engine = DefaultTranslationEngine(config: config)
 
-        popup = TranslationPopupController(engine: engine)
-        inputWindow = InputWindowController(engine: engine)
-        translatePage = TranslatePageViewController(engine: engine)
-        imagePage = ImageTranslateViewController(engine: engine)
-        glossaryPage = GlossaryViewController(rulesPath: config.rulesPath)
+        popup = TranslationPopupController(engine: withHistory("popup"))
+        inputWindow = InputWindowController(engine: withHistory("page"))
+        translatePage = TranslatePageViewController(engine: withHistory("page"))
+        imagePage = ImageTranslateViewController(engine: withHistory("image"))
+        Self.ensureProfileFile(config.activeProfile)
+        glossaryPage = GlossaryViewController(rulesPath: config.effectiveRulesPath)
         documentsPage = DocumentsViewController(engine: engine)
         historyPage = HistoryViewController(store: history)
+        historyPage.onOpen = { [weak self] e in
+            self?.mainWindow.show(.translate)
+            self?.translatePage.load(text: e.source)
+        }
         mainWindow = MainWindowController(translate: translatePage,
                                           image: imagePage,
                                           documents: documentsPage,
@@ -54,14 +60,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.translatePage.load(text: text)
         }
         popup.toneForApp = { [weak self] in self?.config.tone(forApp: $0) ?? .auto }
-        reply = ReplyPanelController(engine: engine)
+        reply = ReplyPanelController(engine: withHistory("reply"))
         reply.toneForApp = { [weak self] in self?.config.tone(forApp: $0) ?? .auto }
         popup.onReply = { [weak self] ctx in self?.reply.show(ctx) }
 
         monitor = DoubleCopyMonitor(interval: config.doubleCopyInterval)
         monitor.onTrigger = { [weak self] text, point in self?.doubleCopy(text, at: point) }
 
-        quickActions = QuickActionsController(engine: engine, config: config)
+        quickActions = QuickActionsController(engine: withHistory("quick"), config: config)
         quickActions.onWillPerform = { [weak self] in self?.popup.hideNow() }
         if !quickActions.start() { NSLog("Tolk: hotkeys taken: \(quickActions.failedActions.map(\.title))") }
 
@@ -116,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Dev: TOLK_RENDER_POPUP=dir shows the popup with a sample, waits for the translation, renders PNG, quits.
         if let dir = ProcessInfo.processInfo.environment["TOLK_RENDER_POPUP"] {
             UserDefaults.standard.set(false, forKey: "tolk.popup.notes")
+            popup.replaceEngine(engine) // no history entries from dev renders
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
                 popup.show(text: "Hey Vlad, our CR on your push zones dropped to 0.4%. Can you check the sub IDs?", at: NSPoint(x: 500, y: 700))
                 DispatchQueue.main.asyncAfter(deadline: .now() + 9) { [self] in
@@ -136,6 +143,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) { Diagnostics.markCleanExit() }
 
+    /// Every feature gets the engine through a history recorder with its own origin
+    /// (documents are not recorded paragraph by paragraph).
+    private func withHistory(_ origin: String) -> TranslationEngine {
+        HistoryRecordingEngine(engine, origin: origin, store: history)
+    }
+
     /// Click on the Dock / Launchpad icon while Tolk is already running.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { mainWindow.show() }
@@ -146,16 +159,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func configChanged() {
         config = TolkConfig.load()
-        Diagnostics.log("settings changed: model=\(config.model) server=\(config.ollamaURL)")
+        Diagnostics.log("settings changed: profile=\(config.activeProfileID) model=\(config.effectiveModel) fallback=\(config.fallback.rawValue)")
         engine = DefaultTranslationEngine(config: config)
-        popup.replaceEngine(engine)
-        reply.replaceEngine(engine)
-        translatePage.engine = engine
-        imagePage.engine = engine
+        popup.replaceEngine(withHistory("popup"))
+        reply.replaceEngine(withHistory("reply"))
+        translatePage.engine = withHistory("page")
+        imagePage.engine = withHistory("image")
         documentsPage.engine = engine
-        inputWindow.engine = engine
-        glossaryPage.switchFile(to: config.rulesPath)
-        quickActions.update(engine: engine, config: config)
+        inputWindow.engine = withHistory("page")
+        Self.ensureProfileFile(config.activeProfile)
+        glossaryPage.switchFile(to: config.effectiveRulesPath)
+        rebuildProfileMenu()
+        quickActions.update(engine: withHistory("quick"), config: config)
         monitor.stop()
         monitor = DoubleCopyMonitor(interval: config.doubleCopyInterval)
         monitor.onTrigger = { [weak self] text, point in self?.doubleCopy(text, at: point) }
@@ -201,7 +216,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusLine.title = qwenOK
             ? "● Переводит \(engine.primary.name) (vkbox)"
-            : (config.useGoogleFallback ? "○ vkbox недоступен — переводит Google" : "○ vkbox недоступен")
+            : (config.fallback == .none ? "○ vkbox недоступен"
+                                         : "○ vkbox недоступен — переводит \(config.fallback == .apple ? "Apple" : "Google")")
         statusItem.button?.toolTip = statusLine.title
     }
 
@@ -223,6 +239,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item("Перевести и заменить выделенное  ⌃⌥T", #selector(quickTranslate)))
         menu.addItem(item("Причесать выделенное  ⌃⌥P", #selector(quickPolish)))
         menu.addItem(.separator())
+        profileItem = NSMenuItem(title: "Профиль", action: nil, keyEquivalent: "")
+        profileItem.submenu = NSMenu()
+        menu.addItem(profileItem)
+        rebuildProfileMenu()
         menu.addItem(item("Глоссарий", #selector(openGlossary)))
         menu.addItem(item("Настройки…", #selector(openSettings)))
         menu.addItem(item("Как пользоваться", #selector(openHelp)))
@@ -241,6 +261,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openMain() { mainWindow.show() }
+
+    // MARK: - Glossary profiles
+
+    private func rebuildProfileMenu() {
+        guard let profileItem else { return }
+        profileItem.title = "Профиль: \(config.activeProfile.name)"
+        let sub = NSMenu()
+        for p in config.profiles {
+            let i = NSMenuItem(title: p.name, action: #selector(switchProfile(_:)), keyEquivalent: "")
+            i.target = self
+            i.representedObject = p.id
+            i.state = p.id == config.activeProfileID ? .on : .off
+            sub.addItem(i)
+        }
+        profileItem.submenu = sub
+    }
+
+    @objc private func switchProfile(_ item: NSMenuItem) {
+        guard let id = item.representedObject as? String, id != config.activeProfileID else { return }
+        var c = config
+        c.activeProfileID = id
+        try? c.save() // posts didChange → configChanged rebuilds the engine
+    }
+
+    /// A new profile starts with a style for its purpose instead of an empty file.
+    static func ensureProfileFile(_ p: GlossaryProfile) {
+        let path = (p.rulesPath as NSString).expandingTildeInPath
+        guard !FileManager.default.fileExists(atPath: path) else { return }
+        let isHome = p.id == "home"
+        let style = isHome ? """
+        - Книги, статьи, документы, письма: естественный литературный язык, без канцелярита и кальки.
+        - Сохраняй стиль и интонацию автора, имена и реалии; не упрощай и не пересказывай.
+        - Названия и термины — так, как принято в русскоязычных изданиях.
+        - Официальные документы — точно и нейтрально, без вольностей.
+        """ : """
+        - Пиши естественно, как носитель языка; сохраняй тон оригинала.
+        """
+        let text = """
+        <!-- Профиль «\(p.name)»: правила и глоссарий Tolk. Редактируйте в разделе «Глоссарий». -->
+
+        ## Стиль
+        \(style)
+
+        ## Глоссарий EN → RU (обратно — так же)
+
+        """
+        try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try? text.write(toFile: path, atomically: true, encoding: .utf8)
+        Diagnostics.log("created rules file for profile \(p.id)")
+    }
     @objc private func openHelp() { mainWindow.show(.help) }
     @objc private func reportProblem() { Diagnostics.copyProblemReport() }
     @objc private func openGlossary() { mainWindow.show(.glossary) }

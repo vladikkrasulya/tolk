@@ -21,6 +21,8 @@ final class TranslationRunner {
     private var generation = 0
     private(set) var isRunning = false
     var onUpdate: ((Update) -> Void)?
+    /// Who translated and how fast (arrives right before `.finished`).
+    var onStats: ((TranslationStats) -> Void)?
 
     init(engine: TranslationEngine) { self.engine = engine }
 
@@ -61,6 +63,8 @@ final class TranslationRunner {
             onUpdate?(.delta(chunk))
         case let .fellBack(from, reason):
             onUpdate?(.fellBack(from: from, reason: reason))
+        case let .stats(st):
+            onStats?(st)
         case .finished:
             isRunning = false
             onUpdate?(.finished)

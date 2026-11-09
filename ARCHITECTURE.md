@@ -53,3 +53,17 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - `MainWindow/HelpViewController.swift`: «Как пользоваться» page (⌘5, menu). Cards animate only on hover
   (all-at-once loops cost 16–24 % CPU on 120 Hz).
 - DEBUG render hooks: `TOLK_RENDER_REPLY=dir`, `TOLK_RENDER_POPUP=dir` write PNGs (no screen-recording needed).
+
+## v0.5.0 — models, fallback, profiles, history, documents, status line
+- Config: `fallback` (google / apple / none; old `useGoogleFallback` is read and migrated), `profiles` +
+  `activeProfileID` — each `GlossaryProfile` has its own rules file and optional model; the engine uses
+  `effectiveRulesPath` / `effectiveModel`. Settings: model picker (`*-translate` models from the server),
+  fallback picker, profiles editor; menu bar «Профиль: …».
+- `AppleTranslationProvider` (Translation framework, macOS 26+, on-device; 15 s timeout).
+- History: `TolkCore/History/HistoryStore` (JSONL, 0600, ≤3000) + `Tolk/History/HistoryRecordingEngine`
+  decorator per origin (popup/reply/quick/page/image; documents are not recorded) + «История» page.
+- Documents: `Tolk/Documents/**` — PDF (text + OCR), Word/RTF/ODT/HTML/TXT/MD, paragraph-by-paragraph,
+  pause/resume, export DOCX/RTF/TXT/MD (bilingual option).
+- `TranslationEvent.stats(TranslationStats)` before `.finished` (route, first chunk, exact tokens via
+  `stream_options.include_usage` → `UsageBox` task-local); `StatusLineView` under translations
+  (popup, translate page, reply). `TranslationRunner.onStats`.

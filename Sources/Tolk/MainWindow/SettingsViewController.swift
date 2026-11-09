@@ -163,8 +163,44 @@ final class SettingsModel: ObservableObject {
 
     // MARK: Rules file
 
-    var rulesURL: URL { URL(fileURLWithPath: (config.rulesPath as NSString).expandingTildeInPath) }
+    var rulesURL: URL { URL(fileURLWithPath: (config.effectiveRulesPath as NSString).expandingTildeInPath) }
     var rulesExists: Bool { FileManager.default.fileExists(atPath: rulesURL.path) }
+
+    /// Translation models on the server (`*-translate`), plus the ones already configured.
+    var translateModels: [String] {
+        var names = availableModels.map { $0.replacingOccurrences(of: ":latest", with: "") }
+            .filter { $0.hasSuffix("-translate") }
+        for m in [config.model] + config.profiles.compactMap(\.model) where !m.isEmpty && !names.contains(m) {
+            names.append(m)
+        }
+        return names.sorted()
+    }
+
+    func chooseRulesFile(forProfile id: String) {
+        guard let i = config.profiles.firstIndex(where: { $0.id == id }) else { return }
+        let current = URL(fileURLWithPath: (config.profiles[i].rulesPath as NSString).expandingTildeInPath)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Файл правил и глоссария для профиля «\(config.profiles[i].name)» (Markdown)"
+        panel.prompt = "Выбрать"
+        panel.directoryURL = current.deletingLastPathComponent()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        config.profiles[i].rulesPath = (url.path as NSString).abbreviatingWithTildeInPath
+    }
+
+    func addProfile() {
+        var n = config.profiles.count + 1
+        while config.profiles.contains(where: { $0.id == "p\(n)" }) { n += 1 }
+        config.profiles.append(GlossaryProfile(id: "p\(n)", name: "Профиль \(n)", rulesPath: "~/Translate/profile-\(n).md"))
+    }
+
+    func removeProfile(_ id: String) {
+        guard config.profiles.count > 1 else { return }
+        config.profiles.removeAll { $0.id == id }
+        if config.activeProfileID == id { config.activeProfileID = config.profiles[0].id }
+    }
 
     func chooseRulesFile() {
         let panel = NSOpenPanel()
@@ -315,20 +351,7 @@ struct SettingsView: View {
     private var serverSection: some View {
         Section {
             TextField("Адрес в домашней сети", text: $model.config.ollamaURL, prompt: Text("http://192.168.1.13:11434"))
-            HStack {
-                TextField("Модель", text: $model.config.model, prompt: Text("qwen-translate"))
-                if !model.availableModels.isEmpty {
-                    Menu {
-                        ForEach(model.availableModels, id: \.self) { name in
-                            Button(name) { model.config.model = name.replacingOccurrences(of: ":latest", with: "") }
-                        }
-                    } label: { Image(systemName: "chevron.up.chevron.down") }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .help("Модели на сервере")
-                }
-            }
+            ModelPicker(title: "Модель", selection: $model.config.model, models: model.translateModels)
             HStack(alignment: .firstTextBaseline) {
                 Button("Проверить соединение") { model.checkConnection() }
                 Spacer()
@@ -341,6 +364,7 @@ struct SettingsView: View {
             }
         } header: {
             Text("Сервер перевода")
+                .onAppear { if model.availableModels.isEmpty { model.checkConnection() } }
         } footer: {
             Text("Ollama на домашнем сервере. Сначала Tolk пробует этот адрес, затем — адрес вне дома.")
                 .foregroundStyle(.secondary)
@@ -414,7 +438,14 @@ struct SettingsView: View {
                         .frame(width: 52, alignment: .trailing)
                 }
             }
-            Toggle("Запасной перевод через Google", isOn: $model.config.useGoogleFallback)
+            Picker("Если сервер недоступен", selection: $model.config.fallback) {
+                ForEach(FallbackProvider.allCases, id: \.self) { f in
+                    Text(f.title).tag(f)
+                        .disabled(f == .apple && !AppleTranslationProvider.isSupportedOnThisMac)
+                }
+            }
+            Text(fallbackHint(model.config.fallback))
+                .font(.callout).foregroundStyle(.secondary)
             Toggle("Запускать при входе в систему", isOn: Binding(
                 get: { model.launchAtLogin },
                 set: { model.setLaunchAtLogin($0) }))
@@ -425,7 +456,7 @@ struct SettingsView: View {
         } header: {
             Text("Поведение")
         } footer: {
-            Text("Интервал — сколько секунд может пройти между двумя нажатиями ⌘C. Google используется, когда домашний сервер выключен или занят.")
+            Text("Интервал — сколько секунд может пройти между двумя нажатиями ⌘C.")
                 .foregroundStyle(.secondary)
         }
     }
@@ -434,28 +465,55 @@ struct SettingsView: View {
 
     private var rulesSection: some View {
         Section {
-            LabeledContent("Файл правил") {
-                HStack {
-                    Text(model.config.rulesPath)
-                        .textSelection(.enabled)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .labelsHidden()
-                        .multilineTextAlignment(.trailing)
-                    Button("Выбрать…") { model.chooseRulesFile() }
-                    Button {
-                        model.revealRules()
-                    } label: { Image(systemName: "folder") }
-                    .help("Показать в Finder")
-                    .disabled(!model.rulesExists)
-                }
+            Picker("Активный профиль", selection: $model.config.activeProfileID) {
+                ForEach(model.config.profiles) { p in Text(p.name).tag(p.id) }
             }
+            .pickerStyle(.segmented)
+            ForEach($model.config.profiles) { $p in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        TextField("Название", text: $p.name).frame(maxWidth: 160)
+                        if p.id == model.config.activeProfileID {
+                            Text("активный").font(.caption).foregroundStyle(.green)
+                        }
+                        Spacer()
+                        if model.config.profiles.count > 1 {
+                            Button(role: .destructive) { model.removeProfile(p.id) } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.borderless).help("Удалить профиль (файл глоссария останется)")
+                        }
+                    }
+                    HStack {
+                        Text(p.rulesPath).font(.callout).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                        Spacer()
+                        Button("Файл…") { model.chooseRulesFile(forProfile: p.id) }
+                    }
+                    ModelPicker(title: "Модель профиля", selection: Binding(
+                        get: { p.model ?? "" }, set: { p.model = $0.isEmpty ? nil : $0 }),
+                        models: model.translateModels, allowDefault: true)
+                }
+                .padding(.vertical, 2)
+            }
+            Button { model.addProfile() } label: { Label("Добавить профиль", systemImage: "plus") }
+                .buttonStyle(.borderless)
         } header: {
-            Text("Правила и глоссарий")
+            Text("Профили глоссария")
         } footer: {
-            Text(model.rulesExists ? "Термины и стиль из этого файла подставляются в каждый перевод. Редактировать — в разделе «Глоссарий»."
-                                   : "Файл не найден — переводы пойдут без глоссария.")
-                .foregroundStyle(model.rulesExists ? Color.secondary : Color.orange)
+            Text("У каждого профиля свой глоссарий и стиль — например, «Работа» со сленгом adtech и «Дом» для книг и документов. Переключать можно и из меню Tolk. Редактировать глоссарий активного профиля — в разделе «Глоссарий».")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func fallbackHint(_ f: FallbackProvider) -> String {
+        switch f {
+        case .google:
+            return "Быстро и бесплатно, но текст уходит в Google. Без глоссария, тона и «причесать»."
+        case .apple:
+            return AppleTranslationProvider.isSupportedOnThisMac
+                ? "Прямо на этом Mac, без интернета, текст никуда не уходит. Качество проще Google. Нужны скачанные языки: Системные настройки → Основные → Язык и регион → Языки перевода."
+                : "Нужна macOS 26 или новее."
+        case .none:
+            return "Без домашнего сервера Tolk покажет ошибку — ничего не уходит в интернет."
         }
     }
 
@@ -550,5 +608,39 @@ private struct CheckLabel: View {
         }
         .font(.callout)
         .lineLimit(2)
+    }
+}
+
+
+/// Picker of translation models with human descriptions; «Другая…» reveals a free text field.
+struct ModelPicker: View {
+    let title: String
+    @Binding var selection: String
+    let models: [String]
+    var allowDefault = false
+    @State private var custom = false
+
+    static func describe(_ id: String) -> String {
+        let m = id.lowercased()
+        if m.contains("qwen") { return "Qwen 35B — быстрее, лучше английский, деловые и юридические тексты" }
+        if m.contains("gemma") { return "Gemma 26B — меньше калек, живее русский и украинский, книги" }
+        return id
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker(title, selection: Binding(
+                get: { custom ? "__custom" : selection },
+                set: { v in if v == "__custom" { custom = true } else { custom = false; selection = v } })) {
+                if allowDefault { Text("Как по умолчанию").tag("") }
+                ForEach(models, id: \.self) { m in Text(Self.describe(m)).tag(m) }
+                Divider()
+                Text("Другая…").tag("__custom")
+            }
+            if custom || (!selection.isEmpty && !models.contains(selection)) {
+                TextField("Имя модели на сервере", text: $selection, prompt: Text("qwen-translate"))
+                    .font(.callout)
+            }
+        }
     }
 }

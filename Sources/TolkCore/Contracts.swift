@@ -107,7 +107,52 @@ public enum TranslationEvent: Sendable, Equatable {
     case started(provider: String, source: Language, target: Language)
     case delta(String)
     case fellBack(from: String, reason: String)
+    /// Sent right before `.finished`: who translated, by which route, how fast.
+    case stats(TranslationStats)
     case finished
+}
+
+/// How a translation went — shown as a one-line status under the translation.
+public struct TranslationStats: Sendable, Equatable {
+    public enum Route: String, Sendable { case home, remote, web, device }
+    public var provider: String
+    public var route: Route
+    /// Seconds from the request to the first chunk.
+    public var firstChunk: TimeInterval?
+    public var total: TimeInterval
+    /// Exact output tokens when the server reports them, else an estimate from streamed chunks.
+    public var outputTokens: Int?
+    public var tokensExact: Bool
+    /// Why the primary model was not used (nil = it was).
+    public var fallbackReason: String?
+
+    public init(provider: String, route: Route, firstChunk: TimeInterval?, total: TimeInterval,
+                outputTokens: Int?, tokensExact: Bool, fallbackReason: String?) {
+        self.provider = provider; self.route = route; self.firstChunk = firstChunk; self.total = total
+        self.outputTokens = outputTokens; self.tokensExact = tokensExact; self.fallbackReason = fallbackReason
+    }
+
+    /// Generation speed (after the first chunk).
+    public var tokensPerSecond: Double? {
+        guard let t = outputTokens, t > 1, let f = firstChunk, total - f > 0.05 else { return nil }
+        return Double(t) / (total - f)
+    }
+
+    public var routeTitle: String {
+        switch route {
+        case .home: "\(provider) дома"
+        case .remote: "\(provider) вне дома"
+        case .web: provider
+        case .device: "\(provider) на этом Mac"
+        }
+    }
+}
+
+/// Lets a provider report the server's token count to the engine (bound per request with a task-local).
+public final class UsageBox: @unchecked Sendable {
+    public var completionTokens: Int?
+    public init() {}
+    @TaskLocal public static var current: UsageBox?
 }
 
 /// One translation backend (Ollama/Qwen, Google, ...).
@@ -155,6 +200,31 @@ public extension TranslationEngine {
     func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String] { [] }
 }
 
+/// What translates when the home model is unreachable.
+public enum FallbackProvider: String, Codable, CaseIterable, Sendable {
+    case google   // free web endpoint, text goes to Google
+    case apple    // Apple Translation, on-device (macOS 26+, language packs must be downloaded)
+    case none     // show an error instead
+
+    public var title: String {
+        switch self { case .google: "Google"; case .apple: "Apple (на этом Mac)"; case .none: "Никакого" }
+    }
+}
+
+/// A glossary profile: its own rules/glossary file and, optionally, its own model.
+/// E.g. «Работа» (adtech slang, Qwen) and «Дом» (books and documents, Gemma).
+public struct GlossaryProfile: Codable, Sendable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
+    public var rulesPath: String
+    /// nil = use `TolkConfig.model`.
+    public var model: String?
+
+    public init(id: String, name: String, rulesPath: String, model: String? = nil) {
+        self.id = id; self.name = name; self.rulesPath = rulesPath; self.model = model
+    }
+}
+
 /// App settings. Stored as JSON at `TolkConfig.defaultPath`; missing file = defaults.
 public struct TolkConfig: Codable, Sendable, Equatable {
     public var ollamaURL: String = "http://192.168.1.13:11434"
@@ -166,7 +236,27 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public var secondaryLanguage: Language = .english
     /// Max seconds between the two Cmd+C presses.
     public var doubleCopyInterval: Double = 0.4
-    public var useGoogleFallback: Bool = true
+    public var useGoogleFallback: Bool { fallback == .google }
+    public var fallback: FallbackProvider = .google
+    /// Glossary profiles; the active one decides the rules file (and may override the model).
+    public var profiles: [GlossaryProfile] = TolkConfig.defaultProfiles(workRules: "~/Translate/rules.md")
+    public var activeProfileID: String = "work"
+
+    public static func defaultProfiles(workRules: String) -> [GlossaryProfile] {
+        [GlossaryProfile(id: "work", name: "Работа", rulesPath: workRules),
+         GlossaryProfile(id: "home", name: "Дом", rulesPath: "~/Translate/home.md")]
+    }
+
+    public var activeProfile: GlossaryProfile {
+        profiles.first { $0.id == activeProfileID } ?? profiles.first
+            ?? GlossaryProfile(id: "work", name: "Работа", rulesPath: rulesPath)
+    }
+    /// What the engine really uses.
+    public var effectiveRulesPath: String { activeProfile.rulesPath }
+    public var effectiveModel: String {
+        if let m = activeProfile.model, !m.isEmpty { return m }
+        return model
+    }
     /// Remote access to the same Ollama from outside the home network (e.g. a Cloudflare Tunnel URL).
     /// Empty = LAN only. The engine tries `ollamaURL` first, then `remoteURL`.
     public var remoteURL: String = ""
@@ -185,6 +275,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case ollamaURL, model, rulesPath, primaryLanguage, secondaryLanguage, doubleCopyInterval, useGoogleFallback
+        case fallback, profiles, activeProfileID
         case remoteURL, remoteHeaders, toneByApp
     }
 
@@ -198,10 +289,36 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         primaryLanguage = try c.decodeIfPresent(Language.self, forKey: .primaryLanguage) ?? d.primaryLanguage
         secondaryLanguage = try c.decodeIfPresent(Language.self, forKey: .secondaryLanguage) ?? d.secondaryLanguage
         doubleCopyInterval = try c.decodeIfPresent(Double.self, forKey: .doubleCopyInterval) ?? d.doubleCopyInterval
-        useGoogleFallback = try c.decodeIfPresent(Bool.self, forKey: .useGoogleFallback) ?? d.useGoogleFallback
+        // Old configs had a Google on/off switch; new ones store the fallback choice.
+        if let f = try c.decodeIfPresent(FallbackProvider.self, forKey: .fallback) {
+            fallback = f
+        } else if let google = try c.decodeIfPresent(Bool.self, forKey: .useGoogleFallback) {
+            fallback = google ? .google : .none
+        } else {
+            fallback = d.fallback
+        }
+        profiles = try c.decodeIfPresent([GlossaryProfile].self, forKey: .profiles)
+            ?? TolkConfig.defaultProfiles(workRules: rulesPath)
+        activeProfileID = try c.decodeIfPresent(String.self, forKey: .activeProfileID) ?? d.activeProfileID
         remoteURL = try c.decodeIfPresent(String.self, forKey: .remoteURL) ?? d.remoteURL
         remoteHeaders = try c.decodeIfPresent([String: String].self, forKey: .remoteHeaders) ?? d.remoteHeaders
         toneByApp = try c.decodeIfPresent([String: Tone].self, forKey: .toneByApp) ?? d.toneByApp
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(ollamaURL, forKey: .ollamaURL)
+        try c.encode(model, forKey: .model)
+        try c.encode(rulesPath, forKey: .rulesPath)
+        try c.encode(primaryLanguage, forKey: .primaryLanguage)
+        try c.encode(secondaryLanguage, forKey: .secondaryLanguage)
+        try c.encode(doubleCopyInterval, forKey: .doubleCopyInterval)
+        try c.encode(fallback, forKey: .fallback)
+        try c.encode(profiles, forKey: .profiles)
+        try c.encode(activeProfileID, forKey: .activeProfileID)
+        try c.encode(remoteURL, forKey: .remoteURL)
+        try c.encode(remoteHeaders, forKey: .remoteHeaders)
+        try c.encode(toneByApp, forKey: .toneByApp)
     }
 
     /// Tone for an app (bundle id), `.auto` if not configured.

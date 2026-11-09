@@ -49,6 +49,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     private var backTitle: NSTextField!
     private var backText: NSTextField!
     private var notesBox: NSStackView!
+    private var statusLine: StatusLineView!
     private var notesButton: NSButton!
     private var notesTask: Task<Void, Never>?
     private var lastProvider = ""
@@ -113,6 +114,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         self.backRunner = TranslationRunner(engine: engine)
         super.init()
         runner.onUpdate = { [weak self] in self?.handle($0) }
+        runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
         backRunner.onUpdate = { [weak self] in self?.handleBack($0) }
     }
 
@@ -140,6 +142,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         runner = TranslationRunner(engine: new)
         backRunner = TranslationRunner(engine: new)
         runner.onUpdate = { [weak self] in self?.handle($0) }
+        runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
         backRunner.onUpdate = { [weak self] in self?.handleBack($0) }
     }
 
@@ -248,6 +251,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         spinner.startAnimation(nil)
         showMessage("Перевожу…", color: .tertiaryLabelColor)
         showsPlaceholder = true
+        statusLine.waiting(provider: "…")
         runner.start(TranslationRequest(text: sourceText, source: requestedSource,
                                         target: requestedTarget, tone: effectiveTone))
     }
@@ -258,6 +262,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     private func handle(_ update: TranslationRunner.Update) {
         switch update {
         case let .started(provider, source, target):
+            statusLine.waiting(provider: provider)
             detectedSource = source
             detectedTarget = target
             updateDirectionTitle()
@@ -269,6 +274,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
                            color: .systemOrange)
             }
         case let .delta(chunk):
+            statusLine.chunk()
             if showsPlaceholder {
                 showsPlaceholder = false
                 textView.string = ""
@@ -281,6 +287,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
             glossaryButton.isEnabled = true
             updateSize()
         case let .fellBack(from, reason):
+            statusLine.fellBack(reason: reason)
             fellBackFrom = from
             translation = ""
             showMessage("Перевожу через запасной сервис…", color: .tertiaryLabelColor)
@@ -299,6 +306,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
                 else if notesEnabled { startNotes() }
             }
         case let .failed(message):
+            statusLine.failed(message)
             spinner.stopAnimation(nil)
             if translation.isEmpty {
                 showMessage(message, color: .systemRed)
@@ -980,6 +988,8 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         backBox.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05).cgColor
         backBox.isHidden = true
 
+        statusLine = StatusLineView()
+
         altBox = NSStackView()
         altBox.orientation = .horizontal
         altBox.spacing = 6
@@ -1046,10 +1056,11 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         replyButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         replyButton.toolTip = "Ответить партнёру: пишите по-своему, перевод — на его язык (R)"
         replyButton.isEnabled = false
+        replyButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         copyButton.title = ""
         copyButton.imagePosition = .imageOnly
         for b in [backButton!, notesButton!, glossaryButton!, copyButton!, insertButton!] {
-            b.widthAnchor.constraint(equalToConstant: 34).isActive = true  // equal icon buttons
+            b.widthAnchor.constraint(equalToConstant: 30).isActive = true  // equal icon buttons
         }
         let footer = NSStackView(views: [toneControl, UIFactory.spacer(), backButton, notesButton, glossaryButton, copyButton, insertButton, replyButton])
         footer.orientation = .horizontal
@@ -1058,7 +1069,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         let separator = NSBox()
         separator.boxType = .separator
 
-        let root = NSStackView(views: [header, noticeLabel, scrollView, altBox, notesBox, backBox, glossaryForm, separator, footer])
+        let root = NSStackView(views: [header, noticeLabel, scrollView, statusLine, altBox, notesBox, backBox, glossaryForm, separator, footer])
         root.orientation = .vertical
         root.alignment = .leading
         root.spacing = 8
@@ -1073,7 +1084,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
             root.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
             effect.widthAnchor.constraint(equalToConstant: width),
         ])
-        for v in [header, noticeLabel!, scrollView!, altBox!, notesBox!, backBox!, glossaryForm!, separator, footer] {
+        for v in [header, noticeLabel!, scrollView!, statusLine!, altBox!, notesBox!, backBox!, glossaryForm!, separator, footer] {
             v.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -inset * 2).isActive = true
         }
         noticeLabel.preferredMaxLayoutWidth = width - inset * 2

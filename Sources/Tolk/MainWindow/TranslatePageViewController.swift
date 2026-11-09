@@ -45,6 +45,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             runner.cancel()
             runner = TranslationRunner(engine: engine)
             runner.onUpdate = { [weak self] in self?.handle($0) }
+        runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
             lastTranslatedRequest = nil
             if isViewLoaded {
                 spinner.stopAnimation(nil)
@@ -53,6 +54,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         }
     }
     private var runner: TranslationRunner
+    private var statusLine: StatusLineView!
     private let debounce: Duration = .milliseconds(400)
 
     /// ⌘↩. Default (nil): copy the translation. The standalone window sets "copy and close".
@@ -101,6 +103,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         self.runner = TranslationRunner(engine: engine)
         super.init(nibName: nil, bundle: nil)
         runner.onUpdate = { [weak self] in self?.handle($0) }
+        runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -202,12 +205,14 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
                                  range: NSRange(location: 0, length: storage.length))
         }
         spinner.startAnimation(nil)
+        statusLine?.waiting(provider: "…")
         runner.start(request)
     }
 
     private func handle(_ update: TranslationRunner.Update) {
         switch update {
         case let .started(provider, source, target):
+            statusLine?.waiting(provider: provider)
             detectedSource = source
             detectedTarget = target
             providerBadge.text = UIText.providerName(provider)
@@ -218,6 +223,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
                            color: .systemOrange)
             }
         case let .delta(chunk):
+            statusLine?.chunk()
             if awaitingFirstDelta {
                 awaitingFirstDelta = false
                 setOutput("", color: .labelColor)
@@ -226,6 +232,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             outputView.textStorage?.append(NSAttributedString(string: chunk, attributes: textAttributes()))
             copyButton.isEnabled = true
         case let .fellBack(from, reason):
+            statusLine?.fellBack(reason: reason)
             fellBackFrom = from
             translation = ""
             awaitingFirstDelta = true
@@ -237,6 +244,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             spinner.stopAnimation(nil)
             awaitingFirstDelta = false
         case let .failed(message):
+            statusLine?.failed(message)
             spinner.stopAnimation(nil)
             lastTranslatedRequest = nil // allow retry with the same text
             if translation.isEmpty { setOutput(message, color: .systemRed) } else { showNotice(message, color: .systemRed) }
@@ -461,7 +469,8 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         copyButton.imagePosition = .imageLeading
         copyButton.isEnabled = false
         copyButton.toolTip = "Скопировать перевод (⌘↩)"
-        let outBottom = NSStackView(views: [noticeLabel, UIFactory.spacer(), copyButton])
+        statusLine = StatusLineView()
+        let outBottom = NSStackView(views: [statusLine, noticeLabel, UIFactory.spacer(), copyButton])
         outBottom.orientation = .horizontal
 
         let leftCard = card(inScroll, bottom: inBottom, tinted: false)

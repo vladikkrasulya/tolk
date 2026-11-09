@@ -72,8 +72,8 @@ struct HelpView: View {
                              text: "Выделите мышью область экрана — текст распознается прямо на Mac и переведётся. Если открыто окно Tolk — результат появится в «Фото и скриншоты».") { hovering in
                         AnimCanvas(active: hovering) { phase in CaptureAnim(phase: phase) }
                     }
-                    HelpCard(title: "Фото и документы", keys: [], keysNote: "раздел «Фото и скриншоты»",
-                             text: "Перетащите фото страницы, скриншот или PDF в окно — Tolk распознает текст и переведёт по абзацам.") { hovering in
+                    HelpCard(title: "Фото и документы", keys: [], keysNote: "разделы «Фото и скриншоты» и «Документы»",
+                             text: "Фото страницы или скриншот — в «Фото и скриншоты». Целый документ (Word, PDF, RTF, TXT) — в «Документы»: переведётся по абзацам и сохранится в Word с оригиналом или без.") { hovering in
                         AnimCanvas(active: hovering) { phase in DropAnim(phase: phase) }
                     }
                 }
@@ -303,6 +303,10 @@ struct PopupButtonsCard: View {
                 .font(.callout)
             }
             Text("Тон: «Авто» подбирается по программе (Slack и Telegram — чат, почта — письмо), «Чат» и «Письмо» — вручную.")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("Строка под переводом: ● зелёная — перевела модель дома, синяя — вне дома, оранжевая — запасной Google/Apple (без глоссария). Там же время до первого слова и скорость.")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("История — все переводы на этом Mac с поиском. Профиль «Работа / Дом» — меню Tolk или «Настройки»: у каждого свой глоссарий и модель.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(14)

@@ -24,6 +24,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
 
     private var panel: PopupPanel!
     private var runner: TranslationRunner
+    private var statusLine: StatusLineView!
     private var context: ReplyContext?
     private var translation = ""
     private var debounce: DispatchWorkItem?
@@ -53,6 +54,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         self.runner = TranslationRunner(engine: engine)
         super.init()
         runner.onUpdate = { [weak self] in self?.handle($0) }
+        runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
     }
 
     func replaceEngine(_ new: TranslationEngine) {
@@ -60,6 +62,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         engine = new
         runner = TranslationRunner(engine: new)
         runner.onUpdate = { [weak self] in self?.handle($0) }
+        runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
     }
 
     var window: NSWindow? { panel }
@@ -124,6 +127,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         // Keep the previous translation, dimmed, until the new one starts.
         if !translation.isEmpty { outputLabel.textColor = .tertiaryLabelColor }
         pendingFirstChunk = true
+        statusLine?.waiting(provider: "…")
         runner.start(TranslationRequest(text: text, target: ctx.partnerLanguage, tone: tone, replyTo: ctx.partnerText))
     }
 
@@ -131,15 +135,20 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
 
     private func handle(_ u: TranslationRunner.Update) {
         switch u {
-        case .started, .fellBack:
+        case let .started(provider, _, _):
+            statusLine?.waiting(provider: provider)
+        case let .fellBack(_, reason):
+            statusLine?.fellBack(reason: reason)
             break
         case let .delta(chunk):
+            statusLine?.chunk()
             if pendingFirstChunk { translation = ""; pendingFirstChunk = false }
             translation += chunk
             setOutput(translation, placeholder: false)
         case .finished:
             spinner.stopAnimation(nil)
         case let .failed(message):
+            statusLine?.failed(message)
             spinner.stopAnimation(nil)
             setOutput(message, placeholder: false, color: .systemRed)
         }
@@ -402,7 +411,8 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         footer.orientation = .horizontal
         footer.spacing = 6
 
-        let root = NSStackView(views: [header, partner, inputBox, outputRow, footer])
+        statusLine = StatusLineView()
+        let root = NSStackView(views: [header, partner, inputBox, outputRow, statusLine, footer])
         root.orientation = .vertical
         root.alignment = .leading
         root.spacing = 10

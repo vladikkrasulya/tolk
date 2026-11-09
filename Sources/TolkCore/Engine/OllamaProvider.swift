@@ -20,8 +20,8 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
         self.lanURL = Self.normalize(config.ollamaURL) ?? URL(string: "http://127.0.0.1:11434")!
         self.remoteURL = Self.normalize(config.remoteURL)
         self.remoteHeaders = config.remoteHeaders.filter { !$0.key.isEmpty }
-        self.model = config.model
-        self.name = OllamaProvider.displayName(for: config.model)
+        self.model = config.effectiveModel
+        self.name = OllamaProvider.displayName(for: config.effectiveModel)
         self.rules = rules
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = 90   // max silence between bytes (cold model load can take a while)
@@ -69,6 +69,9 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
         return (resp as? HTTPURLResponse)?.statusCode == 200
     }
 
+    /// True when the last availability check picked the remote address.
+    public var isUsingRemote: Bool { lock.withLock { usingRemote } }
+
     /// Adds the access headers when talking to the remote address.
     func authorize(_ req: inout URLRequest) {
         guard lock.withLock({ usingRemote }) else { return }
@@ -83,6 +86,7 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
         let body: [String: Any] = [
             "model": model,
             "stream": true,
+            "stream_options": ["include_usage": true],
             // Without this Qwen 3.6 thinks for a minute; think:false and /no_think don't work.
             "reasoning_effort": "none",
             // Low temperature: the same phrase should translate the same way every time.
@@ -117,6 +121,9 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
                         guard let data = payload.data(using: .utf8),
                               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
                         else { continue }
+                        if let u = obj["usage"] as? [String: Any], let n = u["completion_tokens"] as? Int {
+                            UsageBox.current?.completionTokens = n
+                        }
                         if let err = obj["error"] {
                             throw TolkError.badResponse("\(name): \(Self.describe(err))")
                         }
