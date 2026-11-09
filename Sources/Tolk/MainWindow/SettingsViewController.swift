@@ -214,6 +214,61 @@ final class SettingsModel: ObservableObject {
         config.rulesPath = (url.path as NSString).abbreviatingWithTildeInPath
     }
 
+    func revealAutocompleteModel() {
+        let url = URL(fileURLWithPath: (config.autocompleteModel as NSString).expandingTildeInPath)
+        if FileManager.default.fileExists(atPath: url.path) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        else { NSWorkspace.shared.open(url.deletingLastPathComponent()) }
+    }
+
+    /// Running regular apps (name, bundle id) for "add instructions for an app", sorted by name.
+    static func runningApps() -> [(name: String, id: String)] {
+        var seen = Set<String>()
+        return NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.bundleIdentifier != Bundle.main.bundleIdentifier }
+            .compactMap { a -> (String, String)? in
+                guard let id = a.bundleIdentifier, seen.insert(id).inserted else { return nil }
+                return (a.localizedName ?? id, id)
+            }
+            .sorted { $0.0.localizedCaseInsensitiveCompare($1.0) == .orderedAscending }
+    }
+
+    /// `.gguf` files in the models folder (paths with ~), plus the current one if it lives elsewhere.
+    func ggufModels() -> [String] {
+        let dir = (("~/Library/Application Support/Tolk/models") as NSString).expandingTildeInPath
+        let files = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
+            .filter { $0.lowercased().hasSuffix(".gguf") }.sorted()
+            .map { "~/Library/Application Support/Tolk/models/" + $0 }
+        var out = files
+        if !out.contains(config.autocompleteModel) { out.insert(config.autocompleteModel, at: 0) }
+        return out
+    }
+
+    func addToneApp(_ id: String) {
+        if config.toneByApp[id] == nil { config.toneByApp[id] = .chat }
+    }
+
+    func addAppInstruction(_ id: String) {
+        if config.autocompleteAppInstructions[id] == nil { config.autocompleteAppInstructions[id] = "" }
+    }
+
+    /// Asks, then tells the style feature to forget everything it learned.
+    func confirmDeleteLearned() {
+        let a = NSAlert()
+        a.messageText = "Удалить выученное?"
+        a.informativeText = "Примеры ваших сообщений, по которым подсказки подстраиваются под ваш стиль, будут стёрты. Это нельзя отменить."
+        a.addButton(withTitle: "Удалить")
+        a.addButton(withTitle: "Отмена")
+        a.alertStyle = .warning
+        if a.runModal() == .alertFirstButtonReturn {
+            NotificationCenter.default.post(name: Notification.Name("TolkStyleMemoryDeleteAll"), object: nil)
+        }
+    }
+
+    static func appName(_ bundleID: String) -> String {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return bundleID }
+        return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+    }
+
     func revealRules() {
         if rulesExists { NSWorkspace.shared.activateFileViewerSelecting([rulesURL]) }
         else { NSSound.beep() }
@@ -337,6 +392,8 @@ struct SettingsView: View {
             remoteSection
             languageSection
             behaviorSection
+            autocompleteSection
+            toneSection
             rulesSection
             accessSection
             aboutSection
@@ -457,6 +514,129 @@ struct SettingsView: View {
             Text("Поведение")
         } footer: {
             Text("Интервал — сколько секунд может пройти между двумя нажатиями ⌘C.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // Автодополнение
+
+    private var autocompleteSection: some View {
+        Section {
+            Toggle("Автодополнение (Tab)", isOn: $model.config.autocomplete)
+            HStack {
+                Picker("Модель", selection: $model.config.autocompleteModel) {
+                    ForEach(model.ggufModels(), id: \.self) { path in
+                        Text((path as NSString).lastPathComponent).tag(path)
+                    }
+                }
+                Button("Показать в Finder") { model.revealAutocompleteModel() }
+            }
+            if model.config.autocompleteOffApps.isEmpty {
+                Text("Выключенных программ нет.").font(.callout).foregroundStyle(.secondary)
+            } else {
+                ForEach(model.config.autocompleteOffApps, id: \.self) { id in
+                    HStack {
+                        Text(SettingsModel.appName(id))
+                        Text(id).font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button(role: .destructive) {
+                            model.config.autocompleteOffApps.removeAll { $0 == id }
+                        } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+            Picker("Длина подсказки", selection: $model.config.autocompleteLength) {
+                Text("Короткая (до 3 слов)").tag("short")
+                Text("Средняя (до 6)").tag("medium")
+                Text("Длинная (до 12)").tag("long")
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Общие инструкции").font(.callout)
+                TextEditor(text: $model.config.autocompleteInstructions)
+                    .font(.body).frame(minHeight: 54, maxHeight: 90)
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.3)))
+                Text("Например: «пиши коротко», «на Вы», «без эмодзи». Действуют везде.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Инструкции по программам").font(.callout)
+                    Spacer()
+                    Menu("Добавить программу") {
+                        ForEach(SettingsModel.runningApps(), id: \.id) { app in
+                            Button(app.name) { model.addAppInstruction(app.id) }
+                                .disabled(model.config.autocompleteAppInstructions[app.id] != nil)
+                        }
+                    }
+                    .fixedSize()
+                }
+                if model.config.autocompleteAppInstructions.isEmpty {
+                    Text("Нет. Выберите запущенную программу, чтобы задать ей свои инструкции.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(model.config.autocompleteAppInstructions.keys.sorted(), id: \.self) { id in
+                    HStack {
+                        Text(SettingsModel.appName(id)).frame(width: 120, alignment: .leading).lineLimit(1)
+                        TextField("Инструкции для этой программы", text: Binding(
+                            get: { model.config.autocompleteAppInstructions[id] ?? "" },
+                            set: { model.config.autocompleteAppInstructions[id] = $0 }))
+                        Button(role: .destructive) {
+                            model.config.autocompleteAppInstructions[id] = nil
+                        } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+            Toggle("Глоссарий и тон", isOn: $model.config.autocompleteUseGlossary)
+            Toggle("Буфер обмена", isOn: $model.config.autocompleteClipboard)
+            Toggle("Эмодзи (:fire → 🔥)", isOn: $model.config.autocompleteEmoji)
+            Toggle("Исправлять опечатки", isOn: $model.config.autocorrect)
+            Toggle("Учиться на моих сообщениях", isOn: $model.config.autocompleteLearnStyle)
+            Button("Удалить выученное…", role: .destructive) { model.confirmDeleteLearned() }
+        } header: {
+            Text("Автодополнение")
+        } footer: {
+            Text("Серый текст у курсора в любой программе: Tab принимает слово, → всё, Esc скрывает. Модель работает локально на этом Mac. «Глоссарий и тон» берёт термины из активного профиля и тон программы; «Буфер обмена» подмешивает недавно скопированный короткий текст (пароли и ключи отбрасываются). Список ниже — где автодополнение выключено.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // Тон по программам
+
+    private var toneSection: some View {
+        Section {
+            if model.config.toneByApp.isEmpty {
+                Text("Нет. Тон выбирается автоматически по тексту.").font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(model.config.toneByApp.keys.sorted(), id: \.self) { id in
+                HStack {
+                    Text(SettingsModel.appName(id))
+                    Text(id).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer()
+                    Picker("", selection: Binding(
+                        get: { model.config.toneByApp[id] ?? .auto },
+                        set: { model.config.toneByApp[id] = $0 })) {
+                        Text("Авто").tag(Tone.auto)
+                        Text("Чат").tag(Tone.chat)
+                        Text("Официально").tag(Tone.formal)
+                    }
+                    .labelsHidden().fixedSize()
+                    Button(role: .destructive) { model.config.toneByApp[id] = nil } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless)
+                }
+            }
+            Menu("Добавить программу") {
+                ForEach(SettingsModel.runningApps(), id: \.id) { app in
+                    Button(app.name) { model.addToneApp(app.id) }
+                        .disabled(model.config.toneByApp[app.id] != nil)
+                }
+            }
+            .fixedSize()
+        } header: {
+            Text("Тон по программам")
+        } footer: {
+            Text("Какой тон использовать в переводе и в подсказках, когда активна эта программа: Чат — разговорно, Официально — вежливо.")
                 .foregroundStyle(.secondary)
         }
     }

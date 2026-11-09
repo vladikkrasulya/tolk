@@ -77,3 +77,22 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   one form of address («Вы»), «Добрый день» → Hello / Hi <Name>; chat tone keeps slang but never adds swearing.
 - Measured on ~/Translate/test-corpus (50 Kadam texts): Gemma vs Qwen 21/11/18 (wins/losses/ties);
   Gemma with rules vs without: 26 better, 3 worse, 20 same.
+
+## v0.6.0 — system-wide autocomplete (in the spirit of Cotypist)
+- `Sources/Tolk/Autocomplete/`: ghost text after the caret in any app; Tab = next word, → = all, Esc = dismiss.
+  Off by default (menu bar → Автодополнение); terminals/IDEs and password fields are excluded.
+- Model runs ON THIS MAC (no network: suggestions must land in ~100–300 ms): Homebrew `llama-server`
+  on 127.0.0.1:8178, started/stopped by Tolk (`LocalModelServer`), one slot, prompt cache on.
+  Default `gemma-4-E4B-it-q4_0.gguf` (Google QAT) in ~/Library/Application Support/Tolk/models.
+  The base E4B GGUF drifted into noise; the it model with a raw prompt (no chat template) won.
+  Prompt must not end with a space (models jump to digits/dates). Measurements: ~/Translate/test-corpus/autocomplete-eval.md.
+- `FocusedField` reads text before the caret and the caret rect via Accessibility (character-before-caret rect
+  first: zero-length ranges return whole paragraphs in some apps). `ScreenContext` adds the visible conversation
+  (AX first, OCR of the window as fallback; cached, refreshed ≤ every 4 s) at the START of the prompt so the
+  llama.cpp KV cache is reused while typing (warm ≈120 ms, after a context change ≈400 ms).
+- Extension points (`AutocompleteHooks.swift`, wired in `AutocompleteFeatures.configure`):
+  instant providers without the model — `Autocorrect` (NSSpellChecker, skips glossary/adtech slang) and
+  `EmojiSuggestions` (`:fire`, `:огонь`); `PromptExtras` — instructions (global, per app, tone, matching glossary
+  terms), fresh clipboard, length; `StyleMemory` — opt-in, AES-GCM encrypted local store of sent/accepted phrases
+  (key in Keychain), 2–3 similar ones as style examples; «Удалить выученное» wipes file and key.
+- Every switch is in Settings and in the menu bar submenu; nothing requires editing tolk.json.

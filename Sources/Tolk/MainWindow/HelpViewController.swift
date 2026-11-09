@@ -77,6 +77,7 @@ struct HelpView: View {
                         AnimCanvas(active: hovering) { phase in DropAnim(phase: phase) }
                     }
                 }
+                AutocompleteHelpCard()
                 PopupButtonsCard()
                 TroubleCard()
             }
@@ -308,6 +309,23 @@ struct PopupButtonsCard: View {
                 .font(.caption).foregroundStyle(.secondary)
             Text("История — все переводы на этом Mac с поиском. Профиль «Работа / Дом» — меню Tolk или «Настройки»: у каждого свой глоссарий и модель.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)))
+    }
+}
+
+struct AutocompleteHelpCard: View {
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "text.cursor").font(.title2).foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Автодополнение").font(.headline)
+                Text("Включается в меню Tolk. Пока вы печатаете, серый текст у курсора предлагает продолжение: Tab или → принимает, Esc скрывает. В терминалах и редакторах кода выключено — список в «Настройках».")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -271,12 +271,43 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         "com.apple.mail": .formal, "com.microsoft.Outlook": .formal, "com.readdle.smartemail-Mac": .formal,
     ]
 
+    /// System-wide autocomplete (local model, ghost text, Tab accepts).
+    public var autocomplete: Bool = false
+    /// GGUF model for autocomplete (same as `AutocompletePrompt.defaultModelPath`; TolkCore cannot see the app target).
+    public var autocompleteModel: String = "~/Library/Application Support/Tolk/models/gemma-4-E4B-it-q4_0.gguf"
+    /// Bundle ids where autocomplete stays off (terminals, IDEs).
+    public var autocompleteOffApps: [String] = TolkConfig.defaultAutocompleteOffApps
+    /// Suggestion length: "short" (~3 words), "medium" (~6), "long" (~12).
+    public var autocompleteLength: String = "medium"
+    /// Global writing instructions for suggestions.
+    public var autocompleteInstructions: String = ""
+    /// Per-app instructions, bundle id -> text.
+    public var autocompleteAppInstructions: [String: String] = [:]
+    /// Use the active glossary profile + tone-by-app in suggestions.
+    public var autocompleteUseGlossary: Bool = true
+    /// Add recently copied text to the prompt.
+    public var autocompleteClipboard: Bool = false
+    /// ":code" -> emoji suggestions.
+    public var autocompleteEmoji: Bool = true
+    /// Typo fixes as ghost text (Tab applies).
+    public var autocorrect: Bool = true
+    /// Remember accepted/sent phrases locally and use them as style examples.
+    public var autocompleteLearnStyle: Bool = false
+
+    public static let defaultAutocompleteOffApps: [String] = [
+        "com.apple.Terminal", "com.googlecode.iterm2", "com.apple.dt.Xcode",
+        "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92",
+    ]
+
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
         case ollamaURL, model, rulesPath, primaryLanguage, secondaryLanguage, doubleCopyInterval, useGoogleFallback
         case fallback, profiles, activeProfileID
         case remoteURL, remoteHeaders, toneByApp
+        case autocomplete, autocompleteModel, autocompleteOffApps
+        case autocompleteLength, autocompleteInstructions, autocompleteAppInstructions, autocompleteUseGlossary
+        case autocompleteClipboard, autocompleteEmoji, autocorrect, autocompleteLearnStyle
     }
 
     /// Every key is optional: `{"model": "x"}` keeps all other defaults.
@@ -303,6 +334,17 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         remoteURL = try c.decodeIfPresent(String.self, forKey: .remoteURL) ?? d.remoteURL
         remoteHeaders = try c.decodeIfPresent([String: String].self, forKey: .remoteHeaders) ?? d.remoteHeaders
         toneByApp = try c.decodeIfPresent([String: Tone].self, forKey: .toneByApp) ?? d.toneByApp
+        autocomplete = try c.decodeIfPresent(Bool.self, forKey: .autocomplete) ?? d.autocomplete
+        autocompleteModel = try c.decodeIfPresent(String.self, forKey: .autocompleteModel) ?? d.autocompleteModel
+        autocompleteOffApps = try c.decodeIfPresent([String].self, forKey: .autocompleteOffApps) ?? d.autocompleteOffApps
+        autocompleteLength = try c.decodeIfPresent(String.self, forKey: .autocompleteLength) ?? d.autocompleteLength
+        autocompleteInstructions = try c.decodeIfPresent(String.self, forKey: .autocompleteInstructions) ?? d.autocompleteInstructions
+        autocompleteAppInstructions = try c.decodeIfPresent([String: String].self, forKey: .autocompleteAppInstructions) ?? d.autocompleteAppInstructions
+        autocompleteUseGlossary = try c.decodeIfPresent(Bool.self, forKey: .autocompleteUseGlossary) ?? d.autocompleteUseGlossary
+        autocompleteClipboard = try c.decodeIfPresent(Bool.self, forKey: .autocompleteClipboard) ?? d.autocompleteClipboard
+        autocompleteEmoji = try c.decodeIfPresent(Bool.self, forKey: .autocompleteEmoji) ?? d.autocompleteEmoji
+        autocorrect = try c.decodeIfPresent(Bool.self, forKey: .autocorrect) ?? d.autocorrect
+        autocompleteLearnStyle = try c.decodeIfPresent(Bool.self, forKey: .autocompleteLearnStyle) ?? d.autocompleteLearnStyle
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -319,6 +361,17 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         try c.encode(remoteURL, forKey: .remoteURL)
         try c.encode(remoteHeaders, forKey: .remoteHeaders)
         try c.encode(toneByApp, forKey: .toneByApp)
+        try c.encode(autocomplete, forKey: .autocomplete)
+        try c.encode(autocompleteModel, forKey: .autocompleteModel)
+        try c.encode(autocompleteOffApps, forKey: .autocompleteOffApps)
+        try c.encode(autocompleteLength, forKey: .autocompleteLength)
+        try c.encode(autocompleteInstructions, forKey: .autocompleteInstructions)
+        try c.encode(autocompleteAppInstructions, forKey: .autocompleteAppInstructions)
+        try c.encode(autocompleteUseGlossary, forKey: .autocompleteUseGlossary)
+        try c.encode(autocompleteClipboard, forKey: .autocompleteClipboard)
+        try c.encode(autocompleteEmoji, forKey: .autocompleteEmoji)
+        try c.encode(autocorrect, forKey: .autocorrect)
+        try c.encode(autocompleteLearnStyle, forKey: .autocompleteLearnStyle)
     }
 
     /// Tone for an app (bundle id), `.auto` if not configured.

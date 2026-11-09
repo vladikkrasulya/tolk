@@ -33,6 +33,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastHealth: Bool?
     private var profileItem: NSMenuItem!
 
+    // Autocomplete
+    private var acServer: LocalModelServer!
+    private var acController: AutocompleteController!
+    private var acItem: NSMenuItem!
+    private var acStatusItem: NSMenuItem!
+    private var acAppItem: NSMenuItem!
+    private var acFlagItems: [(item: NSMenuItem, keyPath: WritableKeyPath<TolkConfig, Bool>)] = []
+    private var acLengthItems: [NSMenuItem] = []
+    private var acTimer: Timer?
+    private var lastExternalApp: NSRunningApplication?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         engine = DefaultTranslationEngine(config: config)
 
@@ -80,8 +91,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Closing the main window stops a long document translation (it would hold an Ollama slot).
         mainWindow.onClose = { [weak self] in self?.imagePage.cancelWork(); self?.documentsPage.cancelWork() }
 
+        setupAutocomplete()
         setupMenu()
         startMonitor()
+        applyAutocomplete()
         startHealthChecks()
 
         NotificationCenter.default.addObserver(self, selector: #selector(configChanged),
@@ -145,7 +158,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
-    func applicationWillTerminate(_ notification: Notification) { Diagnostics.markCleanExit() }
+    func applicationWillTerminate(_ notification: Notification) {
+        acController?.stop()
+        acServer?.stop() // the llama-server child must not outlive Tolk
+        Diagnostics.markCleanExit()
+    }
 
     /// Every feature gets the engine through a history recorder with its own origin
     /// (documents are not recorded paragraph by paragraph).
@@ -179,7 +196,100 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitor = DoubleCopyMonitor(interval: config.doubleCopyInterval)
         monitor.onTrigger = { [weak self] text, point in self?.doubleCopy(text, at: point) }
         startMonitor()
+        applyAutocomplete()
         checkHealth()
+    }
+
+    // MARK: - Autocomplete
+
+    private func setupAutocomplete() {
+        acServer = LocalModelServer(modelPath: config.autocompleteModel)
+        acController = AutocompleteController(server: acServer)
+        acServer.onStateChange = { [weak self] _ in self?.refreshAutocompleteMenu() }
+        let me = Bundle.main.bundleIdentifier
+        lastExternalApp = NSWorkspace.shared.frontmostApplication.flatMap { $0.bundleIdentifier == me ? nil : $0 }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(appActivated(_:)),
+            name: NSWorkspace.didActivateApplicationNotification, object: nil)
+    }
+
+    @objc private func appActivated(_ n: Notification) {
+        guard let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              app.bundleIdentifier != Bundle.main.bundleIdentifier,
+              app.activationPolicy == .regular else { return }
+        lastExternalApp = app
+        refreshAutocompleteMenu()
+    }
+
+    /// Brings server + controller in line with the config (on launch and on every settings change).
+    private func applyAutocomplete() {
+        acController.disabledApps = Set(config.autocompleteOffApps)
+        AutocompleteFeatures.configure(acController, config: config)
+        acServer.setModel(config.autocompleteModel)
+        acTimer?.invalidate(); acTimer = nil
+        if config.autocomplete {
+            if acServer.state == .stopped { acServer.start() }
+            if !acController.isRunning && !acController.start() {
+                _ = DoubleCopyMonitor.hasAccessibility(prompt: true) // same flow as double Cmd+C
+                acTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
+                    guard let self else { t.invalidate(); return }
+                    if !self.config.autocomplete || self.acController.start() { t.invalidate(); self.acTimer = nil }
+                }
+            }
+        } else {
+            acController.stop()
+            acServer.stop()
+        }
+        refreshAutocompleteMenu()
+    }
+
+    private func refreshAutocompleteMenu() {
+        guard acItem != nil else { return }
+        acItem.state = config.autocomplete ? .on : .off
+        acStatusItem.isHidden = !config.autocomplete
+        for f in acFlagItems { f.item.state = config[keyPath: f.keyPath] ? .on : .off }
+        for it in acLengthItems { it.state = (it.representedObject as? String) == config.autocompleteLength ? .on : .off }
+        switch acServer.state {
+        case .stopped: acStatusItem.title = "\(acServer.modelName): остановлена"
+        case .starting: acStatusItem.title = "\(acServer.modelName) загружается…"
+        case .ready: acStatusItem.title = "\(acServer.modelName): готово"
+        case .failed(let e): acStatusItem.title = "Ошибка: \(e)"
+        }
+        if let app = lastExternalApp, let id = app.bundleIdentifier {
+            let off = config.autocompleteOffApps.contains(id)
+            acAppItem.title = "\(off ? "Включить" : "Выключить") в \(app.localizedName ?? id)"
+            acAppItem.isHidden = false
+        } else {
+            acAppItem.isHidden = true
+        }
+    }
+
+    @objc private func toggleAutocomplete() {
+        var c = config
+        c.autocomplete.toggle()
+        try? c.save()
+    }
+
+    @objc private func toggleAutocompleteFlag(_ sender: NSMenuItem) {
+        guard acFlagItems.indices.contains(sender.tag) else { return }
+        var c = config
+        c[keyPath: acFlagItems[sender.tag].keyPath].toggle()
+        try? c.save()
+    }
+
+    @objc private func setAutocompleteLength(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        var c = config
+        c.autocompleteLength = key
+        try? c.save()
+    }
+
+    @objc private func toggleAutocompleteForApp() {
+        guard let id = lastExternalApp?.bundleIdentifier else { return }
+        var c = config
+        if let i = c.autocompleteOffApps.firstIndex(of: id) { c.autocompleteOffApps.remove(at: i) }
+        else { c.autocompleteOffApps.append(id) }
+        try? c.save()
     }
 
     // MARK: - Double Cmd+C
@@ -238,6 +348,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(item("Перевести и заменить выделенное  ⌃⌥T", #selector(quickTranslate)))
         menu.addItem(item("Причесать выделенное  ⌃⌥P", #selector(quickPolish)))
+        menu.addItem(.separator())
+        let acMenuItem = NSMenuItem(title: "Автодополнение", action: nil, keyEquivalent: "")
+        let acMenu = NSMenu()
+        acItem = item("Включено (Tab)", #selector(toggleAutocomplete))
+        acMenu.addItem(acItem)
+        acStatusItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        acStatusItem.isEnabled = false
+        acMenu.addItem(acStatusItem)
+        acMenu.addItem(.separator())
+        let flags: [(String, WritableKeyPath<TolkConfig, Bool>)] = [
+            ("Исправлять опечатки", \.autocorrect), ("Эмодзи", \.autocompleteEmoji),
+            ("Буфер обмена", \.autocompleteClipboard), ("Учиться на моих сообщениях", \.autocompleteLearnStyle)]
+        acFlagItems = flags.map { (title, kp) in (item(title, #selector(toggleAutocompleteFlag(_:))), kp) }
+        for (i, f) in acFlagItems.enumerated() { f.item.tag = i; acMenu.addItem(f.item) }
+        let lengthItem = NSMenuItem(title: "Длина", action: nil, keyEquivalent: "")
+        let lengthMenu = NSMenu()
+        for (key, title) in [("short", "Короткая"), ("medium", "Средняя"), ("long", "Длинная")] {
+            let it = item(title, #selector(setAutocompleteLength(_:)))
+            it.representedObject = key
+            lengthMenu.addItem(it)
+            acLengthItems.append(it)
+        }
+        lengthItem.submenu = lengthMenu
+        acMenu.addItem(lengthItem)
+        acMenu.addItem(.separator())
+        acAppItem = item("", #selector(toggleAutocompleteForApp))
+        acMenu.addItem(acAppItem)
+        acMenuItem.submenu = acMenu
+        menu.addItem(acMenuItem)
+        refreshAutocompleteMenu()
         menu.addItem(.separator())
         profileItem = NSMenuItem(title: "Профиль", action: nil, keyEquivalent: "")
         profileItem.submenu = NSMenu()
