@@ -107,7 +107,6 @@ public enum AutocompleteSafety {
 
         public func isSilenced(_ word: String) -> Bool { silenced.contains(word.lowercased()) }
         public var silencedWords: [String] { silenced }
-        public var pendingCount: Int { counts.count }
 
         public mutating func reject(_ word: String) {
             let key = word.lowercased()

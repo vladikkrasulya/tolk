@@ -78,7 +78,10 @@ struct HotKeyRecorderRow: View {
         if recording { stopRecording(); return }
         recording = true
         message = nil
+        let host = NSApp.keyWindow
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // The settings window was closed / another window took the keys while recording: stop swallowing keystrokes.
+            guard let host, host.isVisible, event.window === host else { stopRecording(); return event }
             handle(event)
             return nil // swallow while recording
         }

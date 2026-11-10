@@ -8,22 +8,35 @@ public struct ServerRecord: Codable, Equatable, Sendable {
     public var pid: Int32
     public var port: Int
     public var model: String
-    public init(pid: Int32, port: Int, model: String) { self.pid = pid; self.port = port; self.model = model }
+    /// pid of the Tolk process that started the server (nil in records written by older versions).
+    public var owner: Int32?
+    public init(pid: Int32, port: Int, model: String, owner: Int32? = nil) {
+        self.pid = pid; self.port = port; self.model = model; self.owner = owner
+    }
 }
 
 public enum PortDecision: Equatable, Sendable {
     case startOwn                 // port is free
     case killOrphanThenStart(Int32) // a llama-server left by a previous Tolk: stop it, start ours
     case portBusy                 // somebody else's process: never use it, show «порт занят»
+    case ownedByOtherTolk(Int32)  // a live OTHER Tolk started it: leave it alone, no kill, no retries
 }
 
 public enum ServerLifecycle {
     /// `listenerPid` — pid listening on the port (nil = nobody); `listenerIsLlama` — its executable is llama-server.
     /// The pid file is the proof that Tolk started it: pid, port and (a llama-server) must all match.
-    public static func decide(listenerPid: Int32?, listenerIsLlama: Bool, record: ServerRecord?, port: Int) -> PortDecision {
+    /// `myPid` / `isAlive`: the server of a LIVE other Tolk is never an orphan (two Tolk instances used to kill each
+    /// other's llama-server every 2 s); it is an orphan only when its owner is gone (or the record has no owner).
+    public static func decide(listenerPid: Int32?, listenerIsLlama: Bool, record: ServerRecord?, port: Int,
+                              myPid: Int32 = getpid(), isAlive: (Int32) -> Bool = processAlive) -> PortDecision {
         guard let pid = listenerPid else { return .startOwn }
-        if let r = record, r.pid == pid, r.port == port, listenerIsLlama { return .killOrphanThenStart(pid) }
-        return .portBusy
+        guard let r = record, r.pid == pid, r.port == port, listenerIsLlama else { return .portBusy }
+        if let owner = r.owner, owner != myPid, isAlive(owner) { return .ownedByOtherTolk(owner) }
+        return .killOrphanThenStart(pid)
+    }
+
+    public static func processAlive(_ pid: Int32) -> Bool {
+        pid > 0 && (kill(pid, 0) == 0 || errno == EPERM)
     }
 
     /// Pauses before automatic restarts after the server process dies / fails to load: 2, 10, 60 s, then stop.
@@ -38,9 +51,9 @@ public enum ServerLifecycle {
     /// The watcher subshell outlives a killed wrapper, so the child dies in every case.
     public static func wrapperArguments(command: [String]) -> [String] {
         let script = #"""
-        trap 'kill $c 2>/dev/null; exit 143' TERM INT HUP
+        trap 'kill $c $w 2>/dev/null; exit 143' TERM INT HUP
         "$@" & c=$!
-        ( while kill -0 $PPID 2>/dev/null; do sleep 2; done; kill $c 2>/dev/null ) & w=$!
+        ( while kill -0 $PPID 2>/dev/null && kill -0 $c 2>/dev/null; do sleep 2; done; kill $c 2>/dev/null ) & w=$!
         wait $c; code=$?
         kill $w 2>/dev/null
         exit $code
@@ -62,7 +75,11 @@ public enum ServerLifecycle {
         if let d = try? JSONEncoder().encode(r) { try? d.write(to: URL(fileURLWithPath: path), options: .atomic) }
     }
 
-    public static func removeRecord(at path: String = recordPath) { try? FileManager.default.removeItem(atPath: path) }
+    /// Never deletes the record of a live OTHER Tolk (it still manages that server).
+    public static func removeRecord(at path: String = recordPath, myPid: Int32 = getpid(), isAlive: (Int32) -> Bool = processAlive) {
+        if let r = readRecord(at: path), let owner = r.owner, owner != myPid, isAlive(owner) { return }
+        try? FileManager.default.removeItem(atPath: path)
+    }
 
     // MARK: Process inspection (blocking, short: call off the main thread)
 
@@ -94,6 +111,18 @@ public enum ServerLifecycle {
             Thread.sleep(forTimeInterval: 0.1)
         }
         kill(pid, SIGKILL)
+    }
+}
+
+/// A second Tolk (installed + debug build, or a double launch) must not fight the first one for the model server,
+/// the event taps and the hotkeys: it finds the other instance and stops.
+public enum SingleInstance {
+    public struct Proc: Sendable { public var pid: Int32; public var bundleID: String?; public var executable: String?
+        public init(pid: Int32, bundleID: String?, executable: String?) { self.pid = pid; self.bundleID = bundleID; self.executable = executable } }
+
+    /// pid of another running Tolk (same bundle id, or an executable named «Tolk» — a bare debug binary has no bundle id).
+    public static func otherInstance(in running: [Proc], myPid: Int32, bundleID: String = "local.vk.tolk") -> Int32? {
+        running.first { $0.pid != myPid && ($0.bundleID == bundleID || $0.executable == "Tolk") }?.pid
     }
 }
 

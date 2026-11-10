@@ -362,8 +362,11 @@ public final class ACStatsStore: @unchecked Sendable {
             if let d = try? JSONDecoder().decode(ACStatsData.self, from: raw) {
                 _data = d
                 _data.prune(calendar: calendar)
+            } else {
+                // Broken file: keep a copy, start over (the next write replaces it).
+                let backup = path + ".corrupt"
+                if !FileManager.default.fileExists(atPath: backup) { try? raw.write(to: URL(fileURLWithPath: backup)) }
             }
-            // Broken file: start over, the next write replaces it.
             return
         }
         if let logPath, let text = try? String(contentsOfFile: logPath, encoding: .utf8) {
@@ -427,6 +430,8 @@ public final class ACStatsStore: @unchecked Sendable {
         guard let raw = try? enc.encode(_data) else { return }
         let url = URL(fileURLWithPath: path)
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if (try? raw.write(to: url, options: .atomic)) != nil { dirty = false; lastWrite = now }
+        // Read-only disk / no space: back off for a full interval instead of re-encoding on every event.
+        lastWrite = now
+        if (try? raw.write(to: url, options: .atomic)) != nil { dirty = false }
     }
 }

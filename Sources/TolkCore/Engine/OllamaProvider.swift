@@ -12,6 +12,11 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
     private var usingRemote = false
     /// The address that answered the last availability check.
     var baseURL: URL { lock.withLock { usingRemote ? (remoteURL ?? lanURL) : lanURL } }
+    /// Address AND its access headers from ONE lock acquisition: a concurrent availability check flipping `usingRemote`
+    /// between two separate reads used to send the LAN URL with the remote headers (or the other way round).
+    func endpoint() -> (url: URL, headers: [String: String]) {
+        lock.withLock { usingRemote ? (remoteURL ?? lanURL, remoteHeaders) : (lanURL, [:]) }
+    }
     let model: String
     let rules: RulesStore
     private let session: URLSession
@@ -43,10 +48,11 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
 
     /// Is the model in memory right now (GET /api/ps, 2 s)? nil = could not find out.
     public func isModelLoaded() async -> Bool? {
-        var req = URLRequest(url: baseURL.appendingPathComponent("api/ps"))
+        let ep = endpoint()
+        var req = URLRequest(url: ep.url.appendingPathComponent("api/ps"))
         req.timeoutInterval = 2
         req.cachePolicy = .reloadIgnoringLocalCacheData
-        authorize(&req)
+        ep.headers.forEach { req.setValue($0.value, forHTTPHeaderField: $0.key) }
         guard let (data, resp) = try? await session.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -102,8 +108,8 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
         let once = NSLock(); var done = false
         return await withCheckedContinuation { (c: CheckedContinuation<Readiness, Never>) in
             func finish(_ v: Readiness) { once.lock(); defer { once.unlock() }; if !done { done = true; c.resume(returning: v) } }
-            Task { finish(await load.value ? .ready : .failed) }
-            Task { try? await Task.sleep(nanoseconds: UInt64(timeout * 1e9)); finish(.stillLoading) }
+            let sleeper = Task { try? await Task.sleep(nanoseconds: UInt64(timeout * 1e9)); if !Task.isCancelled { finish(.stillLoading) } }
+            Task { finish(await load.value ? .ready : .failed); sleeper.cancel() } // the timer must not linger for the full timeout
         }
     }
 
@@ -142,8 +148,9 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
         req.timeoutInterval = timeout
         req.cachePolicy = .reloadIgnoringLocalCacheData
         headers.forEach { req.setValue($0.value, forHTTPHeaderField: $0.key) }
-        guard let (_, resp) = try? await session.data(for: req) else { return false }
-        return (resp as? HTTPURLResponse)?.statusCode == 200
+        guard let (data, resp) = try? await session.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200 else { return false }
+        // A captive portal / Cloudflare Access login page also answers 200: only Ollama's JSON counts.
+        return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["version"] is String
     }
 
     /// True when the last availability check picked the remote address.
@@ -164,7 +171,8 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
 
     /// One streamed chat completion with the sampling settings shared by translation and the editor pass.
     func makeChatRequest(system: String, user: String) throws -> URLRequest {
-        var req = URLRequest(url: baseURL.appendingPathComponent("v1/chat/completions"))
+        let ep = endpoint()
+        var req = URLRequest(url: ep.url.appendingPathComponent("v1/chat/completions"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
@@ -184,7 +192,7 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
             ],
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        authorize(&req)
+        ep.headers.forEach { req.setValue($0.value, forHTTPHeaderField: $0.key) }
         return req
     }
 

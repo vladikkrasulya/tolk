@@ -83,6 +83,12 @@ final class FileKeyStore: StyleKeyStore, @unchecked Sendable {
 
     func loadOrCreate() -> SymmetricKey? {
         if let d = try? Data(contentsOf: url), d.count == 32 { return SymmetricKey(data: d) }
+        if FileManager.default.fileExists(atPath: url.path) {
+            // A key file that is there but not 32 bytes (truncated, being written): never replace it with a new key —
+            // style.db would become undecryptable. Style memory stays paused instead.
+            Diagnostics.log("style: style.key exists but is not a valid key — kept, style memory paused")
+            return nil
+        }
         if legacy.hasItem {
             guard let old = legacy.loadExisting() else {
                 Diagnostics.log("style: keychain key not readable (access denied?) — kept, style memory paused")

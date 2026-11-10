@@ -107,6 +107,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
 
     /// Opens files (images / PDF). Several files become several pages.
     func open(urls: [URL]) {
+        loadViewIfNeeded()
         var loaded: [ImagePage] = []
         var errors: [String] = []
         for url in urls {
@@ -124,6 +125,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         _ = view
         ocrTask?.cancel()
         translator.cancel()
+        translateSpinner.stopAnimation(nil) // the cancelled translation never reports back: no endless spinner on a text-less image
         pages = newPages
         results = Array(repeating: .empty, count: newPages.count)
         paragraphRanges = []
@@ -569,6 +571,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
     }
 
     @objc func pasteFromClipboard(_ sender: Any?) {
+        loadViewIfNeeded()
         let (loaded, errors) = ImageLoader.pages(from: .general)
         if !loaded.isEmpty { load(pages: loaded); return }
         if !errors.isEmpty { showNotice(errors.joined(separator: "\n")); return }
@@ -611,6 +614,8 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
     @objc private func clearAll(_ sender: Any?) {
         ocrTask?.cancel(); ocrTask = nil
         translator.cancel()
+        ocrSpinner.stopAnimation(nil); translateSpinner.stopAnimation(nil)
+        ocrStatus.stringValue = ""; progressLabel.stringValue = ""
         pages = []; results = []; paragraphRanges = []
         preview.image = nil; preview.boxes = []
         sourceView.string = ""
@@ -694,6 +699,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         textEdited = false
         let count = results.reduce(0) { $0 + $1.paragraphs.count }
         if text.isEmpty {
+            translateSpinner.stopAnimation(nil); progressLabel.stringValue = ""
             ocrStatus.stringValue = ""
             showNotice("Текст не найден. Попробуйте снять страницу ближе, ровнее и при хорошем освещении.")
             updateButtons()

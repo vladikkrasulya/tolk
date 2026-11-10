@@ -202,9 +202,6 @@ public struct TranslationNote: Sendable, Equatable, Codable {
     public init(term: String, used: String, suggestion: String?, note: String) {
         self.term = term; self.used = used; self.suggestion = suggestion; self.note = note
     }
-
-    /// What goes into the glossary when the user saves the note.
-    public var preferred: String { (suggestion?.isEmpty == false ? suggestion : nil) ?? used }
 }
 
 /// Entry point used by the app.
@@ -344,7 +341,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     /// System-wide autocomplete (local model, ghost text, Tab accepts).
     public var autocomplete: Bool = false
     /// GGUF model for autocomplete.
-    public var autocompleteModel: String = "~/Library/Application Support/Tolk/models/gemma-4-E4B-it-q4_0.gguf"
+    public var autocompleteModel: String = "~/Library/Application Support/Tolk/models/gemma-4-E2B-abl-Q4_K.gguf"
     /// Bundle ids where autocomplete stays off (terminals, IDEs).
     public var autocompleteOffApps: [String] = TolkConfig.defaultAutocompleteOffApps
     /// Suggestion length: "short" (~3 words), "medium" (~6), "long" (~12).
@@ -401,46 +398,46 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = TolkConfig()
-        ollamaURL = try c.decodeIfPresent(String.self, forKey: .ollamaURL) ?? d.ollamaURL
-        model = try c.decodeIfPresent(String.self, forKey: .model) ?? d.model
-        rulesPath = try c.decodeIfPresent(String.self, forKey: .rulesPath) ?? d.rulesPath
-        primaryLanguage = try c.decodeIfPresent(Language.self, forKey: .primaryLanguage) ?? d.primaryLanguage
-        secondaryLanguage = try c.decodeIfPresent(Language.self, forKey: .secondaryLanguage) ?? d.secondaryLanguage
-        doubleCopyInterval = try c.decodeIfPresent(Double.self, forKey: .doubleCopyInterval) ?? d.doubleCopyInterval
+        ollamaURL = c.lenient(String.self, forKey: .ollamaURL) ?? d.ollamaURL
+        model = c.lenient(String.self, forKey: .model) ?? d.model
+        rulesPath = c.lenient(String.self, forKey: .rulesPath) ?? d.rulesPath
+        primaryLanguage = c.lenient(Language.self, forKey: .primaryLanguage) ?? d.primaryLanguage
+        secondaryLanguage = c.lenient(Language.self, forKey: .secondaryLanguage) ?? d.secondaryLanguage
+        doubleCopyInterval = c.lenient(Double.self, forKey: .doubleCopyInterval) ?? d.doubleCopyInterval
         // Old configs had a Google on/off switch; new ones store the fallback choice.
-        if let f = try c.decodeIfPresent(FallbackProvider.self, forKey: .fallback) {
+        if let f = c.lenient(FallbackProvider.self, forKey: .fallback) {
             fallback = f
-        } else if let google = try c.decodeIfPresent(Bool.self, forKey: .useGoogleFallback) {
+        } else if let google = c.lenient(Bool.self, forKey: .useGoogleFallback) {
             fallback = google ? .google : .none
         } else {
             fallback = d.fallback
         }
-        profiles = try c.decodeIfPresent([GlossaryProfile].self, forKey: .profiles)
+        profiles = c.lenient([GlossaryProfile].self, forKey: .profiles)
             ?? TolkConfig.defaultProfiles(workRules: rulesPath)
-        activeProfileID = try c.decodeIfPresent(String.self, forKey: .activeProfileID) ?? d.activeProfileID
-        remoteURL = try c.decodeIfPresent(String.self, forKey: .remoteURL) ?? d.remoteURL
-        remoteHeaders = try c.decodeIfPresent([String: String].self, forKey: .remoteHeaders) ?? d.remoteHeaders
-        toneByApp = try c.decodeIfPresent([String: Tone].self, forKey: .toneByApp) ?? d.toneByApp
-        autocomplete = try c.decodeIfPresent(Bool.self, forKey: .autocomplete) ?? d.autocomplete
-        autocompleteModel = try c.decodeIfPresent(String.self, forKey: .autocompleteModel) ?? d.autocompleteModel
-        autocompleteOffApps = try c.decodeIfPresent([String].self, forKey: .autocompleteOffApps) ?? d.autocompleteOffApps
-        autocompleteLength = try c.decodeIfPresent(String.self, forKey: .autocompleteLength) ?? d.autocompleteLength
-        autocompleteInstructions = try c.decodeIfPresent(String.self, forKey: .autocompleteInstructions) ?? d.autocompleteInstructions
-        autocompleteAppInstructions = try c.decodeIfPresent([String: String].self, forKey: .autocompleteAppInstructions) ?? d.autocompleteAppInstructions
-        autocompleteUseGlossary = try c.decodeIfPresent(Bool.self, forKey: .autocompleteUseGlossary) ?? d.autocompleteUseGlossary
-        autocompleteClipboard = try c.decodeIfPresent(Bool.self, forKey: .autocompleteClipboard) ?? d.autocompleteClipboard
-        autocompleteEmoji = try c.decodeIfPresent(Bool.self, forKey: .autocompleteEmoji) ?? d.autocompleteEmoji
-        autocorrect = try c.decodeIfPresent(Bool.self, forKey: .autocorrect) ?? d.autocorrect
-        autocompleteLearnStyle = try c.decodeIfPresent(Bool.self, forKey: .autocompleteLearnStyle) ?? d.autocompleteLearnStyle
-        autocompleteFrequency = try c.decodeIfPresent(String.self, forKey: .autocompleteFrequency) ?? d.autocompleteFrequency
-        autocompleteRecordAll = try c.decodeIfPresent(Bool.self, forKey: .autocompleteRecordAll) ?? d.autocompleteRecordAll
-        autocompleteWordPreference = try c.decodeIfPresent(String.self, forKey: .autocompleteWordPreference) ?? d.autocompleteWordPreference
-        autocompleteScreenContext = try c.decodeIfPresent(Bool.self, forKey: .autocompleteScreenContext) ?? d.autocompleteScreenContext
-        autocompleteBatteryRare = try c.decodeIfPresent(Bool.self, forKey: .autocompleteBatteryRare) ?? d.autocompleteBatteryRare
-        autocompleteBatteryNoScreen = try c.decodeIfPresent(Bool.self, forKey: .autocompleteBatteryNoScreen) ?? d.autocompleteBatteryNoScreen
-        autocompleteBatteryShort = try c.decodeIfPresent(Bool.self, forKey: .autocompleteBatteryShort) ?? d.autocompleteBatteryShort
-        typeTranslateApps = try c.decodeIfPresent([String: Bool].self, forKey: .typeTranslateApps) ?? d.typeTranslateApps
-        typeTranslateAuto = try c.decodeIfPresent(Bool.self, forKey: .typeTranslateAuto) ?? d.typeTranslateAuto
+        activeProfileID = c.lenient(String.self, forKey: .activeProfileID) ?? d.activeProfileID
+        remoteURL = c.lenient(String.self, forKey: .remoteURL) ?? d.remoteURL
+        remoteHeaders = c.lenient([String: String].self, forKey: .remoteHeaders) ?? d.remoteHeaders
+        toneByApp = c.lenient([String: Tone].self, forKey: .toneByApp) ?? d.toneByApp
+        autocomplete = c.lenient(Bool.self, forKey: .autocomplete) ?? d.autocomplete
+        autocompleteModel = c.lenient(String.self, forKey: .autocompleteModel) ?? d.autocompleteModel
+        autocompleteOffApps = c.lenient([String].self, forKey: .autocompleteOffApps) ?? d.autocompleteOffApps
+        autocompleteLength = c.lenient(String.self, forKey: .autocompleteLength) ?? d.autocompleteLength
+        autocompleteInstructions = c.lenient(String.self, forKey: .autocompleteInstructions) ?? d.autocompleteInstructions
+        autocompleteAppInstructions = c.lenient([String: String].self, forKey: .autocompleteAppInstructions) ?? d.autocompleteAppInstructions
+        autocompleteUseGlossary = c.lenient(Bool.self, forKey: .autocompleteUseGlossary) ?? d.autocompleteUseGlossary
+        autocompleteClipboard = c.lenient(Bool.self, forKey: .autocompleteClipboard) ?? d.autocompleteClipboard
+        autocompleteEmoji = c.lenient(Bool.self, forKey: .autocompleteEmoji) ?? d.autocompleteEmoji
+        autocorrect = c.lenient(Bool.self, forKey: .autocorrect) ?? d.autocorrect
+        autocompleteLearnStyle = c.lenient(Bool.self, forKey: .autocompleteLearnStyle) ?? d.autocompleteLearnStyle
+        autocompleteFrequency = c.lenient(String.self, forKey: .autocompleteFrequency) ?? d.autocompleteFrequency
+        autocompleteRecordAll = c.lenient(Bool.self, forKey: .autocompleteRecordAll) ?? d.autocompleteRecordAll
+        autocompleteWordPreference = c.lenient(String.self, forKey: .autocompleteWordPreference) ?? d.autocompleteWordPreference
+        autocompleteScreenContext = c.lenient(Bool.self, forKey: .autocompleteScreenContext) ?? d.autocompleteScreenContext
+        autocompleteBatteryRare = c.lenient(Bool.self, forKey: .autocompleteBatteryRare) ?? d.autocompleteBatteryRare
+        autocompleteBatteryNoScreen = c.lenient(Bool.self, forKey: .autocompleteBatteryNoScreen) ?? d.autocompleteBatteryNoScreen
+        autocompleteBatteryShort = c.lenient(Bool.self, forKey: .autocompleteBatteryShort) ?? d.autocompleteBatteryShort
+        typeTranslateApps = c.lenient([String: Bool].self, forKey: .typeTranslateApps) ?? d.typeTranslateApps
+        typeTranslateAuto = c.lenient(Bool.self, forKey: .typeTranslateAuto) ?? d.typeTranslateAuto
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -497,9 +494,23 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     /// Posted after `save`; the app rebuilds the engine with the new settings.
     public static let didChange = Notification.Name("TolkConfigDidChange")
 
+    /// A missing file = defaults. A file that cannot be parsed at all is copied to `<name>.corrupt` first (the next
+    /// `save()` would overwrite the user's hand-written settings); one bad value only loses that value (see `lenient`).
     public static func load(from path: String = defaultPath) -> TolkConfig {
         let url = URL(fileURLWithPath: expandPath(path))
         guard let data = try? Data(contentsOf: url) else { return TolkConfig() }
-        return (try? JSONDecoder().decode(TolkConfig.self, from: data)) ?? TolkConfig()
+        if let cfg = try? JSONDecoder().decode(TolkConfig.self, from: data) { return cfg }
+        let backup = url.appendingPathExtension("corrupt")
+        if !FileManager.default.fileExists(atPath: backup.path) { try? data.write(to: backup) }
+        return TolkConfig()
+    }
+}
+
+
+extension KeyedDecodingContainer {
+    /// Like `decodeIfPresent`, but a value of the wrong type / an unknown enum case reads as «absent» instead of
+    /// failing the whole config (which used to reset every setting, including the privacy-relevant fallback).
+    fileprivate func lenient<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        (try? decodeIfPresent(type, forKey: key)) ?? nil
     }
 }

@@ -39,6 +39,7 @@ public final class RulesStore: @unchecked Sendable {
     public let path: String
     private let lock = NSLock()
     private var mtime: Date?
+    private var parsedOnce = false // a missing file (built-in rules) is parsed once, not on every call
     private var parsed = Parsed()
 
     struct GlossaryLine {
@@ -146,8 +147,11 @@ public final class RulesStore: @unchecked Sendable {
         let entry = "- \(s) → \(t)"
         lock.lock(); defer { lock.unlock() }
         let url = URL(fileURLWithPath: path)
-        var lines = ((try? String(contentsOf: url, encoding: .utf8)) ?? builtIn ?? "")
-            .components(separatedBy: "\n")
+        // An existing but unreadable file (not UTF-8, no permission) must not be replaced by the built-in text:
+        // that would silently overwrite the user's rules.
+        let existing: String?
+        if FileManager.default.fileExists(atPath: path) { existing = try String(contentsOf: url, encoding: .utf8) } else { existing = nil }
+        var lines = (existing ?? builtIn ?? "").components(separatedBy: "\n")
         if let g = lines.firstIndex(where: Self.isGlossaryHeader) {
             var end = lines[(g + 1)...].firstIndex { $0.hasPrefix("#") } ?? lines.count
             while end > g + 1, lines[end - 1].trimmingCharacters(in: .whitespaces).isEmpty { end -= 1 }
@@ -160,7 +164,7 @@ public final class RulesStore: @unchecked Sendable {
         if !out.hasSuffix("\n") { out += "\n" }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try out.write(to: url, atomically: true, encoding: .utf8)
-        mtime = nil // force re-read
+        mtime = nil; parsedOnce = false // force re-read
     }
 
     // MARK: - Loading
@@ -168,8 +172,8 @@ public final class RulesStore: @unchecked Sendable {
     private func current() -> Parsed {
         lock.lock(); defer { lock.unlock() }
         let m = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
-        if m != mtime || m == nil {
-            mtime = m
+        if m != mtime || !parsedOnce {
+            mtime = m; parsedOnce = true
             let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? (m == nil ? builtIn ?? "" : "")
             parsed = Self.parse(text)
         }

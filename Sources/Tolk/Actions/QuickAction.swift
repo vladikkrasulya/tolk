@@ -68,9 +68,11 @@ enum QuickActionText {
 
     static func providerName(_ raw: String) -> String {
         let s = raw.lowercased()
-        if s.contains("qwen") || s.contains("ollama") { return "Qwen" }
-        if s.contains("google") { return "Google" }
         if s.contains("gemma") { return "Gemma" }
+        if s.contains("qwen") { return "Qwen" }
+        if s.contains("google") { return "Google" }
+        if s.contains("apple") { return "Apple" }
+        if s.contains("ollama") { return "vkbox" }
         return raw
     }
 

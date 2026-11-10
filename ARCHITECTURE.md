@@ -1,30 +1,127 @@
-# Tolk — DeepL-style translator for macOS (personal)
+# Tolk — архитектура
 
-Double Cmd+C anywhere -> popup near the cursor with a streaming translation from Qwen
-(`qwen-translate` on vkbox Ollama, http://192.168.1.13:11434, OpenAI-compatible /v1 with
-`reasoning_effort: "none"`), with rules/glossary from `~/Translate/rules.md`; Google fallback
-when vkbox is off or busy with a game.
+Версия 0.7.0. Этот файл начинается с актуального обзора. Ниже, в разделе «История и журнал версий», идут записи по версиям от 0.3 до 0.7.0. Установка — в [SETUP.md](SETUP.md), работа с приложением — в [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
-## Ownership (parallel sessions edit only their own files, commit nothing)
-| Area | Files | Owner |
+## Обзор
+
+### Цели
+
+- Личный переводчик для macOS «как DeepL, но на своей модели»: двойное ⌘C в любом приложении, перевод рядом с курсором, потоковый вывод.
+- Рабочая переписка (adtech, RU ↔ EN) и бытовая (RU / UK / EN). Перевод с правилами и глоссарием, ответ собеседнику на его языке.
+- Помощь при наборе: автодополнение, «Перевод при наборе», исправление опечаток и раскладки.
+- Приватность: перевод идёт только на сервер пользователя, подсказки считаются на Mac, в облако по умолчанию ничего не уходит. Google — запасной путь по выбору.
+- Сборка без Xcode: Command Line Tools со Swift 6.2, режим языка Swift 5, macOS 14+.
+
+### Схема
+
+```
+ Mac (Tolk.app)                                          Сервер модели (Ollama :11434, 2 слота)
+ ┌─────────────────────────────────────────────┐  HTTP  ┌──────────────────────────────────────┐
+ │ Input: двойное ⌘C, горячие клавиши           │ ─────▶ │ gemma-translate (Gemma 4 26B MoE,     │
+ │ UI: popup, «Ответить», большое окно          │ ◀───── │   num_ctx 8192)                       │
+ │ TolkCore: промпты, правила, проверки, кеши   │  поток └──────────────────────────────────────┘
+ │ Autocomplete: llama-server 127.0.0.1:8178    │
+ │   Gemma 4 E2B abliterated Q4_K (Metal)       │  нет сервера → Google / Apple Translation /
+ └─────────────────────────────────────────────┘  ничего (в «Переводе при наборе» — тишина)
+```
+
+Запрос перевода идёт по OpenAI-совместимому `/v1/chat/completions` с `reasoning_effort: "none"`, `temperature: 0.1`, `seed: 42`. Сноски, варианты и прочие JSON-запросы — те же маршруты с другими промптами. Одновременно к модели идут не больше двух запросов.
+
+### Цели пакета (`Package.swift`)
+
+| Цель | Что это | Зависимости |
 |---|---|---|
-| Contracts | `Sources/TolkCore/Contracts.swift` | coordinator (change only by agreement) |
-| Engine | `Sources/TolkCore/Engine/**`, `Sources/tolk-cli/**` | engine session |
-| Input + packaging | `Sources/Tolk/Input/**`, `scripts/**`, `Resources/**` | input session |
-| UI | `Sources/Tolk/UI/**` | UI session |
-| Wiring | `Sources/Tolk/AppDelegate.swift`, `main.swift`, `Package.swift` | coordinator |
+| `TolkCore` | Движок без AppKit: модели языков и запросов, провайдеры, промпты, правила и глоссарий, проверки, кеши, история, чистая логика автодополнения, самотест | — |
+| `Tolk` | Приложение в строке меню: ввод, окна, автодополнение, OCR, документы | `TolkCore` |
+| `tolk-cli` | Инструмент разработчика: перевод из терминала, все режимы движка, самотест, корпуса | `TolkCore` |
 
-Build: `swift build` (Swift 6.2 CLT, no Xcode). Language mode Swift 5.
+### Подсистемы и файлы
 
-## v0.3 — full app (parallel sessions, same rules: own files only, no commits)
-| Area | Files | Owner |
+| Подсистема | Файлы |
+|---|---|
+| Контракты (языки, запрос, события, настройки `TolkConfig`) | `TolkCore/Contracts.swift` |
+| Перевод: провайдеры и маршрутизация | `Engine/DefaultTranslationEngine.swift`, `OllamaProvider.swift`, `GoogleProvider.swift`, `AppleTranslationProvider.swift`, `LanguageDetector.swift`, `TolkError.swift` |
+| Промпты, правила, глоссарий | `Engine/Prompt.swift`, `RulesStore.swift`, `DefaultRules.swift`, `RulesFingerprint.swift`, `Glossary/*` |
+| Проверки и страховки | `Engine/TranslationCheck.swift`, `CalqueDetector.swift`, `Refine.swift` (`RefineGuard`), `BackDiff.swift`, `EntityMasker.swift` (выключен) |
+| Кеши и память | `Engine/TranslationCache.swift`, `IncrementalTranslation.swift`, `ThreadMemory.swift` |
+| Сноски и инструменты большого окна | `Engine/NotesProvider.swift`, `BigWindowTools.swift`, `SentencePairs.swift`, `ReplyChips.swift`, `PopupHandoff.swift` |
+| Без модели | `Engine/LayoutFix.swift`, `TimezoneConverter.swift` |
+| История | `TolkCore/History/HistoryStore.swift`, `Tolk/History/*` |
+| Ввод и быстрые действия | `Tolk/Input/DoubleCopyMonitor.swift`, `Tolk/Actions/*` (`HotKey`, `QuickAction*`, `ClipboardPaste`, `SpellCheckOracle`), `TolkCore/HotKeyRules.swift`, `CaptureFocus.swift` |
+| Всплывающее окно и «Ответить» | `Tolk/UI/TranslationPopupController.swift`, `ReplyPanelController.swift`, `StatusLineView.swift`, `HintsKit.swift`, `RefineRunner.swift`, `LiveTranslation.swift` |
+| Большое окно | `Tolk/MainWindow/*` (`TranslatePageViewController`, `ComposePanel`, `RewriteBar`, `SettingsViewController`, `HelpViewController`, `ACStatsView`), `UI/TranslationHintsPanel.swift` |
+| Глоссарий (редактор) | `Tolk/Glossary/*`, `TolkCore/Glossary/*` |
+| Фото и экран | `Tolk/ImageTranslate/*` (Vision OCR, `ScreenCaptureController`) |
+| Документы | `Tolk/Documents/*` |
+| Автодополнение | `Tolk/Autocomplete/*` (`AutocompleteController`, `FocusedField`, `ScreenContext`, `AutocompletePrompt`, `LocalModelServer`, `Autocorrect`, `EmojiSuggestions`, `StyleMemory`, `SuggestionJournal`), `TolkCore/AutocompleteSafety.swift`, `AutocompleteTuning.swift`, `AutocompleteHealing.swift`, `AutocompleteServerLogic.swift`, `AutocompleteStats.swift`, `ContextRefresh.swift` |
+| «Перевод при наборе» | `Tolk/TypeTranslate/*`, `TolkCore/TypeTranslate.swift` |
+| Диагностика | `Tolk/Diagnostics/Diagnostics.swift` (`~/Library/Logs/Tolk`) |
+| Сборка и установка | `scripts/*` (`build-app.sh`, `install.sh`, `make-dmg.sh`, `make-signing-cert.sh`, `make-icon.sh`), `Resources/*`, `VERSION` |
+
+Правило версий: `VERSION` — единственное место. `build-app.sh` пишет его в `CFBundleShortVersionString`, число коммитов — в `CFBundleVersion`, короткий хеш (с `-dirty` при незакоммиченных изменениях) — в `TolkGitCommit`. Для релиза: поднять `VERSION`, закоммитить, поставить тег `vX.Y.Z`, собрать и установить.
+
+### Модели и ключевые замеры
+
+| Что | Значение |
+|---|---|
+| Перевод | `gemma-translate` (Gemma 4 26B MoE, 128 экспертов, 8 активных, около 4B активных параметров), Q4_K_M. `qwen-translate` (Qwen 3.6 35B-A3B) — запас, выбирается в настройках |
+| Скорость перевода | Видеокарта 6 ГБ: около 22 ток/с с `num_ctx 32768`, около 26 с `num_ctx 8192` (+15–20 %), первое слово около 1,1 с. Видеокарта 12 ГБ (Windows-ПК друга): около 55 ток/с |
+| Перезагрузка модели | Запрос с другим `num_ctx` перезагружает модель (около 30 с). Tolk `num_ctx` не передаёт; менять его только в `Modelfile` |
+| Слоты Ollama | `OLLAMA_NUM_PARALLEL=2`: при шести параллельных запросах медианное ожидание 5,5 с против 8,6 с с одним слотом. Четыре слота хуже |
+| Корпус «работа» (50 текстов adtech) | 50 из 50, около 5,9 с на текст. Gemma против Qwen: 21 / 11 / 18 (лучше / хуже / одинаково) |
+| Корпус «дом» (50 текстов RU / UK / EN) | Текстов с кальками 17 → 4 |
+| Корпус ловушек (321 текст) | Автопроверка 299/321 → 313/321 на `gemma-translate`; `qwen-translate` 290/321 с тем же промптом |
+| Модель подсказок | Gemma 4 E2B abliterated Q4_K (3,4 ГБ, около 3,6 ГБ памяти), `llama-server -c 4096 -ngl 99 -fa on -np 1`; тёплая подсказка около 105 мс против 160–250 мс у E4B |
+| Подсказки при наборе | Набор из 54 случаев: правильная подсказка появляется в 23 случаях при проходе по буквам (было 14); окончания слов посреди слова: 0 → 9 из 15 с «token healing» |
+| Отвергнуто | Gemma 26B для подсказок на Mac (около 15 ГБ, нагрев) и на сервере (около 1,35–1,4 с, переоценивает уверенность) |
+
+Подробности и таблицы сравнения моделей — в журнале версий ниже и в замерах `~/Translate/test-corpus`.
+
+### Как это проверяется
+
+- **Самотест** `swift run tolk-cli --self-test`: 777 проверок (на версии 0.7.0) без модели и сети. В Command Line Tools нет XCTest, поэтому тесты свои: `TolkCore/SelfTest*.swift`. Покрывают глоссарий, промпты, проверки, кеши, разбор JSON, страховки редактора и переписывания, логику безопасности и сервера автодополнения, пары предложений, раскладку, часовые пояса, ловушки.
+- **Корпуса** на живой модели: `tolk-cli --trap-corpus FILE [--model M] [--rules P] [--trap-out J] [--trap-only ids|types]` (321 текст), рабочий и бытовой корпуса в `~/Translate/test-corpus` (замеры «было / стало»), набор из 54 случаев для автодополнения (`autocomplete-eval.md`).
+- **`tolk-cli`** гоняет каждый режим движка на модели: `--rewrite`, `--variants`, `--variants-all`, `--compose`, `--reply-to`, `--explain`, `--pairs`, `--check`, `--refine`, `--type-sim`, `--tz`, `--ac-stats` и другие (`--help`).
+- **Офлайн-отрисовка интерфейса** в PNG без показа окон на экране (отладочная сборка): `TOLK_RENDER_POPUP=dir`, `TOLK_RENDER_REPLY=dir`, `TOLK_HINTS_SHOT=dir .build/debug/Tolk --background`, `TOLK_MAIN_SHOT`, `TOLK_AC_STATS_SHOT`, `TOLK_TYPE_TRANSLATE_SHOT`.
+- **Правило проекта:** проверки «невидимые», без окон на экране, смены фокуса, синтетических нажатий и изменения буфера. Всё, что так не проверить (реальные щелчки, Tab в чужих полях), помечается «не проверено» и проверяется вживую.
+- **Дымового прогона** отдельным скриптом нет.
+
+### Как ведётся работа
+
+Координатор держит архитектуру, делит работу между параллельными сессиями (у каждой свой worktree и свои файлы), сводит ветки, прогоняет самотест и только после согласия пользователя коммитит и ставит сборку.
+
+## История и журнал версий
+
+Ниже — прежняя шапка файла и записи по версиям. Записи не переписывались.
+
+### Первоначальная постановка (v0.1–v0.2)
+
+Двойное ⌘C → окно рядом с курсором со стримингом перевода от Qwen (`qwen-translate` на сервере Ollama в домашней сети, OpenAI-совместимый `/v1`, `reasoning_effort: "none"`), правила и глоссарий из `~/Translate/rules.md`, запасной Google при выключенном сервере. С версии 0.5.2 основная модель — Gemma (`gemma-translate`), Qwen остаётся запасной.
+
+Сборка: `swift build`, Swift 6.2 CLT, режим языка Swift 5.
+
+### Распределение файлов между сессиями (v0.1–v0.3, для истории)
+
+Параллельные сессии правили только свои файлы и ничего не коммитили.
+
+| Область | Файлы | Владелец |
 |---|---|---|
-| Main window, Dock, translate page, settings, app icon | `Sources/Tolk/MainWindow/**`, `Sources/Tolk/UI/InputWindowController.swift`, `Resources/**`, `scripts/**` | main-window session |
-| Glossary editor | `Sources/Tolk/Glossary/**`, `Sources/TolkCore/Glossary/**` | glossary session |
-| Image / screenshot translate (OCR) | `Sources/Tolk/ImageTranslate/**` | image session |
-| Popup, engine, contracts, wiring | `UI/TranslationPopupController.swift`, `UI/UIShared.swift`, `TolkCore/Engine/**`, `Contracts.swift`, `AppDelegate.swift` | coordinator |
+| Контракты | `Sources/TolkCore/Contracts.swift` | координатор (менять по согласованию) |
+| Движок | `Sources/TolkCore/Engine/**`, `Sources/tolk-cli/**` | сессия движка |
+| Ввод и упаковка | `Sources/Tolk/Input/**`, `scripts/**`, `Resources/**` | сессия ввода |
+| Интерфейс | `Sources/Tolk/UI/**` | сессия интерфейса |
+| Связка | `Sources/Tolk/AppDelegate.swift`, `main.swift`, `Package.swift` | координатор |
 
-## Models (Ollama on vkbox) — known quirks
+v0.3 (полное приложение):
+
+| Область | Файлы | Владелец |
+|---|---|---|
+| Главное окно, Dock, страница перевода, настройки, иконка | `Sources/Tolk/MainWindow/**`, `Sources/Tolk/UI/InputWindowController.swift`, `Resources/**`, `scripts/**` | сессия главного окна |
+| Редактор глоссария | `Sources/Tolk/Glossary/**`, `Sources/TolkCore/Glossary/**` | сессия глоссария |
+| Перевод фото и скриншотов (OCR) | `Sources/Tolk/ImageTranslate/**` | сессия картинок |
+| Popup, движок, контракты, связка | `UI/TranslationPopupController.swift`, `UI/UIShared.swift`, `TolkCore/Engine/**`, `Contracts.swift`, `AppDelegate.swift` | координатор |
+
+### Модели Ollama — особенности (v0.5)
 Both models are switched in Settings → «Модель» (`TolkConfig.model`); the engine treats them the same.
 | | `qwen-translate` (qwen3.6:35b-a3b) | `gemma-translate` (gemma4:26b) |
 |---|---|---|
@@ -39,22 +136,22 @@ Server: `OLLAMA_NUM_PARALLEL=2` (tested: 6 concurrent → median wait 5.5 s vs 8
 model is partly on CPU). Single request ~0.8 s slower than with 1 slot.
 Only one big model fits the 6 GB GPU; switching models costs a reload (first request after switch: 30–150 s).
 
-## Versioning
+### Versioning
 - `VERSION` (e.g. `0.3.1`) is the only place to change the version. `scripts/build-app.sh` writes it to
   `CFBundleShortVersionString`, sets `CFBundleVersion` = commit count and `TolkGitCommit` = short hash
   (`-dirty` if there were uncommitted changes). Settings → «О программе» and crash reports show all three.
 - Each release: bump `VERSION`, commit, `git tag vX.Y.Z`, then build/install. Tags: v0.1 … v0.3.1.
 
-## v0.4.0 — reply mode and in-app help
+### v0.4.0 — reply mode and in-app help
 - `UI/ReplyPanelController.swift`: «Ответ» window from the popup («Ответить» / R). Partner's message (full, scrolls
   when long) + reply input + live translation into the partner's language with `TranslationRequest.replyTo`
   (prompt «Conversation context»: reuse partner's terms/register). «Вставить в чат ⌘↩» activates the source app
   and pastes (never sends). Drafts kept per partner message while the app runs.
-- `MainWindow/HelpViewController.swift`: «Как пользоваться» page (⌘5, menu). Cards animate only on hover
+- `MainWindow/HelpViewController.swift`: «Как пользоваться» page (now ⌘7, menu). Cards animate only on hover
   (all-at-once loops cost 16–24 % CPU on 120 Hz).
 - DEBUG render hooks: `TOLK_RENDER_REPLY=dir`, `TOLK_RENDER_POPUP=dir` write PNGs (no screen-recording needed).
 
-## v0.5.0 — models, fallback, profiles, history, documents, status line
+### v0.5.0 — models, fallback, profiles, history, documents, status line
 - Config: `fallback` (google / apple / none; old `useGoogleFallback` is read and migrated), `profiles` +
   `activeProfileID` — each `GlossaryProfile` has its own rules file and optional model; the engine uses
   `effectiveRulesPath` / `effectiveModel`. Settings: model picker (`*-translate` models from the server),
@@ -68,7 +165,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   `stream_options.include_usage` → `UsageBox` task-local); `StatusLineView` under translations
   (popup, translate page, reply). `TranslationRunner.onStats`.
 
-## v0.5.2 — tuned for Gemma (default model)
+### v0.5.2 — tuned for Gemma (default model)
 - Translation requests send `seed: 42` (with temperature 0.1): the same text gets the same translation every time
   (Gemma: 3/3 identical with a seed, 3 different without). Notes/alternatives keep variety (no seed).
 - `RulesStore.promptBlock(for:target:)` turns every glossary pair to point into the target language
@@ -78,7 +175,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Measured on ~/Translate/test-corpus (50 Kadam texts): Gemma vs Qwen 21/11/18 (wins/losses/ties);
   Gemma with rules vs without: 26 better, 3 worse, 20 same.
 
-## v0.6.0 — system-wide autocomplete (in the spirit of Cotypist)
+### v0.6.0 — system-wide autocomplete (in the spirit of Cotypist)
 - `Sources/Tolk/Autocomplete/`: ghost text after the caret in any app; Tab = next word, → = all, Esc = dismiss.
   Off by default (menu bar → Автодополнение); terminals/IDEs and password fields are excluded.
 - Model runs ON THIS MAC (no network: suggestions must land in ~100–300 ms): Homebrew `llama-server`
@@ -97,7 +194,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   (key in Keychain), 2–3 similar ones as style examples; «Удалить выученное» wipes file and key.
 - Every switch is in Settings and in the menu bar submenu; nothing requires editing tolk.json.
 
-## v0.6.1 — autocomplete tuned on live use
+### v0.6.1 — autocomplete tuned on live use
 - Electron/WebView fields (Slack, Teams): text and caret read through AX text markers when CFRange attributes
   are missing; every refusal is logged with its step. Ghost text sits on the app's baseline, uses the app's font
   size when AX reports it, is clipped to the field/window, and always draws its leading space.
@@ -112,7 +209,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Debug journal (menu, 1 hour, local only): jsonl + screenshots around the caret on shown/accepted events.
 - Settings split into tabs: Перевод · Автодополнение · Общие.
 
-## v0.6.2 — translation for everyday use, sentence cache, checks
+### v0.6.2 — translation for everyday use, sentence cache, checks
 - Prompts are neutral (no adtech in the base prompt or notes) with explicit anti-calque guidance per target language;
   profile files carry the domain. A missing profile file falls back to built-in rules in memory (`DefaultRules.home`,
   a copy of `~/Translate/home.md` — re-sync by hand when that file changes). Default model `gemma-translate`,
@@ -139,7 +236,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Measured (`~/Translate/test-corpus`): everyday corpus `verdict-home.md` — texts with calques 17 → 4 of 50;
   work corpus `results-2026-11-10-1122.md` — 50/50, ≈5.9 s per text.
 
-## v0.6.3 — safer autocomplete, server lifecycle, quieter Mac
+### v0.6.3 — safer autocomplete, server lifecycle, quieter Mac
 - Default suggestion model in use: Gemma 4 E2B abliterated Q4_K (`gemma-4-E2B-abl-Q4_K.gguf`, 3.4 GB) — same quality as
   E4B on the 54-case set, ~105 ms per warm suggestion vs ~160–250 ms, 3.6 GB RAM. Comparison: E2B/E4B abliterated and
   Qwen 3.5 4B abliterated, raw prompt and chat template (chat-template E4B scored best, 8/9 shown, but 530 ms; not used).
@@ -160,7 +257,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   the greeting, or is empty. The edited text is buffered and shown at once (no streaming).
 - Self-test: 197 checks.
 
-## v0.6.4 — big translate window, caches, autocomplete healing, review follow-ups
+### v0.6.4 — big translate window, caches, autocomplete healing, review follow-ups
 - Translate page hints panel (`UI/TranslationHintsPanel.swift`): 3rd column ≥1000 pt wide, below the translation when
   narrower. Cards: check warnings, footnotes, back-translation, word alternatives, add to glossary, editor diff.
   Shared with the popup via `UI/HintsKit.swift` (`HintsSettings`, `HintTask`, `BackTranslationJob`, `NoteRow`,
@@ -184,7 +281,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   Offscreen render: `TOLK_HINTS_SHOT=<dir>` writes translate-{wide,narrow}-{light,dark}-{1-hints,2-pair-hover,3-variants,
   4-rewrite,4b-rewrite-rejected,5-reply,6-explain}.png and recent-{light,dark}.png.
 
-## Autocomplete: healing, prefill, OCR economy
+### Autocomplete: healing, prefill, OCR economy
 - Token healing (`TolkCore/AutocompleteHealing.swift`, switch `AutocompletePrompt.useHealing`): the half-typed word is cut
   off the prompt and `CompletionClient` sends a GBNF `grammar` forcing the reply to start with it; the forced letters are
   stripped again and the first free token's probability is renormalised over grammar-consistent alternatives. Mid-word
@@ -197,7 +294,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   The screen is looked at on events (other window, field emptied = sent, scroll) after 1.5 s, otherwise every 15 s.
 - Numbers and the NSSpellChecker comparison: side-session notes `ac-healing-report.md`.
 
-## v0.6.4 integration notes
+### v0.6.4 integration notes
 - Translation cache (`Engine/TranslationCache.swift`): in-memory LRU (200 entries / 2 MB / 24 h) keyed by SHA-256 of the
   final system prompt + text + model, so rules, glossary, tone, thread context and profile changes miss automatically;
   only finished main-model translations are stored; `TranslationRequest.bypassCache`; `TranslationStats.fromCache` →
@@ -213,7 +310,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Measured on vkbox (2026-11-10): num_ctx 8192 vs 32768 — generation ≈26 vs ≈22 tok/s, first token the same (~1.1 s).
   Ollama reloads the model (~30 s) whenever a request asks for another num_ctx, so change it only in the Modelfile.
 
-## v0.6.5 — «Перевод при наборе» (type in your language, insert the translation)
+### v0.6.5 — «Перевод при наборе» (type in your language, insert the translation)
 - ⌃⌥R toggles the mode per app (`TolkConfig.typeTranslateApps`, optional `typeTranslateAuto` when the partner's last
   message on screen is in another language; off by default). Also in the menu bar and Settings → Автодополнение.
 - After a 500 ms pause the whole field text is translated into the partner's language (`TolkCore/TypeTranslate.swift`:
@@ -225,7 +322,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   intercepted. Same exclusions as autocomplete; autocomplete stays silent in apps where the mode is on.
 - CLI: `tolk-cli --type-sim "partner" "my text"`. Self-test: 526 checks.
 
-## v0.6.6 — focus, wording, own windows, my previous messages
+### v0.6.6 — focus, wording, own windows, my previous messages
 - Screen capture (`TolkCore/CaptureFocus.swift`): result goes to the main window only if Tolk was the active app when
   ⌥⇧S was pressed (then Tolk stays active); otherwise the popup at the area and focus returns to the previous app;
   ⌘Tab during the selection leaves focus alone.
@@ -238,7 +335,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Wording unified (Копировать, Письмо, Отмена, one fallback notice, no raw errors); reply window no longer animates per
   token. Self-test: 555 checks.
 
-## v0.6.7 — autocomplete like Cotypist
+### v0.6.7 — autocomplete like Cotypist
 - A suggestion is requested on every keystroke: 20 ms pause (60 ms when keys come < 110 ms apart, so the single
   llama-server slot does not queue), stale requests are cancelled. Measured on the 54-case set by replaying typing
   letter by letter: cases where a right suggestion appeared 14 → 23 (+64 %) at the same first-word precision (61–63 %).
@@ -252,7 +349,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Studied: KeyType and TabType (MIT): both use raw prompts + token healing and request per keystroke; notes in the
   side-session report. Self-test: 575 checks.
 
-## Translation variants (whole text)
+### Translation variants (whole text)
 - `translationVariants(source:translation:from:to:tone:replyTo:)` (`Engine/BigWindowTools.swift`): one JSON request,
   ≤3 `TranslationVariant { text, label, reason }`, label and reason in the user's language; variants that lose numbers,
   links, times, a question or the greeting, and near-copies (≥80 % same words) are dropped. 9–15 s per request.
@@ -260,7 +357,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   Popup: «Варианты» in the header opens the big window with the same text, tone and chat context (translation comes
   from the cache) and starts the request. CLI: `--variants-all`. Self-test: 587 checks.
 
-## v0.6.8 — tone modes, compose, layout fix, final pass, tails
+### v0.6.8 — tone modes, compose, layout fix, final pass, tails
 - Rewrite modes «По-деловому» (`professional`) and «Прямо» (`direct`): same guard as the others, plus no new numbers.
   The row folds into «Ещё ▾» / «Переписать ▾» on narrow cards (`RewriteBar`).
 - «Составить» page mode (`MainWindow/ComposePanel.swift`, `compose(points:tone:to:partnerMessage:)`): points in the
@@ -275,7 +372,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   Общие (quick actions and «Перевод при наборе»); `TOLK_RENDER_POPUP` renders off-screen now (never shown).
 - vkbox: `gemma-translate` recreated with num_ctx 8192 (old one kept as `gemma-translate-32k`). Self-test: 690 checks.
 
-## v0.6.9 — reply chips, honest tones
+### v0.6.9 — reply chips, honest tones
 - «Ответить» window: «Подтвердить», «Смотрим», «Детали?», «Созвон?», «Отказать» (⌘1…⌘5, `Engine/ReplyChips.swift`):
   `compose` with the partner's message, app tone and thread memory writes the reply in the user's language, then the
   normal translation runs. Hidden while the partner message is empty or the user types. ~5.6 s per chip.
@@ -285,7 +382,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Compose back-translation is a separate request (`composeBackTranslation`): the message shows in 2–6 s.
 - `TOLK_RENDER_REPLY` renders off-screen (`ReplyDemo`). Self-test: 717 checks.
 
-## v0.7.0 — trap corpus, live-run fixes
+### v0.7.0 — trap corpus, live-run fixes
 - Trap corpus (321 business/adtech texts: 81 hand-written + 240 synthetic, case U0 = the user's real Slack message;
   file in side-session notes `trap-corpus/full.json`): `tolk-cli --trap-corpus FILE [--model M] [--rules P]
   [--trap-out J] [--trap-only ids|types]`. Auto-check 299/321 → 313/321 on gemma-translate; qwen-translate 290/321
@@ -303,3 +400,15 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   certificate the Keychain tied «Always Allow» to the exact build, so every rebuild asked for the password. An old
   Keychain key is read once, moved to the file and deleted; a denied read keeps it and pauses style memory instead of
   replacing the key (which used to make style.db unreadable).
+
+## v0.7.1 — hardening and docs
+- Reliability audit (~25 fixes): crashes (recursion in `LanguageDetector`, JSON slicing in `NotesProvider`, bad dates in
+  `HistoryStore`, AX rectangles, no screens), hangs (`ChunkedTranslator.splitLong`, AX calls without a timeout),
+  endless spinners on the image page, races (documents, `LocalModelServer`, `OllamaProvider`), data loss (one bad field
+  no longer resets tolk.json; unreadable files are copied to `.corrupt`, never overwritten).
+- Two Tolk instances no longer fight over llama-server: the pid record stores the owner; a live foreign Tolk's server is
+  left alone. A second Tolk (also a debug binary) activates the first and exits.
+- `TOLK_SMOKE=1 .build/debug/Tolk --background`: creates every controller, calls setters and callbacks before and after
+  view load, exits 0; touches no user files, no autocomplete, no alerts.
+- Default suggestion model is `gemma-4-E2B-abl-Q4_K.gguf`; model descriptions and provider labels match the measurements.
+- Docs: README.md, SETUP.md (0.7), docs/USER-GUIDE.md, PROJECT-OVERVIEW.md, in-app help. Self-test: 802 checks.

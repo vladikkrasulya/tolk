@@ -10,6 +10,7 @@ enum FocusProbe {
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &ref) == .success,
               let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return false }
+        AXUIElementSetMessagingTimeout(ref as! AXUIElement, 0.2) // main thread: never wait the 6 s default on a hung app
         var role: CFTypeRef?
         AXUIElementCopyAttributeValue(ref as! AXUIElement, kAXRoleAttribute as CFString, &role)
         return (role as? String) == (kAXStaticTextRole as String)

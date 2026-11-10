@@ -919,13 +919,16 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
 
     // MARK: - Placement & size
 
-    private func screen(for point: NSPoint) -> NSScreen {
-        NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
+    /// Visible area of the screen under `point`. No screens at all (clamshell, display asleep when the hotkey fires)
+    /// gives a fixed rect instead of crashing on `screens[0]`.
+    private func visibleFrame(for point: NSPoint) -> NSRect {
+        (NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
     }
 
     private func placeInitially() {
         let size = fittingSize()
-        let vf = screen(for: anchor).visibleFrame
+        let vf = visibleFrame(for: anchor)
         // The top edge is the anchor: the popup grows downwards, along the text. If the grown
         // popup runs out of room, applySize() moves it up once.
         let top = min(anchor.y - 18, vf.maxY - 8)
@@ -947,7 +950,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         guard let lm = textView.layoutManager, let tc = textView.textContainer else { return minTextHeight }
         lm.ensureLayout(for: tc)
         let h = ceil(lm.usedRect(for: tc).height + textView.textContainerInset.height * 2)
-        let vf = screen(for: anchor).visibleFrame
+        let vf = visibleFrame(for: anchor)
         let cap = min(maxTextHeight, vf.height * 0.55)
         scrollView.hasVerticalScroller = h > cap
         return min(max(h, minTextHeight), cap)
@@ -971,7 +974,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         guard let panel, panel.isVisible || panel.frame.width > 0 else { return }
         lastApply = CACurrentMediaTime()
         let size = fittingSize()
-        let vf = screen(for: anchor).visibleFrame
+        let vf = visibleFrame(for: anchor)
         // Mid-animation panel.frame is a transient value: build on where it is heading. Once the
         // size has settled use the real frame (the user may have dragged the popup).
         var frame = (targetFrame != .zero && panel.frame.size != targetFrame.size) ? targetFrame : panel.frame

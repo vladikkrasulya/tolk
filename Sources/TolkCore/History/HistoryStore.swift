@@ -327,7 +327,9 @@ public final class HistoryStore: @unchecked Sendable {
         d.dateDecodingStrategy = .custom { dec in
             let c = try dec.singleValueContainer()
             if let ms = try? c.decode(Int64.self) { return date(milliseconds: ms) }
-            return date(milliseconds: Int64(try c.decode(Double.self).rounded()))
+            let d = try c.decode(Double.self).rounded()
+            guard let ms = Int64(exactly: d) else { throw DecodingError.dataCorruptedError(in: c, debugDescription: "date out of range") } // a corrupt line is skipped, not a crash
+            return date(milliseconds: ms)
         }
         return d
     }

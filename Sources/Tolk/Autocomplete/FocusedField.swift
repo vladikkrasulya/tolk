@@ -278,7 +278,7 @@ struct FocusedField {
         func bounds(_ r: CFTypeRef?) -> CGRect? {
             guard let r, let v: AXValue = param(el, "AXBoundsForTextMarkerRange", r) else { return nil }
             var rect = CGRect.zero
-            guard AXValueGetValue(v, .cgRect, &rect), rect.height > 2 else { return nil }
+            guard AXValueGetValue(v, .cgRect, &rect), Self.isSaneRect(rect) else { return nil }
             return rect
         }
 
@@ -348,7 +348,7 @@ struct FocusedField {
     private static func bounds(_ el: AXUIElement, _ r: CFRange) -> CGRect? {
         guard let v: AXValue = param(el, kAXBoundsForRangeParameterizedAttribute, axRange(r)) else { return nil }
         var rect = CGRect.zero
-        guard AXValueGetValue(v, .cgRect, &rect), rect.height > 2 else { return nil }
+        guard AXValueGetValue(v, .cgRect, &rect), Self.isSaneRect(rect) else { return nil }
         return rect
     }
 
@@ -384,11 +384,17 @@ struct FocusedField {
         return (rect, info)
     }
 
+    /// An AX rect from the target app is untrusted: `CGRect.infinite` / NaN would trap in `Int(...)` when logged or placed.
+    static func isSaneRect(_ r: CGRect) -> Bool {
+        r.height > 2 && [r.minX, r.minY, r.width, r.height].allSatisfy { $0.isFinite && abs($0) < 1e7 }
+    }
+
     private static let enhancedUIApps: Set<String> = ["com.tinyspeck.slackmacgap", "com.microsoft.teams2", "com.microsoft.teams"]
 
     /// Chromium/Electron apps build their accessibility tree only when asked.
     static func enableAccessibility(pid: pid_t) {
         let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.25) // runs on the main thread (and the event tap): a hung app must not freeze typing
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         // Slack / Teams (Chromium) sometimes need the older switch too.
         if let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier, enhancedUIApps.contains(id) {

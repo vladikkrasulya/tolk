@@ -16,7 +16,7 @@ public enum GlossaryCSV {
     public static func parse(_ data: Data) -> [GlossaryEntry] {
         guard var text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .windowsCP1251) else { return [] }
         if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
-        let firstLine = text.prefix { $0 != "\n" && $0 != "\r" }
+        let firstLine = text.prefix { !$0.isNewline } // "\r\n" is ONE Character: comparing with "\n"/"\r" took the whole CRLF file as the first line
         let sep: Character = [",", ";", "\t"].max { a, b in
             firstLine.filter { $0 == a }.count < firstLine.filter { $0 == b }.count
         } ?? ","

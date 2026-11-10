@@ -55,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
+        // First of all: builds throw-away controllers only; no autocomplete, event taps, hotkeys, timers or server.
+        if SmokeTest.requested { SmokeTest.run(); exit(0) }
         if ProcessInfo.processInfo.environment["TOLK_AC_STATS_SHOT"] != nil { ACStatsDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_HINTS_SHOT"] != nil { TranslateHintsDemo.run(); return }
         // Invisible popup render (never shown): TOLK_RENDER_POPUP=dir
@@ -69,6 +71,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Dev: TOLK_TEST_OLLAMA=http://127.0.0.1:11999 points this run at a fake server (cold-model / down tests); not saved.
         if let url = ProcessInfo.processInfo.environment["TOLK_TEST_OLLAMA"] { config.ollamaURL = url; config.autocomplete = false }
         #endif
+        // A second Tolk would fight the first for the model server, the event taps and the hotkeys: hand over and quit.
+        let running = NSWorkspace.shared.runningApplications.map {
+            SingleInstance.Proc(pid: $0.processIdentifier, bundleID: $0.bundleIdentifier, executable: $0.executableURL?.lastPathComponent)
+        }
+        if let other = SingleInstance.otherInstance(in: running, myPid: getpid()) {
+            Diagnostics.log("another Tolk is already running (pid \(other)) — quitting")
+            NSRunningApplication(processIdentifier: other)?.activate()
+            exit(0)
+        }
         engine = DefaultTranslationEngine(config: config)
 
         popup = TranslationPopupController(engine: withHistory("popup"))
@@ -358,9 +369,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !acController.isRunning && !acController.start() {
                 Diagnostics.log("autocomplete: event tap not created (Accessibility/Input Monitoring missing?) trusted=\(AXIsProcessTrusted())")
                 _ = DoubleCopyMonitor.hasAccessibility(prompt: true) // same flow as double Cmd+C
+                acTimer?.invalidate()
                 acTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
-                    guard let self else { t.invalidate(); return }
-                    if !self.wantsTypingTap || self.acController.start() { t.invalidate(); self.acTimer = nil }
+                    MainActor.assumeIsolated { // timers fire on the main run loop
+                        guard let self else { t.invalidate(); return }
+                        if !self.wantsTypingTap || self.acController.start() { t.invalidate(); self.acTimer = nil }
+                    }
                 }
             }
         } else {
@@ -448,8 +462,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accessItem.isHidden = false
         accessibilityTimer?.invalidate()
         accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
-            guard let self else { t.invalidate(); return }
-            if self.monitor.start() { t.invalidate(); self.accessItem.isHidden = true }
+            MainActor.assumeIsolated {
+                guard let self else { t.invalidate(); return }
+                if self.monitor.start() { t.invalidate(); self.accessItem.isHidden = true }
+            }
         }
     }
 
@@ -458,8 +474,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startHealthChecks() {
         checkHealth()
         healthTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            self?.checkHealth()
-            self?.monitor?.ensureAlive()
+            MainActor.assumeIsolated {
+                self?.checkHealth()
+                self?.monitor?.ensureAlive()
+            }
         }
     }
 

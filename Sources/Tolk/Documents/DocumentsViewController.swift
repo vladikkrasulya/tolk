@@ -117,6 +117,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
 
     private let translator: DocumentTranslator
     private var document: ExtractedDocument?
+    private var extractToken = UUID()
     private var extractTask: Task<Void, Never>?
     private var runState = RunState.idle
     private var autoFollow = true
@@ -201,6 +202,8 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         loadingLabel.stringValue = "Читаю «\(url.lastPathComponent)»…"
         loadingSpinner.startAnimation(nil)
         let label = loadingLabel!
+        let token = UUID()
+        extractToken = token // an older, cancelled read that finishes late must not touch the state of this one
         extractTask = Task { @MainActor [weak self] in
             do {
                 let doc = try await DocumentExtractor.extract(url) { page, total, ocr in
@@ -211,12 +214,13 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
                             : "Читаю страницу \(page) из \(total)…"
                     }
                 }
-                guard let self, !Task.isCancelled else { return }
+                guard let self, self.extractToken == token else { return }
                 self.extractTask = nil
                 self.loadingSpinner.stopAnimation(nil)
+                if Task.isCancelled { self.show(.empty); return }
                 self.loaded(doc)
             } catch {
-                guard let self else { return }
+                guard let self, self.extractToken == token else { return }
                 self.extractTask = nil
                 self.loadingSpinner.stopAnimation(nil)
                 self.show(.empty)
@@ -1118,6 +1122,9 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
     private func hideNotice() { noticeLabel.isHidden = true; noticeLabel.stringValue = "" }
 
     private func showAlert(_ text: String) {
+        #if DEBUG
+        if SmokeTest.requested { print("smoke: alert suppressed: \(text)"); return } // the smoke run must never put a dialog on screen
+        #endif
         let alert = NSAlert()
         alert.messageText = text
         alert.addButton(withTitle: "OK")

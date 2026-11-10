@@ -995,8 +995,8 @@ struct ModelPicker: View {
 
     static func describe(_ id: String) -> String {
         let m = id.lowercased()
-        if m.contains("qwen") { return "Qwen 35B — быстрее, лучше английский, деловые и юридические тексты" }
-        if m.contains("gemma") { return "Gemma 26B — меньше калек, живее русский и украинский, книги" }
+        if m.contains("qwen") { return "Qwen 35B — чуть быстрее, но хуже на рабочем жаргоне (290 против 313 из 321 на корпусе)" }
+        if m.contains("gemma") { return "Gemma 26B — основная: точнее термины, меньше калек, живее русский и украинский" }
         return id
     }
 

@@ -148,10 +148,12 @@ final class ChunkedTranslator {
         for var s in sentences {
             while s.count > limit { // a "sentence" longer than the limit: cut at the last space
                 let cut = s.index(s.startIndex, offsetBy: limit)
-                let at = s[..<cut].lastIndex(of: " ") ?? cut
+                // A space at the very start (left by the previous cut) would give an empty piece and no progress → endless loop.
+                var at = s[..<cut].lastIndex(of: " ") ?? cut
+                if at == s.startIndex { at = cut }
                 if !acc.isEmpty { out.append(acc.trimmingCharacters(in: .whitespaces)); acc = "" }
                 out.append(String(s[..<at]).trimmingCharacters(in: .whitespaces))
-                s = String(s[at...])
+                s = String(s[at...].drop(while: { $0 == " " }))
             }
             if acc.count + s.count > limit, !acc.isEmpty {
                 out.append(acc.trimmingCharacters(in: .whitespaces)); acc = ""

@@ -11,7 +11,13 @@ import Darwin
 
 enum Diagnostics {
     static let dir: URL = {
-        let d = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Tolk", isDirectory: true)
+        var d = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Tolk", isDirectory: true)
+        #if DEBUG
+        // The smoke run must never write into the user's real log directory.
+        if ProcessInfo.processInfo.environment["TOLK_SMOKE"] != nil {
+            d = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("tolk-smoke-logs", isDirectory: true)
+        }
+        #endif
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
     }()

@@ -65,13 +65,17 @@ struct HelpView: View {
                              text: "Выделите свой текст в Slack, Telegram или почте — он заменится переводом прямо там. Тон подберётся по программе.") { hovering in
                         AnimCanvas(active: hovering) { phase in ReplaceAnim(phase: phase, from: "Скинь стату за неделю", to: "Send me the weekly stats") }
                     }
-                    HelpCard(title: "Причесать английский", keys: ["⌃", "⌥", "P"], keysNote: "по умолчанию",
-                             text: "Без перевода: исправит грамматику и сделает текст как у носителя из индустрии.") { hovering in
+                    HelpCard(title: "Причесать и заменить", keys: ["⌃", "⌥", "P"], keysNote: "по умолчанию",
+                             text: "Без перевода: исправит грамматику и сделает текст как у носителя из индустрии, на том же языке.") { hovering in
                         AnimCanvas(active: hovering) { phase in ReplaceAnim(phase: phase, from: "we was checked yours traffic", to: "we've checked your traffic") }
                     }
                     HelpCard(title: "Исправить раскладку", keys: ["⌃", "⌥", "L"], keysNote: "по умолчанию",
                              text: "Набрали «Ghbdtn» вместо «Привет» (или наоборот)? Выделите текст — он заменится на правильный, без модели и мгновенно. Русская и украинская раскладки, смешанный текст — по словам.") { hovering in
                         AnimCanvas(active: hovering) { phase in ReplaceAnim(phase: phase, from: "Ghbdtn, rfr ltkf?", to: "Привет, как дела?") }
+                    }
+                    HelpCard(title: "Перевод при наборе", keys: ["⌃", "⌥", "R"], keysNote: "включить для программы, по умолчанию",
+                             text: "Пишете в чате по-своему — под полем появляется перевод на язык собеседника. Tab вставляет его вместо вашего текста, Esc оставляет ваш. Ничего не отправляется.") { hovering in
+                        AnimCanvas(active: hovering) { phase in ReplaceAnim(phase: phase, from: "Да, отключим сабы сегодня", to: "Yes, we'll disable the subs today") }
                     }
                     HelpCard(title: "Перевести с экрана", keys: ["⌥", "⇧", "S"], keysNote: "по умолчанию",
                              text: "Выделите мышью область экрана — текст распознается прямо на Mac и переведётся. Если вы в окне Tolk — результат появится в «Фото и скриншоты», иначе — рядом с областью.") { hovering in
@@ -83,6 +87,7 @@ struct HelpView: View {
                     }
                 }
                 PopupButtonsCard()
+                BigWindowCard()
                 TroubleCard()
                 AutocompleteHelpCard()
             }
@@ -301,7 +306,9 @@ struct PopupButtonsCard: View {
         ("book", "В глоссарий", "закрепить, как переводить термин"),
         ("doc.on.doc", "Копировать", "⌘C"),
         ("text.insert", "Вставить", "⌘↩ — заменить выделенный текст переводом"),
-        ("arrowshape.turn.up.left", "Ответить", "R — окно ответа партнёру"),
+        ("arrowshape.turn.up.left", "Ответить", "R — окно ответа партнёру, внутри готовые ответы ⌘1…⌘5"),
+        ("list.bullet.rectangle", "Варианты перевода", "2–3 версии всего текста с пояснением, чем они отличаются"),
+        ("arrow.up.left.and.arrow.down.right", "Открыть в окне перевода", "тот же текст в большом окне"),
         ("cursorarrow.click.2", "Выделить слово в переводе", "покажет варианты замены"),
         ("escape", "Закрыть", "Esc или клик мимо"),
     ]
@@ -319,10 +326,35 @@ struct PopupButtonsCard: View {
             }
             Text("Тон: «Авто» подбирается по программе (Slack и Telegram — чат, почта — письмо), «Чат» и «Письмо» — вручную.")
                 .font(.caption).foregroundStyle(.secondary)
-            Text("Строка под переводом: ● зелёная — перевела модель дома, синяя — вне дома, оранжевая — запасной Google/Apple (без глоссария). Там же время до первого слова и скорость.")
+            Text("Строка под переводом: ● зелёная — перевела модель дома, синяя — вне дома, оранжевая — запасной Google/Apple (без глоссария). Там же время до первого слова и скорость. «из кеша» — перевод взят из памяти; щёлкните «↻ заново», чтобы перевести без кеша.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("История — все переводы на этом Mac с поиском. Профиль «Работа / Дом» — меню Tolk или «Настройки»: у каждого свой глоссарий и модель.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+        .infoCardStyle()
+    }
+}
+
+struct BigWindowCard: View {
+    private let rows: [(String, String, String)] = [
+        ("character.bubble", "Перевод", "живой перевод при наборе; ⌘↩ или ⌘R — заново. Кнопки «Короче», «Мягче», «Твёрже», «Проще», «По-деловому», «Прямо» и «ты» / «Вы» переписывают перевод, «Вернуть» откатывает"),
+        ("arrowshape.turn.up.left", "Ответ", "вставьте сообщение собеседника — ваш ответ переведётся на его язык; «Что он имел в виду» разберёт смысл и тон"),
+        ("square.and.pencil", "Составить", "тезисы своими словами → готовое сообщение на языке получателя в тоне «Нейтрально», «По-деловому», «Прямо» или «Дружелюбно», ⌘↩"),
+        ("sidebar.right", "Подсказки", "проверка, сноски, обратный перевод, варианты слова и всего перевода, правка редактора. Щёлкните по предложению в переводе — варианты предложения"),
+        ("clock.arrow.circlepath", "Последние", "недавние переводы из истории; файл, брошенный на страницу, откроется в «Документах»"),
+    ]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Большое окно (Tolk в меню, ⌘1…⌘7 — разделы)").font(.headline)
+            ForEach(rows, id: \.1) { icon, title, note in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: icon).frame(width: 20).foregroundStyle(Color.accentColor)
+                    Text(title).frame(width: 110, alignment: .leading)
+                    Text(note).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                }
+                .font(.callout)
+            }
         }
         .infoCardStyle()
     }
@@ -334,7 +366,7 @@ struct AutocompleteHelpCard: View {
             Image(systemName: "text.cursor").font(.title2).foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Автодополнение (по умолчанию выключено)").font(.headline)
-                Text("Необязательная функция в разработке, не связана с переводом. Включается в меню Tolk. Пока вы печатаете, серый текст у курсора предлагает продолжение: Tab или → принимает, Esc скрывает. В терминалах и редакторах кода выключено — список в «Настройках».")
+                Text("Включается в меню Tolk → «Автодополнение» или в «Настройках». Пока вы печатаете, серый текст у курсора предлагает продолжение: Tab принимает слово, → — всё целиком, ⌥Tab — обычный Tab, Esc скрывает подсказку в этом поле. Модель работает на этом Mac. Опечатки и эмодзи (:fire) подсказываются и без модели. В терминалах, редакторах кода и полях паролей выключено — список в «Настройках». Сколько подсказок показано и принято — «Настройки» → «Автодополнение» → «Статистика» и меню.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }

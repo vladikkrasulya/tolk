@@ -16,11 +16,16 @@ public enum LanguageDetector {
         return words.joined(separator: " ")
     }
 
-    public static func detect(_ original: String) -> Language {
-        let text = meaningful(original)
+    public static func detect(_ original: String) -> Language { detect(original, retried: false) }
+
+    /// `retried`: the second pass looks at the raw text; without this flag a text whose every word is dropped by
+    /// `meaningful` ("ключ=значение") called itself forever (stack overflow).
+    private static func detect(_ original: String, retried: Bool) -> Language {
+        let text = retried ? original : meaningful(original)
         guard text.contains(where: { $0.isLetter }) else {
             // Only IDs / links / numbers: if there are Cyrillic letters (e.g. inside an ID) keep going, else English.
-            return original.unicodeScalars.contains { (0x0400...0x04FF).contains($0.value) } ? detect(original.filter { !$0.isNumber }) : .english
+            guard !retried, original.unicodeScalars.contains(where: { (0x0400...0x04FF).contains($0.value) }) else { return .english }
+            return detect(original.filter { !$0.isNumber }, retried: true)
         }
         var cyrillic = 0, latin = 0, ukrainianMarks = 0, russianMarks = 0, other = 0
         for scalar in text.unicodeScalars {

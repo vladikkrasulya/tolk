@@ -104,7 +104,7 @@ final class ScreenCaptureController {
     /// `rect` is the selection in global screen coordinates (bottom-left origin).
     /// `route` decides who gets the focus when the overlay closes (see `CaptureFocus`); `end` tells how it ended.
     func selectImage(route: CaptureRoute, _ completion: @escaping (_ image: CGImage?, _ rect: NSRect, _ end: CaptureEnd) -> Void) {
-        guard overlay == nil else { return }
+        guard overlay == nil else { completion(nil, .zero, .cancelled); return } // never leave the caller (a hidden main window) waiting
         guard Self.ensurePermission() else { completion(nil, .zero, .cancelled); return }
         let overlay = SelectionOverlay()
         self.overlay = overlay

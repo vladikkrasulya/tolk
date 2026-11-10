@@ -41,6 +41,7 @@ enum AutocompleteFeatures {
         if config.autocomplete && config.autocompleteClipboard { ClipboardWatcher.shared.start() }
         AutocompletePrompt.maxTokens = PromptPrefs.maxTokens(forWords: PromptPrefs.maxWords(for: config.autocompleteLength))
         c.promptExtras = { field in prefs.extras(for: field) }
+        c.onAccepted = nil // same for the accepted-text hook: otherwise every settings save wrapped the previous closure (unbounded chain)
 
         // MARK: [style] — learning from accepted/sent text (section owned by the style feature)
         let style = StyleMemory.shared

@@ -40,6 +40,7 @@ public enum SelfTest {
         tails(check)
         modelUsage(check)
         trapCorpus(check)
+        hardening(check)
         return (check.total, check.failures)
     }
 

@@ -120,6 +120,8 @@ final class LocalModelServer {
         switch decision {
         case .portBusy:
             fail("порт \(port) занят другой программой", retryable: false); return
+        case .ownedByOtherTolk(let owner):
+            fail("автодополнение уже запущено в другом Tolk (pid \(owner))", retryable: false); return
         case .killOrphanThenStart(let pid):
             Diagnostics.log("autocomplete: stopping a llama-server left by a previous Tolk (pid \(pid))")
             await Task.detached { ServerLifecycle.terminate(pid: pid) }.value
@@ -155,12 +157,14 @@ final class LocalModelServer {
         while !Task.isCancelled, Date().timeIntervalSince(started) < 90 {
             if process == nil { return } // exited: the termination handler reported it
             if await healthy() {
+                // stop()/start() during the boot (model switch): this boot belongs to a process that was let go.
+                guard !Task.isCancelled, process === p else { return }
                 state = .ready
                 failures = 0
                 let model = modelPath
                 await Task.detached {
                     if let l = ServerLifecycle.listener(onPort: port) {
-                        ServerLifecycle.writeRecord(ServerRecord(pid: l.pid, port: port, model: model))
+                        ServerLifecycle.writeRecord(ServerRecord(pid: l.pid, port: port, model: model, owner: getpid()))
                     }
                 }.value
                 Diagnostics.log("autocomplete: model ready in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
@@ -214,7 +218,11 @@ struct CompletionClient {
 
     /// `healLiteral`: the cut-off word the grammar forces at the start of the reply (see `AutocompleteHealing`); it is
     /// read when the call is made, right after `AutocompletePrompt.prompt(...)`.
-    func complete(prompt: String, maxTokens: Int, healLiteral: String? = AutocompletePrompt.lastHealLiteral) async throws -> Result {
+    /// The defaults are evaluated by the CALLER (main thread), so `complete` — which runs off the main actor after its
+    /// first await — never reads the shared `AutocompletePrompt` statics that main keeps rewriting while typing.
+    func complete(prompt: String, maxTokens: Int, healLiteral: String? = AutocompletePrompt.lastHealLiteral,
+                  logitBias: [(token: Int, bias: Double)] = AutocompletePrompt.logitBias,
+                  textBefore: String = AutocompletePrompt.lastTextBefore) async throws -> Result {
         var req = URLRequest(url: baseURL.appendingPathComponent("completion"))
         req.httpMethod = "POST"
         req.timeoutInterval = 5
@@ -228,8 +236,8 @@ struct CompletionClient {
             "cache_prompt": true,
             "n_probs": 1,   // per-token probabilities → AutocompletePrompt.confidentPrefix
         ]
-        if !AutocompletePrompt.logitBias.isEmpty {
-            body["logit_bias"] = AutocompletePrompt.logitBias.map { [$0.token, $0.bias] as [Any] }   // «Выбор слов» (WordBias)
+        if !logitBias.isEmpty {
+            body["logit_bias"] = logitBias.map { [$0.token, $0.bias] as [Any] }   // «Выбор слов» (WordBias)
         }
         if let lit = healLiteral, !lit.isEmpty {
             body["grammar"] = AutocompleteHealing.grammar(forLiteral: lit)
@@ -258,7 +266,7 @@ struct CompletionClient {
             tokens = stripped.tokens
         }
         if AutocompletePrompt.useConfidence, !tokens.isEmpty {
-            text = AutocompletePrompt.confidentPrefix(tokens.map { ($0.text, $0.prob) }, textBefore: AutocompletePrompt.lastTextBefore)
+            text = AutocompletePrompt.confidentPrefix(tokens.map { ($0.text, $0.prob) }, textBefore: textBefore)
         }
         return Result(text: text, ms: Int(Date().timeIntervalSince(t0) * 1000))
     }

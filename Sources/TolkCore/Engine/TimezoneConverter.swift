@@ -50,14 +50,14 @@ public enum TimezoneConverter {
         ("нью-йорку", "America/New_York"), ("лос-анджелесу", "America/Los_Angeles"),
     ]
 
-    private static let timePart = "(\\d{1,2})(?:[:.](\\d{2}))?\\s*([ap]\\.?m\\.?)?"
+    private static let timePart = "([0-9]{1,2})(?:[:.]([0-9]{2}))?\\s*([ap]\\.?m\\.?)?"
     private static let zonePart: String = {
         let abbr = abbreviations.keys.filter { $0 != "Z" && $0 != "UTC" && $0 != "GMT" }.sorted { $0.count > $1.count }.joined(separator: "|")
         let ph = phrases.map { $0.0 }.joined(separator: "|")
-        return "(?:(?:UTC|GMT)(?:\\s?[+\\-−]\\s?\\d{1,2}(?::?\\d{2})?)?|\(abbr)|по\\s+(?:\(ph)))"
+        return "(?:(?:UTC|GMT)(?:\\s?[+\\-−]\\s?[0-9]{1,2}(?::?[0-9]{2})?)?|\(abbr)|по\\s+(?:\(ph)))"
     }()
-    nonisolated(unsafe) private static let regex = try! NSRegularExpression(
-        pattern: "(?<![\\w:.])(?:(в|at|@|к|from|с)\\s+)?\(timePart)(?:\\s*(?:[-–—]|to|до)\\s*\(timePart))?\\s*(\(zonePart))(?![\\p{L}\\d])",
+    private static let regex = try! NSRegularExpression(
+        pattern: "(?<![\\w:.])(?:(в|at|@|к|from|с)\\s+)?\(timePart)(?:\\s*(?:[-–—]|to|до)\\s*\(timePart))?\\s*(\(zonePart))(?![\\p{L}0-9])",
         options: [.caseInsensitive])
 
     private static let monthNames: [(String, Int)] = [
@@ -67,11 +67,11 @@ public enum TimezoneConverter {
         ("oct(?:ober)?|жовт(?:ня)?|окт(?:ября)?", 10), ("nov(?:ember)?|листоп(?:ада)?|ноя(?:бря)?", 11), ("dec(?:ember)?|груд(?:ня)?|дек(?:абря)?", 12),
     ]
     private static let monthAlt = monthNames.map { "(?:\($0.0))" }.joined(separator: "|")
-    nonisolated(unsafe) private static let dateRegexes: [NSRegularExpression] = [
-        "(\\d{4})-(\\d{2})-(\\d{2})",
-        "(?<![\\d.])(\\d{1,2})\\.(\\d{1,2})(?:\\.(\\d{2,4}))?(?![\\d:])",
-        "(\\d{1,2})(?:st|nd|rd|th)?\\s+(\(monthAlt))\\p{L}*\\.?(?:\\s+(\\d{4}))?",
-        "(\(monthAlt))\\p{L}*\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s+(\\d{4}))?",
+    private static let dateRegexes: [NSRegularExpression] = [
+        "([0-9]{4})-([0-9]{2})-([0-9]{2})",
+        "(?<![0-9.])([0-9]{1,2})\\.([0-9]{1,2})(?:\\.([0-9]{2,4}))?(?![0-9:])",
+        "([0-9]{1,2})(?:st|nd|rd|th)?\\s+(\(monthAlt))\\p{L}*\\.?(?:\\s+([0-9]{4}))?",
+        "(\(monthAlt))\\p{L}*\\.?\\s+([0-9]{1,2})(?:st|nd|rd|th)?(?:,?\\s+([0-9]{4}))?",
     ].map { try! NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
 
     private static func month(_ s: String) -> Int? {
@@ -222,11 +222,10 @@ public enum TimezoneConverter {
         let srcDay = srcCal.dateComponents([.year, .month, .day], from: start)
         let locDay = locCal.dateComponents([.year, .month, .day], from: start)
         var shift = 0
-        if let a = srcCal.date(from: srcDay), let b = locCal.date(from: locDay) {
+        if srcCal.date(from: srcDay) != nil, locCal.date(from: locDay) != nil {
             var utc = Calendar(identifier: .gregorian); utc.timeZone = TimeZone(secondsFromGMT: 0)!
             var ac = utc.dateComponents([.year, .month, .day], from: Date()); ac.year = srcDay.year; ac.month = srcDay.month; ac.day = srcDay.day
             var bc = ac; bc.year = locDay.year; bc.month = locDay.month; bc.day = locDay.day
-            _ = a; _ = b
             if let da = utc.date(from: ac), let db = utc.date(from: bc) { shift = utc.dateComponents([.day], from: da, to: db).day ?? 0 }
         }
         if explicitDate {

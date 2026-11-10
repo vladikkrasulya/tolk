@@ -58,8 +58,6 @@ public enum LayoutFix {
     }()
 
     private static let ukOnly = Set("іїєґІЇЄҐ")
-    /// Клавиши, на которых RU и UA различаются: `s ] ' ` и их верхний регистр.
-    private static let ambiguousLatin = Set("s]'`SS}\"~")
 
     // MARK: Классы символов
 
@@ -339,7 +337,6 @@ public enum LayoutFix {
         let cyrCore = core(of: token) { isCyrillicLetter($0) }
         let word = letters(cyrCore)
         if word.isEmpty { return .keep }
-        let hasUkLetter = word.contains { ukOnly.contains($0) }
         let ru = known(word, .ru, oracle: oracle), uk = known(word, .uk, oracle: oracle)
         if ru == true || uk == true { return .keep }
         let mapCore = core(of: token) { isCyrillicLetter($0) || layoutPunct.contains($0) }
@@ -356,7 +353,6 @@ public enum LayoutFix {
         let cyrBad = !plausibleCyrillic(word)
         let latGood = plausibleLatin(latLetters)
         if cyrBad && latGood { return oracle == nil || enKnown == nil ? .strong(cand) : .weak(cand) }
-        _ = hasUkLetter
         return .keep
     }
 

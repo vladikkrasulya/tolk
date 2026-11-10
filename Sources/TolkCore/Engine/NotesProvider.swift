@@ -47,7 +47,7 @@ extension OllamaProvider {
               let message = choices.first?["message"] as? [String: Any],
               var content = message["content"] as? String
         else { return nil }
-        if let a = content.firstIndex(of: "{"), let b = content.lastIndex(of: "}") { content = String(content[a...b]) }
+        content = Self.jsonObjectText(content)
         return (try? JSONSerialization.jsonObject(with: Data(content.utf8))) as? [String: Any]
     }
 
@@ -97,9 +97,15 @@ extension OllamaProvider {
         return Self.parseNotes(content, source: source)
     }
 
+    /// The `{…}` part of a model reply. Garbage like "} … {" (closing brace first) used to trap on `a...b`.
+    static func jsonObjectText(_ s: String) -> String {
+        guard let a = s.firstIndex(of: "{"), let b = s.lastIndex(of: "}"), a <= b else { return s }
+        return String(s[a...b])
+    }
+
     static func parseNotes(_ content: String, source: String) -> [TranslationNote] {
         var json = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let a = json.firstIndex(of: "{"), let b = json.lastIndex(of: "}") { json = String(json[a...b]) }
+        json = Self.jsonObjectText(json)
         // Element by element: one malformed note must not throw away the good ones.
         guard let d = json.data(using: .utf8), let root = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
               let raw = root["notes"] as? [[String: Any]] else { return [] }

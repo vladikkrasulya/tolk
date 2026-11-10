@@ -1,5 +1,5 @@
 #!/bin/bash
-# Installs build/Tolk.app into ~/Applications and registers a login LaunchAgent.
+# Installs build/Tolk.app into /Applications and registers a login LaunchAgent.
 # Usage: scripts/install.sh [--no-autostart]
 set -euo pipefail
 

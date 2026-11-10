@@ -457,7 +457,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         let deadline = Date().addingTimeInterval(1.5)
         func pasteWhenFront() {
             if NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier, Date() < deadline {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: pasteWhenFront); return
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { MainActor.assumeIsolated { pasteWhenFront() } }; return
             }
             let src = CGEventSource(stateID: .combinedSessionState)
             for down in [true, false] {
@@ -467,7 +467,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
                 e?.post(tap: .cghidEventTap)
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: pasteWhenFront)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { MainActor.assumeIsolated { pasteWhenFront() } }
         Diagnostics.log("reply inserted into \(app.localizedName ?? "?")")
     }
 

@@ -100,7 +100,7 @@ public struct EntityMasker: Sendable {
         (.id, "\\b[0-9a-fA-F]{16,}\\b"),
         (.id, "\\b(?=[A-Za-z0-9_-]*\\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{20,}\\b"),
     ]
-    nonisolated(unsafe) private static let compiled: [(Kind, NSRegularExpression)] = patterns.compactMap { k, p in
+    private static let compiled: [(Kind, NSRegularExpression)] = patterns.compactMap { k, p in
         (try? NSRegularExpression(pattern: p)).map { (k, $0) }
     }
 
