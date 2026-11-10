@@ -358,6 +358,10 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public var autocompleteBatteryRare: Bool = false
     public var autocompleteBatteryNoScreen: Bool = false
     public var autocompleteBatteryShort: Bool = false
+    /// «Перевод при наборе»: explicit per-app switch, bundle id -> on/off (nil = never decided).
+    public var typeTranslateApps: [String: Bool] = [:]
+    /// Turn the mode on by itself where the partner's last message is in another language (apps without an explicit switch).
+    public var typeTranslateAuto: Bool = false
 
     public static let defaultAutocompleteOffApps: [String] = [
         "com.apple.Terminal", "com.googlecode.iterm2", "com.apple.dt.Xcode",
@@ -373,7 +377,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         case autocomplete, autocompleteModel, autocompleteOffApps
         case autocompleteLength, autocompleteInstructions, autocompleteAppInstructions, autocompleteUseGlossary
         case autocompleteClipboard, autocompleteEmoji, autocorrect, autocompleteLearnStyle, autocompleteFrequency
-        case autocompleteScreenContext, autocompleteBatteryRare, autocompleteBatteryNoScreen, autocompleteBatteryShort
+        case autocompleteScreenContext, autocompleteBatteryRare, autocompleteBatteryNoScreen, autocompleteBatteryShort, typeTranslateApps, typeTranslateAuto
     }
 
     /// Every key is optional: `{"model": "x"}` keeps all other defaults.
@@ -416,6 +420,8 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         autocompleteBatteryRare = try c.decodeIfPresent(Bool.self, forKey: .autocompleteBatteryRare) ?? d.autocompleteBatteryRare
         autocompleteBatteryNoScreen = try c.decodeIfPresent(Bool.self, forKey: .autocompleteBatteryNoScreen) ?? d.autocompleteBatteryNoScreen
         autocompleteBatteryShort = try c.decodeIfPresent(Bool.self, forKey: .autocompleteBatteryShort) ?? d.autocompleteBatteryShort
+        typeTranslateApps = try c.decodeIfPresent([String: Bool].self, forKey: .typeTranslateApps) ?? d.typeTranslateApps
+        typeTranslateAuto = try c.decodeIfPresent(Bool.self, forKey: .typeTranslateAuto) ?? d.typeTranslateAuto
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -448,6 +454,8 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         try c.encode(autocompleteBatteryRare, forKey: .autocompleteBatteryRare)
         try c.encode(autocompleteBatteryNoScreen, forKey: .autocompleteBatteryNoScreen)
         try c.encode(autocompleteBatteryShort, forKey: .autocompleteBatteryShort)
+        try c.encode(typeTranslateApps, forKey: .typeTranslateApps)
+        try c.encode(typeTranslateAuto, forKey: .typeTranslateAuto)
     }
 
     /// Tone for an app (bundle id), `.auto` if not configured.

@@ -441,6 +441,7 @@ struct SettingsView: View {
                     acInstructionsSection
                     acContextSection
                     acTypingSection
+                    typeTranslateSection
                     acStyleSection
                     acOffAppsSection
                 case .general:
@@ -694,6 +695,23 @@ struct SettingsView: View {
             hint("Опечатка в последнем слове показывается серым исправлением, Tab применяет.")
         } header: {
             Text("Помощь при наборе")
+        }
+    }
+
+    private var typeTranslateSection: some View {
+        let names = model.config.typeTranslateApps.filter(\.value).keys.sorted()
+        return Section {
+            Toggle("Включать автоматически, если собеседник пишет на другом языке", isOn: $model.config.typeTranslateAuto)
+            hint("Пишете по-русски — под полем появляется перевод на язык собеседника, Tab вставляет его вместо вашего текста, Esc оставляет ваш. Tolk сам ничего не отправляет. Включить или выключить для текущего приложения: ⌃⌥R или пункт в меню строки меню.")
+            if !names.isEmpty {
+                HStack {
+                    Text("Включено в: " + names.joined(separator: ", ")).font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Выключить везде") { model.config.typeTranslateApps = [:] }
+                }
+            }
+        } header: {
+            Text("Перевод при наборе")
         }
     }
 

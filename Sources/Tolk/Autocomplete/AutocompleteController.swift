@@ -23,6 +23,8 @@ final class AutocompleteController {
     var onAccepted: ((AcceptedText) -> Void)?
 
     var isRunning: Bool { tap != nil }
+    /// «Перевод при наборе» sees every key first; in an app where it is on, autocomplete stays out.
+    var typeTranslate: TypeTranslateController?
 
     private let server: LocalModelServer
     /// Visible conversation around the field, collected in the background (never awaited for long).
@@ -177,6 +179,7 @@ final class AutocompleteController {
             return false
         case .leftMouseDown, .rightMouseDown:
             if event.getIntegerValueField(.eventSourceUserData) == DoubleCopyMonitor.syntheticMarker { return false }
+            typeTranslate?.noteClick()
             cancelPending()
             hide(reason: "click")
             recentTyped = ""
@@ -187,6 +190,18 @@ final class AutocompleteController {
             return false
         }
         if event.getIntegerValueField(.eventSourceUserData) == DoubleCopyMonitor.syntheticMarker { return false }
+
+        if let tt = typeTranslate {
+            switch tt.handleKey(event) {
+            case .swallow: return true
+            case .skipAutocomplete:
+                if suggestion != nil || instant != nil { hide(reason: "type-translate") }
+                cancelPending()
+                recentTyped = ""
+                return false
+            case .proceed: break
+            }
+        }
 
         // Password being typed (secure input) or an app that is off: touch nothing, read nothing, show nothing.
         let front = NSWorkspace.shared.frontmostApplication
@@ -604,6 +619,7 @@ final class AutocompleteController {
 
     private func activeAppChanged(_ app: NSRunningApplication?) {
         screenContext.reset()
+        typeTranslate?.appChanged()
         cancelPending()
         hide(reason: "appSwitch")
         recentTyped = ""

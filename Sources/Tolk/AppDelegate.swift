@@ -37,6 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Autocomplete
     private var acServer: LocalModelServer!
     private var acController: AutocompleteController!
+    private var ttController: TypeTranslateController!
+    private var ttItem: NSMenuItem!
     private var settingsVC: SettingsViewController!
     private var termSources: [DispatchSourceSignal] = []
     private var acItem: NSMenuItem!
@@ -54,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         if ProcessInfo.processInfo.environment["TOLK_AC_STATS_SHOT"] != nil { ACStatsDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_HINTS_SHOT"] != nil { TranslateHintsDemo.run(); return }
+        if ProcessInfo.processInfo.environment["TOLK_TYPE_TRANSLATE_SHOT"] != nil { TypeTranslateDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_MAIN_DEMO"] != nil { MainWindowDemo.runIfRequested(); return }
         // Dev: TOLK_TEST_OLLAMA=http://127.0.0.1:11999 points this run at a fake server (cold-model / down tests); not saved.
         if let url = ProcessInfo.processInfo.environment["TOLK_TEST_OLLAMA"] { config.ollamaURL = url; config.autocomplete = false }
@@ -291,6 +294,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         acServer = LocalModelServer(modelPath: config.autocompleteModel)
         acController = AutocompleteController(server: acServer)
         acController?.onStatsChanged = { [weak self] in self?.refreshStatsMenuLine() }
+        // «Перевод при наборе»: its own engine without the Google fallback (the conversation never leaves for the internet).
+        ttController = TypeTranslateController(engine: typeTranslateEngine(), config: config)
+        ttController.onToggle = { [weak self] apps in
+            guard let self else { return }
+            var c = self.config
+            c.typeTranslateApps = apps
+            try? c.save()
+        }
+        if !ttController.start() { Diagnostics.log("type-translate: hotkey taken") }
+        acController.typeTranslate = ttController
         acServer.onStateChange = { [weak self] _ in self?.serverStateChanged() }
         settingsVC.model.onRetryAutocomplete = { [weak self] in self?.acServer.retry() }
         // SIGTERM/SIGINT/SIGHUP end Tolk normally (applicationWillTerminate stops the server). After kill -9 the
@@ -337,10 +350,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func retryAutocompleteServer() { acServer.retry() }
 
-    private var wantsTypingTap: Bool { config.autocomplete || config.autocorrect || config.autocompleteEmoji }
+    private var wantsTypingTap: Bool {
+        config.autocomplete || config.autocorrect || config.autocompleteEmoji
+            || TypeTranslate.anyEnabled(config.typeTranslateApps) || config.typeTranslateAuto
+    }
+
+    private func typeTranslateEngine() -> TranslationEngine {
+        var c = config
+        c.fallback = .none
+        return DefaultTranslationEngine(config: c)
+    }
 
     /// Brings server + controller in line with the config (on launch and on every settings change).
     private func applyAutocomplete() {
+        ttController?.update(engine: typeTranslateEngine(), config: config)
         acController.disabledApps = Set(config.autocompleteOffApps)
         AutocompleteFeatures.configure(acController, config: config)
         acServer.setModel(config.autocompleteModel)
@@ -389,6 +412,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let retry = acRetryItem { retry.isHidden = !acServer.isFailedState }
         if let app = lastExternalApp, let id = app.bundleIdentifier {
+            let ttOn = config.typeTranslateApps[id] == true
+            ttItem.title = "Перевод при наборе в \(app.localizedName ?? id): \(ttOn ? "выключить" : "включить")  ⌃⌥R"
+            ttItem.state = ttOn ? .on : .off
             let off = config.autocompleteOffApps.contains(id)
             acAppItem.title = "\(off ? "Включить" : "Выключить") в \(app.localizedName ?? id)"
             acAppItem.isHidden = false
@@ -396,6 +422,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             acAppItem.isHidden = true
         }
     }
+
+    @objc private func toggleTypeTranslate() { ttController.toggleForFrontApp() }
 
     @objc private func toggleAutocomplete() {
         var c = config
@@ -495,6 +523,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item("Перевести и заменить выделенное  ⌃⌥T", #selector(quickTranslate)))
         menu.addItem(item("Причесать выделенное  ⌃⌥P", #selector(quickPolish)))
         menu.addItem(.separator())
+        ttItem = item("Перевод при наборе  ⌃⌥R", #selector(toggleTypeTranslate))
+        menu.addItem(ttItem)
         let acMenuItem = NSMenuItem(title: "Автодополнение", action: nil, keyEquivalent: "")
         let acMenu = NSMenu()
         acItem = item("Включено (Tab)", #selector(toggleAutocomplete))

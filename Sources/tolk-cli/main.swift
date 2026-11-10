@@ -25,6 +25,8 @@ var pairsTranslation: String?, variantsCurrent: String?, rewriteMode: RewriteMod
 var maskShow: String?, maskEval: String?, maskFormats = "brackets,section,square", noMask = false, maskFormat: String?
 var prevTurns: [String] = [], calquesText: String?, tzText: String?, tzLocal: String?, tzNow: String?, showFingerprint = false
 var words: [String] = []
+var typeSimPartner: String?
+var typeSimNoPartner = false
 // Dev: `tolk-cli --ac-spawn CMD ARGS…` launches CMD the way Tolk launches llama-server (dies with this process), then waits.
 if CommandLine.arguments.dropFirst().first == "--ac-spawn" {
     let p = Process()
@@ -87,6 +89,8 @@ while let a = args.next() {
     case "--mask-format": maskFormat = value()               // format used by the engine for this run
     case "--mask-on": noMask = true                          // protect links/macros with placeholders (off by default)
     case "--prev": prevTurns.append(value())                 // thread context line "source => translation" (repeatable)
+    case "--type-sim": typeSimPartner = value()              // «Перевод при наборе»: value = partner's message on screen, text = my draft
+    case "--type-sim-empty": typeSimNoPartner = true         // same, with an empty screen (partner language unknown → secondaryLanguage)
     case "--calques": calquesText = value()                  // list calques in this text (use --to for the language)
     case "--tz": tzText = value()                            // time zones in this text -> local time
     case "--tz-local": tzLocal = value()                     // zone id for --tz (default: this Mac)
@@ -180,6 +184,36 @@ if let pairsTranslation {
         print("\(p.isConfident ? "✓" : "?") [\(p.source.location),\(p.source.length)] «\(a)»  ⇄  [\(p.translation.location),\(p.translation.length)] «\(b)»")
     }
     exit(0)
+}
+if typeSimPartner != nil || typeSimNoPartner {
+    // What the line under the field would show (no UI, no keys): partner on screen + my draft → silent / translation.
+    var c = config
+    c.fallback = .none  // the conversation never goes to Google
+    let eng = DefaultTranslationEngine(config: c)
+    let screen = typeSimPartner ?? ""
+    let partner = TypeTranslate.partner(screen: screen, draft: text)
+    let known = partner == nil && TypeTranslate.screenIsAllSameLanguage(screen: screen, draft: text)
+    let verdict = TypeTranslate.decide(text: text, partner: partner, screenKnown: known, primary: c.primaryLanguage, secondary: c.secondaryLanguage,
+                                       explicitlyOn: true, auto: false)
+    guard case let .translate(src, dst) = verdict else {
+        if case let .silent(why) = verdict { print("(строка не появится: \(why.rawValue))") }
+        exit(0)
+    }
+    let req = TypeTranslate.request(text: text, source: src, target: dst, partner: partner, tone: tone, threadContext: nil)
+    timed("type-sim") {
+        let t0 = Date()
+        var out = ""
+        for try await e in eng.translate(req) {
+            switch e {
+            case let .delta(d): out += d
+            case .started: out = ""
+            default: break
+            }
+        }
+        let ms = Int(Date().timeIntervalSince(t0) * 1000)
+        print("[\(TypeTranslate.label(for: dst))] \(out.trimmingCharacters(in: .whitespacesAndNewlines))   — \(TypeTranslate.hint)")
+        err("partner=\(partner.map { "\($0.language.rawValue): \($0.message.prefix(60))" } ?? "нет") ms=\(ms)")
+    }
 }
 let engine: DefaultTranslationEngine
 if let rulesPath {

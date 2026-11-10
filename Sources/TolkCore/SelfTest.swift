@@ -30,6 +30,7 @@ public enum SelfTest {
         bigWindow(check)
         resultCache(check)
         engineReview(check)
+        typeTranslate(check)
         return (check.total, check.failures)
     }
 

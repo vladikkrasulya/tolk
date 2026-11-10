@@ -212,3 +212,15 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   `tolk-cli --ac-stats`.
 - Measured on vkbox (2026-11-10): num_ctx 8192 vs 32768 — generation ≈26 vs ≈22 tok/s, first token the same (~1.1 s).
   Ollama reloads the model (~30 s) whenever a request asks for another num_ctx, so change it only in the Modelfile.
+
+## v0.6.5 — «Перевод при наборе» (type in your language, insert the translation)
+- ⌃⌥R toggles the mode per app (`TolkConfig.typeTranslateApps`, optional `typeTranslateAuto` when the partner's last
+  message on screen is in another language; off by default). Also in the menu bar and Settings → Автодополнение.
+- After a 500 ms pause the whole field text is translated into the partner's language (`TolkCore/TypeTranslate.swift`:
+  partner message + language from `ScreenContext`, else `secondaryLanguage`) with `replyTo`, app tone and thread
+  context; the engine for this mode has no fallback (vkbox down → silence, nothing goes to Google).
+- `Sources/Tolk/TypeTranslate/`: grey line under the field (≤3 lines, «→ EN», «Tab — вставить, Esc — оставить»).
+  Tab re-reads the field (process, element, full text), selects all via `AXSelectedTextRange` and pastes through the
+  shared `Actions/ClipboardPaste.swift` (pasteboard restored, transient types) so the app's ⌘Z works. Enter is never
+  intercepted. Same exclusions as autocomplete; autocomplete stays silent in apps where the mode is on.
+- CLI: `tolk-cli --type-sim "partner" "my text"`. Self-test: 526 checks.
