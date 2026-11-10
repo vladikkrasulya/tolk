@@ -10,6 +10,7 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
     let remoteHeaders: [String: String]
     private let lock = NSLock()
     private var usingRemote = false
+    private var lastHomeOK: Date?
     /// The address that answered the last availability check.
     var baseURL: URL { lock.withLock { usingRemote ? (remoteURL ?? lanURL) : lanURL } }
     /// Address AND its access headers from ONE lock acquisition: a concurrent availability check flipping `usingRemote`
@@ -133,7 +134,15 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
     /// Home first (fast, 0.8 s); if it does not answer and a remote address is set, try that (2 s).
     public func isAvailable() async -> Bool {
         if await ping(lanURL, timeout: 0.8, headers: [:]) {
-            lock.withLock { usingRemote = false }
+            lock.withLock { usingRemote = false; lastHomeOK = Date() }
+            return true
+        }
+        // A busy server (model partly on CPU, both slots generating) answers /api/version in seconds, not
+        // milliseconds. If home answered within the last 10 minutes it is most likely busy, not gone: give it
+        // 6 s before falling back — a slower translation beats a silent switch to the fallback.
+        let recently = lock.withLock { lastHomeOK.map { Date().timeIntervalSince($0) < 600 } ?? false }
+        if recently, await ping(lanURL, timeout: 6, headers: [:]) {
+            lock.withLock { usingRemote = false; lastHomeOK = Date() }
             return true
         }
         if let remoteURL, await ping(remoteURL, timeout: 2, headers: remoteHeaders) {
