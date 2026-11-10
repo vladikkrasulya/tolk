@@ -20,8 +20,18 @@ final class LiveTranslation {
 
     private let session = IncrementalSession()
     private var langs: (source: Language, target: Language)?
+    /// A partial translation was committed since the last full one — the shown text is stitched from pieces.
+    private(set) var hadPartials = false
 
-    func reset() { session.reset(); langs = nil }
+    func reset() { session.reset(); langs = nil; hadPartials = false }
+
+    /// The final whole-text pass produced `translation` for `text`: it becomes the new base of the session.
+    func adoptFinal(text: String, key: String, translation: String) {
+        session.reset()
+        let plan = session.plan(for: text, key: key)
+        session.commit(plan, translation: translation)
+        hadPartials = false
+    }
 
     /// Remember the languages the engine actually used (from the last `.started` of this session).
     func started(source: Language, target: Language) { langs = (source, target) }
@@ -62,5 +72,6 @@ final class LiveTranslation {
     func commit(_ step: Step, tail: String) {
         guard let plan = step.plan else { return }
         session.commit(plan, translation: tail)
+        if plan.kind == .partial { hadPartials = true } else if plan.kind == .full { hadPartials = false }
     }
 }

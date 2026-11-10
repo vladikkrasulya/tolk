@@ -34,6 +34,9 @@ public enum SelfTest {
         resultCache(check)
         engineReview(check)
         typeTranslate(check)
+        layoutFix(check)
+        hotKeyRules(check)
+        tails(check)
         return (check.total, check.failures)
     }
 

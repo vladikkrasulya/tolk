@@ -123,6 +123,25 @@ extension SelfTest {
         check(v("Can you send it?", "Could you send it over?", .formal, .english) == .ok(pronounsChecked: false), "guard: english formal -> not verifiable")
         check(v("Kannst du das schicken?", "Könnten Sie das schicken?", .formal, .german) == .ok(pronounsChecked: true), "guard: formal de ok")
         if case .rejected = v("", "", .shorter) {} else { check(false, "guard: empty rejected") }
+        check(RewriteMode.allCases.count == 8 && RewriteMode(rawValue: "professional") == .professional && RewriteMode.direct.russianTitle == "Прямо", "modes: professional and direct exist with titles")
+        check(v("Пожалуйста, пришлите, если возможно, отчёт до 15 марта в 10:30.", "Просим прислать отчёт до 15 марта в 10:30.", .professional) == .ok(pronounsChecked: false), "guard: professional keeps facts")
+        if case .rejected = v("Пожалуйста, не делайте так.", "Нам это не подходит. Ответ нужен до 12 мая.", .direct) {} else { check(false, "guard: direct with an invented deadline rejected") }
+        if case .rejected = v("Отчёт до 15 марта, пожалуйста.", "Отчёт нужен.", .professional) {} else { check(false, "guard: professional that loses the date rejected") }
+        check(v("Пожалуйста, не делайте так.", "Нам это не подходит.", .direct) == .ok(pronounsChecked: false), "guard: direct without new numbers ok")
+        if case .rejected = v("Вы можете прислать файл?", "Присылайте файл.", .direct) {} else { check(false, "guard: direct turning a question into a statement rejected") }
+        check(v("Привет! Мы отключим трафик 5 мая.", "Привет! Отключаем трафик 5 мая.", .professional) == .ok(pronounsChecked: false), "guard: professional keeps greeting and date")
+
+        // MARK: compose (points -> message): parsing of a saved answer and the checks
+        check(ComposeTone.allCases.map(\.rawValue) == ["neutral", "professional", "direct", "friendly"] && ComposeTone.direct.russianTitle == "Прямо", "compose: four tones")
+        let pts = "Пусть отключит весь трафик с 3 июня, попробуем ещё раз завтра в 9:30. Если опять будет фуфло — стопнем насовсем."
+        var cw = ExtrasParsing.composeWarnings(points: pts, text: "Please switch off all traffic from June 3. We will try again tomorrow at 9:30. If the quality is poor again, we stop for good.", from: .russian, to: .english)
+        check(cw.isEmpty, "compose check: every number/time of the points present -> no warnings", "\(cw)")
+        cw = ExtrasParsing.composeWarnings(points: pts, text: "Please switch off all traffic from June 3. We will try again tomorrow. If the quality is poor again, we stop for good.", from: .russian, to: .english)
+        check(!cw.isEmpty, "compose check: lost time «9:30» -> warning", "\(cw)")
+        cw = ExtrasParsing.composeWarnings(points: pts, text: "Please switch off all traffic from June 3. We will try again tomorrow at 9:30 and give you 48 hours. If the quality is poor again, we stop for good.", from: .russian, to: .english)
+        check(cw.contains { $0.contains("48") }, "compose check: an invented number «48» -> warning", "\(cw)")
+        check(ExtrasParsing.numberTokens("4,8 $ и 4.8 и 12:30").count == 2, "compose check: «4,8» and «4.8» are the same number")
+        check(ExtrasParsing.composeWarnings(points: "Скажи, что нам это не нравится.", text: "We don't like this.", from: .russian, to: .english).isEmpty, "compose check: no numbers at all -> no warnings")
 
         // MARK: reply flow request
         let engine = DefaultTranslationEngine(config: TolkConfig(), rules: RulesStore(path: "/nonexistent/rules.md"),

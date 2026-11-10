@@ -102,10 +102,64 @@ enum TranslateHintsDemo {
             await settle(0.5)
             shot("6-explain")
             await renderLongStatus(to: dir)
+            await renderCompose(to: dir)
             renderRecents(to: dir)
             print("[hints-demo] shots in \(dir)")
             NSApp.terminate(nil)
         }
+    }
+
+    /// «Сформулировать» (empty, filled+result, result with a warning) and the rewrite row with the two new modes
+    /// (wide card: buttons; medium: «Ещё ▾»; narrow: one «Переписать ▾» menu).
+    private static func renderCompose(to dir: String) async {
+        var list: [Shot] = []
+        for (w, h, dark) in [(1180, 700, false), (1180, 700, true), (820, 760, false), (820, 760, true)] {
+            let size = NSSize(width: w, height: h)
+            let page = TranslatePageViewController(engine: DemoTranslationEngine(mode: .normal))
+            let win = NSWindow(contentRect: NSRect(origin: NSPoint(x: -30000, y: -30000), size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+            win.isReleasedWhenClosed = false
+            win.alphaValue = 0
+            win.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            win.contentViewController = page
+            win.setContentSize(size)
+            keepAlive += [win, page]
+            list.append(Shot(name: "compose-\(w)-\(dark ? "dark" : "light")", size: size, appearance: win.appearance, window: win, page: page))
+        }
+        let points = "пусть отключит весь фродовый трафик, весь ресейл, весь iframe и ещё раз попробуем, но с утра. Если опять будет фуфло — стопнем насовсем. Если будет подливать фуфло — будем требовать рефанд. Сильно аккуратно с ними не нужно. Без агрессии, но сказать прямо, что такая история нам не нравится."
+        for s in list { s.page.debugCompose(points: "", run: false) }
+        try? await Task.sleep(for: .milliseconds(400))
+        for s in list { render(s, to: "\(dir)/\(s.name)-9a-compose-empty.png") }
+        for s in list { s.page.debugCompose(points: points, tone: .direct, run: true) }
+        for _ in 0..<40 where !list.allSatisfy({ $0.page.debugComposeIdle }) { try? await Task.sleep(for: .milliseconds(300)) }
+        try? await Task.sleep(for: .milliseconds(500))
+        for s in list { render(s, to: "\(dir)/\(s.name)-9b-compose-result.png") }
+        for s in list { s.page.debugCompose(points: points + " Срок 999 дней.", message: "Hi! We will check the traffic and come back to you.", tone: .professional, run: true) }
+        for _ in 0..<40 where !list.allSatisfy({ $0.page.debugComposeIdle }) { try? await Task.sleep(for: .milliseconds(300)) }
+        try? await Task.sleep(for: .milliseconds(500))
+        for s in list { render(s, to: "\(dir)/\(s.name)-9c-compose-warning-reply.png") }
+
+        // The rewrite row at three widths: card >= 560 (all buttons), 380..560 («Ещё ▾»), < 380 («Переписать ▾»).
+        var rows: [Shot] = []
+        for (w, dark) in [(1700, false), (1700, true), (1180, false), (820, false)] {
+            let size = NSSize(width: w, height: 700)
+            let page = TranslatePageViewController(engine: DemoTranslationEngine(mode: .normal))
+            let win = NSWindow(contentRect: NSRect(origin: NSPoint(x: -30000, y: -30000), size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+            win.isReleasedWhenClosed = false
+            win.alphaValue = 0
+            win.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            win.contentViewController = page
+            win.setContentSize(size)
+            keepAlive += [win, page]
+            rows.append(Shot(name: "rewrite-row-\(w)-\(dark ? "dark" : "light")", size: size, appearance: win.appearance, window: win, page: page))
+        }
+        for s in rows { s.page.load(text: TolkUIDemo.sampleEnglish) }
+        for _ in 0..<60 where !rows.allSatisfy({ $0.page.debugHintsReady }) { try? await Task.sleep(for: .milliseconds(400)) }
+        try? await Task.sleep(for: .seconds(1))
+        for s in rows { render(s, to: "\(dir)/\(s.name)-9d.png") }
+        for s in rows { s.page.debugRewrite(.professional) }
+        for _ in 0..<40 where !rows.allSatisfy({ $0.page.debugIdle }) { try? await Task.sleep(for: .milliseconds(300)) }
+        try? await Task.sleep(for: .milliseconds(500))
+        for s in rows { render(s, to: "\(dir)/\(s.name)-9e-professional.png") }
     }
 
     /// No warnings, long status line («Gemma дома · первое слово … · ток/с»): both buttons of the bottom line must fit whole.

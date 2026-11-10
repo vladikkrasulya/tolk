@@ -69,6 +69,10 @@ struct HelpView: View {
                              text: "Без перевода: исправит грамматику и сделает текст как у носителя из индустрии.") { hovering in
                         AnimCanvas(active: hovering) { phase in ReplaceAnim(phase: phase, from: "we was checked yours traffic", to: "we've checked your traffic") }
                     }
+                    HelpCard(title: "Исправить раскладку", keys: ["⌃", "⌥", "L"], keysNote: "по умолчанию",
+                             text: "Набрали «Ghbdtn» вместо «Привет» (или наоборот)? Выделите текст — он заменится на правильный, без модели и мгновенно. Русская и украинская раскладки, смешанный текст — по словам.") { hovering in
+                        AnimCanvas(active: hovering) { phase in ReplaceAnim(phase: phase, from: "Ghbdtn, rfr ltkf?", to: "Привет, как дела?") }
+                    }
                     HelpCard(title: "Перевести с экрана", keys: ["⌥", "⇧", "S"], keysNote: "по умолчанию",
                              text: "Выделите мышью область экрана — текст распознается прямо на Mac и переведётся. Если вы в окне Tolk — результат появится в «Фото и скриншоты», иначе — рядом с областью.") { hovering in
                         AnimCanvas(active: hovering) { phase in CaptureAnim(phase: phase) }

@@ -23,7 +23,11 @@ final class TypeTranslateController {
     /// Saves the new per-app map (the app writes the config).
     var onToggle: (([String: Bool]) -> Void)?
 
-    static let hotKey = HotKeyCombo(keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(controlKey | optionKey))
+    static let defaultHotKey = HotKeyCombo(keyCode: UInt32(kVK_ANSI_R), modifiers: UInt32(controlKey | optionKey))
+    /// The user's shortcut (settings), the default ⌃⌥R when untouched; nil = switched off.
+    static var hotKey: HotKeyCombo? {
+        QuickActionHotKeyStore().hotKey(id: QuickActionHotKeyStore.typeTranslateID, default: defaultHotKey)
+    }
     static let pause: TimeInterval = 0.5
 
     private let panel = TypeTranslatePanel()
@@ -59,8 +63,17 @@ final class TypeTranslateController {
 
     @discardableResult func start() -> Bool {
         guard hotKeyToken == nil else { return true }
-        hotKeyToken = hotKeys.register(Self.hotKey) { [weak self] in self?.toggleForFrontApp() }
+        QuickActionHotKeyStore.failedIDs.remove(QuickActionHotKeyStore.typeTranslateID)
+        guard let combo = Self.hotKey else { return true } // disabled by the user
+        hotKeyToken = hotKeys.register(combo) { [weak self] in self?.toggleForFrontApp() }
+        if hotKeyToken == nil { QuickActionHotKeyStore.failedIDs.insert(QuickActionHotKeyStore.typeTranslateID) }
         return hotKeyToken != nil
+    }
+
+    /// After the user changed the shortcut in settings.
+    @discardableResult func reregister() -> Bool {
+        if let t = hotKeyToken { hotKeys.unregister(t); hotKeyToken = nil }
+        return start()
     }
 
     func update(engine: TranslationEngine, config: TolkConfig) {

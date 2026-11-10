@@ -46,6 +46,9 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
     private var backText: NSTextField!
     private var notesBox: NSStackView!
     private var statusLine: StatusLineView!
+    /// «🕒 10:00 EST → 16:00 у вас» under the translation (SF Symbol clock), only when a certain conversion was found.
+    private var timeRow: NSStackView!
+    private var timeLabel: NSTextField!
     private var notesButton: NSButton!
     private let notesJob = HintTask()
     private var lastProvider = ""
@@ -215,6 +218,58 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
     }
 
     #if DEBUG
+    /// Dev (invisible render): the same start as `present`, but the panel is NEVER ordered in or made key — it only
+    /// exists so that AppKit lays the views out and `renderInvisible` can draw them. alpha 0, far outside every screen,
+    /// no monitors, no animation, no `orderFront*` / `makeKey*`. Returns false if the panel nevertheless became visible.
+    func presentInvisibly(text: String, appearance: NSAppearance?) -> Bool {
+        presentGeneration += 1
+        buildIfNeeded()
+        panel.alphaValue = 0
+        panel.appearance = appearance
+        panel.setFrameOrigin(NSPoint(x: -30000, y: -30000))
+        runner.cancel(); refiner.cancel(); backJob.cancel()
+        sourceText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        frontApp = nil
+        requestedSource = nil; requestedTarget = nil; detectedSource = nil; detectedTarget = nil
+        anchor = NSPoint(x: 100, y: 800)
+        setGlossaryFormVisible(false)
+        toneControl.selectedSegment = Tone.allCases.firstIndex(of: tone) ?? 0
+        panel.setContentSize(NSSize(width: width, height: 120))
+        startTranslation()
+        return !panel.isVisible
+    }
+
+    var debugPanelVisible: Bool { panel?.isVisible ?? false }
+    var debugFinished: Bool { mainFinished && !runner.isRunning }
+
+    /// Draws the (invisible) popup to a PNG over a plain window-like background.
+    func renderInvisible(to path: String, dark: Bool) {
+        guard let view = panel?.contentView else { return }
+        let size = fittingSize()
+        panel.setContentSize(size)
+        view.layoutSubtreeIfNeeded()
+        view.displayIfNeeded()
+        // The content hangs from the top of the (taller) view; in an unflipped view that is its upper part.
+        let area = NSRect(x: 0, y: view.bounds.height - size.height, width: size.width, height: size.height)
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: area) else { return }
+        view.cacheDisplay(in: area, to: rep)
+        guard let out = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: rep.pixelsWide, pixelsHigh: rep.pixelsHigh,
+                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let ctx = NSGraphicsContext(bitmapImageRep: out) else { return }
+        let px = NSSize(width: rep.pixelsWide, height: rep.pixelsHigh)
+        out.size = px // 1 unit = 1 pixel: whatever scale the off-screen panel picked, the PNG is 1:1 with `rep`
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = ctx
+        rep.draw(in: NSRect(origin: .zero, size: px))
+        ctx.cgContext.setBlendMode(.destinationOver)
+        ctx.cgContext.setFillColor(dark ? CGColor(srgbRed: 0.18, green: 0.18, blue: 0.19, alpha: 1)
+                                        : CGColor(srgbRed: 0.96, green: 0.96, blue: 0.96, alpha: 1))
+        ctx.cgContext.fill(CGRect(origin: .zero, size: px))
+        NSGraphicsContext.restoreGraphicsState()
+        try? out.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+
     /// Dev: TOLK_FRAME_LOG=file samples the panel frame every 10 ms (only changes): "ms top height".
     private func startFrameLog() {
         guard let path = ProcessInfo.processInfo.environment["TOLK_FRAME_LOG"] else { return }
@@ -325,7 +380,24 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         })
     }
 
+    private func showTimeConversions() {
+        let lines = TimezoneLine.lines(in: sourceText)
+        timeRow.isHidden = lines.isEmpty
+        guard !lines.isEmpty else { return }
+        timeLabel.stringValue = lines.joined(separator: "; ")
+        updateSize()
+    }
+
+    /// «Перевести заново»: the next request skips the in-memory cache.
+    private var bypassNext = false
+    private func retranslate() {
+        guard !sourceText.isEmpty, !runner.isRunning else { return }
+        bypassNext = true
+        startTranslation()
+    }
+
     private func startTranslation() {
+        timeRow.isHidden = true
         resetRefine()
         translation = ""
         fellBackFrom = nil
@@ -359,6 +431,8 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         // Short replies from the same chat get the previous lines as context (pronouns), never translated.
         request.threadContext = ThreadMemory.shared.context(for: sourceText, app: frontApp)
         lastThreadContext = request.threadContext
+        request.bypassCache = bypassNext
+        bypassNext = false
         runner.start(request)
     }
 
@@ -376,7 +450,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
             providerBadge.text = UIText.providerName(provider)
             providerBadge.tint = UIText.isFallbackProvider(provider) ? .systemOrange : .secondaryLabelColor
             if let from = fellBackFrom {
-                showNotice("\(UIText.providerName(from)) недоступен — перевод от \(UIText.providerName(provider))",
+                showNotice(UIText.fallbackDone(from: from, to: provider),
                            color: .systemOrange)
             }
         case let .delta(chunk):
@@ -410,6 +484,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
             }
             if translation.isEmpty { showMessage("Пустой перевод.", color: .secondaryLabelColor) }
             else {
+                showTimeConversions()
                 refineButton.isEnabled = true
                 // Two Ollama slots: back-translation first, footnotes after it — so a word-alternatives
                 // request or another user is not stuck behind both.
@@ -981,7 +1056,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
-        let close = UIFactory.symbolButton("xmark", tooltip: "Закрыть (Esc)", target: self, action: #selector(closeClicked))
+        let close = UIFactory.symbolButton("xmark", tooltip: EscText.closeTip, target: self, action: #selector(closeClicked))
         let expand = UIFactory.symbolButton("arrow.up.left.and.arrow.down.right", tooltip: "Открыть в окне перевода",
                                             target: self, action: #selector(expandClicked))
 
@@ -1039,6 +1114,18 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         backBox.isHidden = true
 
         statusLine = StatusLineView()
+        statusLine.onRetranslate = { [weak self] in self?.retranslate() }
+
+        let clock = NSImageView(image: NSImage(systemSymbolName: "clock", accessibilityDescription: "Время") ?? NSImage())
+        clock.symbolConfiguration = .init(pointSize: 11, weight: .regular)
+        clock.contentTintColor = .secondaryLabelColor
+        clock.setContentHuggingPriority(.required, for: .horizontal)
+        timeLabel = UIFactory.wrappingLabel("", size: 12, color: .secondaryLabelColor)
+        timeRow = NSStackView(views: [clock, timeLabel])
+        timeRow.orientation = .horizontal
+        timeRow.alignment = .firstBaseline
+        timeRow.spacing = 5
+        timeRow.isHidden = true
 
         altBox = NSStackView()
         altBox.orientation = .horizontal
@@ -1119,7 +1206,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         let separator = NSBox()
         separator.boxType = .separator
 
-        let root = NSStackView(views: [header, noticeLabel, scrollView, statusLine, altBox, notesBox, backBox, glossaryForm, separator, footer])
+        let root = NSStackView(views: [header, noticeLabel, scrollView, timeRow, statusLine, altBox, notesBox, backBox, glossaryForm, separator, footer])
         root.orientation = .vertical
         root.alignment = .leading
         root.spacing = 8
@@ -1134,9 +1221,10 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
             root.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
             effect.widthAnchor.constraint(equalToConstant: width),
         ])
-        for v in [header, noticeLabel!, scrollView!, statusLine!, altBox!, notesBox!, backBox!, glossaryForm!, separator, footer] {
+        for v in [header, noticeLabel!, scrollView!, timeRow!, statusLine!, altBox!, notesBox!, backBox!, glossaryForm!, separator, footer] {
             v.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -inset * 2).isActive = true
         }
         noticeLabel.preferredMaxLayoutWidth = width - inset * 2
+        timeLabel.preferredMaxLayoutWidth = width - inset * 2 - 20
     }
 }

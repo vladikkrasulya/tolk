@@ -21,7 +21,7 @@ var wantRefine = false, selfTest = false
 var contextSource: String?, contextTranslation: String?
 var checkOnly: String?
 var cancelAfter: Double?, addTerm: String?
-var pairsTranslation: String?, variantsCurrent: String?, rewriteMode: RewriteMode?, rewriteTranslation: String?, wantExplain = false, variantsAll: String?
+var pairsTranslation: String?, variantsCurrent: String?, rewriteMode: RewriteMode?, rewriteTranslation: String?, wantExplain = false, variantsAll: String?, composeTone: ComposeTone?
 var maskShow: String?, maskEval: String?, maskFormats = "brackets,section,square", noMask = false, maskFormat: String?
 var prevTurns: [String] = [], calquesText: String?, tzText: String?, tzLocal: String?, tzNow: String?, showFingerprint = false
 var words: [String] = []
@@ -80,6 +80,9 @@ while let a = args.next() {
     case "--pairs": pairsTranslation = value()               // text = source; value = translation: sentence pairs (no model)
     case "--variants": variantsCurrent = value()             // text = source sentence; value = its translation; full texts via --context-*
     case "--variants-all": variantsAll = value()             // text = source; value = its translation: 2-3 whole-translation variants (--reply-to works)
+    case "--compose":                                        // --compose TONE, text = points, --to LANG / --reply-to MESSAGE
+        guard let t = ComposeTone(rawValue: value()) else { fail("--compose: " + ComposeTone.allCases.map(\.rawValue).joined(separator: "|")) }
+        composeTone = t
     case "--rewrite":                                        // --rewrite MODE TRANSLATION, text = source
         guard let m = RewriteMode(rawValue: value()) else { fail("--rewrite: " + RewriteMode.allCases.map(\.rawValue).joined(separator: "|") + " TRANSLATION") }
         rewriteMode = m; rewriteTranslation = value()
@@ -312,6 +315,14 @@ if let rewriteMode, let rewriteTranslation {
         if !r.accepted { err("⚠️ отклонено: \(r.rejection ?? "?") — оставлен исходный текст") }
         else if !r.changed { err("(без изменений)") }
         if r.pronounsChecked { err("(местоимения проверены)") }
+    }
+}
+if let composeTone {
+    timed("compose \(composeTone.rawValue)") {
+        let r = try await engine.compose(points: text, tone: composeTone, to: ldst, partnerMessage: replyTo)
+        print(r.text)
+        if let b = r.backTranslation { err("↩︎ \(b)") }
+        for w in r.warnings { err("⚠️ \(w)") }
     }
 }
 if wantExplain {

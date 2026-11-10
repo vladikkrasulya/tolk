@@ -389,7 +389,7 @@ private final class OverlayView: NSView {
             let size = "\(Int(sel.width)) × \(Int(sel.height))"
             drawPill(size, at: NSPoint(x: sel.maxX, y: sel.minY - 8), alignRight: true, small: true)
         } else if showsHint {
-            drawPill("Выделите область с текстом  ·  Esc — отмена",
+            drawPill("Выделите область с текстом  ·  \(EscText.cancelHint)",
                      at: NSPoint(x: bounds.midX, y: bounds.maxY - 90), alignRight: false, small: false)
         }
     }

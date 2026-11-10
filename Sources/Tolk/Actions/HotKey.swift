@@ -72,10 +72,15 @@ private func tolkHotKeyCallback(_ next: EventHandlerCallRef?, _ event: EventRef?
     return handled ? noErr : OSStatus(eventNotHandledErr)
 }
 
-/// Hotkeys per action in UserDefaults (`tolk.quickActions.hotKeys`, JSON `{id: combo|null}`).
-/// Missing id = the action's default; explicit null = disabled by the user.
+/// Hotkeys per feature in UserDefaults (`tolk.quickActions.hotKeys`, JSON `{id: combo|null}`).
+/// Missing id = the feature's default; explicit null = disabled by the user. Ids: quick-action ids and "typeTranslate".
 struct QuickActionHotKeyStore {
     static let key = "tolk.quickActions.hotKeys"
+    /// Posted after `set` — controllers re-register their hotkeys, the menu rewrites its labels.
+    static let didChange = Notification.Name("tolk.hotKeysChanged")
+    static let typeTranslateID = "typeTranslate"
+    /// Ids whose last registration failed (taken by another app) — the settings page shows a warning.
+    @MainActor static var failedIDs: Set<String> = []
     let defaults = UserDefaults.standard
 
     private func load() -> [String: HotKeyCombo?] {
@@ -84,9 +89,29 @@ struct QuickActionHotKeyStore {
         return dict
     }
 
-    func hotKey(for action: QuickAction) -> HotKeyCombo? {
-        let dict = load()
-        if let stored = dict[action.id] { return stored } // may be nil = disabled
-        return action.defaultHotKey
+    func hotKey(for action: QuickAction) -> HotKeyCombo? { hotKey(id: action.id, default: action.defaultHotKey) }
+
+    func hotKey(id: String, default def: HotKeyCombo?) -> HotKeyCombo? {
+        if let stored = load()[id] { return stored } // may be nil = disabled
+        return def
     }
+
+    /// nil = disabled. Writing the default again just stores it explicitly (harmless).
+    func set(_ combo: HotKeyCombo?, id: String) {
+        var dict = load()
+        dict[id] = .some(combo)
+        if let data = try? JSONEncoder().encode(dict) { defaults.set(data, forKey: Self.key) }
+        NotificationCenter.default.post(name: Self.didChange, object: nil)
+    }
+
+    func reset(id: String) {
+        var dict = load()
+        dict[id] = nil
+        if let data = try? JSONEncoder().encode(dict) { defaults.set(data, forKey: Self.key) }
+        NotificationCenter.default.post(name: Self.didChange, object: nil)
+    }
+}
+
+extension HotKeyCombo {
+    var display: String { GlobalHotKey.display(keyCode: keyCode, modifiers: modifiers) }
 }

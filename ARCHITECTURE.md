@@ -259,3 +259,18 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Big window: «Варианты перевода» card (button only; word diff against the current translation, «Взять» / «Вернуть»).
   Popup: «Варианты» in the header opens the big window with the same text, tone and chat context (translation comes
   from the cache) and starts the request. CLI: `--variants-all`. Self-test: 587 checks.
+
+## v0.6.8 — tone modes, compose, layout fix, final pass, tails
+- Rewrite modes «По-деловому» (`professional`) and «Прямо» (`direct`): same guard as the others, plus no new numbers.
+  The row folds into «Ещё ▾» / «Переписать ▾» on narrow cards (`RewriteBar`).
+- «Составить» page mode (`MainWindow/ComposePanel.swift`, `compose(points:tone:to:partnerMessage:)`): points in the
+  user's language → a finished message (Нейтрально / По-деловому / Прямо / Дружелюбно) + back-translation; warns when a
+  number/time/date from the points is missing or a new one appears. ~25–30 s per request; tones are still too similar.
+- ⌃⌥L «Исправить раскладку» (`Engine/LayoutFix.swift`, `Actions/SpellCheckOracle.swift`): RU/UK ↔ EN by word, no model.
+- Final pass on the translate page: after a 2.5 s pause, ≤600 chars, >1 sentence and partial translations in this
+  session, the whole text is translated once; replaced only if different (`incremental: final pass changed=…`).
+- «↻ заново» on a cached result (popup and page, ⌘R on the page) sends `bypassCache`.
+- Time zones in the popup and in the «Проверка» card (`TimezoneConverter`); thread memory in «Ответить».
+- One source for server/fallback texts (`ServerText`) and Esc hints (`EscText`); hotkeys are editable in Settings →
+  Общие (quick actions and «Перевод при наборе»); `TOLK_RENDER_POPUP` renders off-screen now (never shown).
+- vkbox: `gemma-translate` recreated with num_ctx 8192 (old one kept as `gemma-translate-32k`). Self-test: 690 checks.

@@ -15,6 +15,8 @@ struct QuickAction: Hashable, Sendable {
     /// HUD verb while working: "Перевожу".
     let progressVerb: String
     let defaultHotKey: HotKeyCombo?
+    /// Local action without a model: swaps a wrong keyboard layout (see `LayoutFix`).
+    var isLayoutFix = false
 
     /// Polish has no Google fallback — the engine fails if Qwen is down.
     var needsQwen: Bool { mode == .polish }
@@ -33,8 +35,14 @@ struct QuickAction: Hashable, Sendable {
         progressVerb: "Причёсываю",
         defaultHotKey: HotKeyCombo(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(controlKey | optionKey)))
 
+    static let fixLayout = QuickAction(
+        id: "fixLayout", title: "Исправить раскладку", mode: .translate, target: nil,
+        progressVerb: "Исправляю",
+        defaultHotKey: HotKeyCombo(keyCode: UInt32(kVK_ANSI_L), modifiers: UInt32(controlKey | optionKey)),
+        isLayoutFix: true)
+
     /// Order = order on the settings page.
-    static let all: [QuickAction] = [.translateReplace, .polishReplace]
+    static let all: [QuickAction] = [.translateReplace, .polishReplace, .fixLayout]
 
     static func with(id: String) -> QuickAction? { all.first { $0.id == id } }
 }
@@ -55,7 +63,7 @@ enum QuickActionText {
 
     /// After the engine fell back to Google.
     static func fallback(verb: String, provider: String, tone: Tone) -> String {
-        "Модель на vkbox недоступна — " + progress(verb: verb.lowercased(), provider: provider, tone: tone)
+        ServerText.hudFallback(progress: progress(verb: verb.lowercased(), provider: provider, tone: tone))
     }
 
     static func providerName(_ raw: String) -> String {
@@ -66,11 +74,14 @@ enum QuickActionText {
         return raw
     }
 
+    static let fixingLayout = "Исправляю раскладку…"
+    static let layoutAlreadyOK = "Раскладка уже верная — менять нечего"
+    static func layoutFixed(words: Int) -> String { "Раскладка исправлена ✓" }
     static let noSelection = "Нет выделенного текста"
     static let busy = "Подождите — предыдущее действие ещё идёт"
     static let done = "Готово ✓"
     static let noAccessibility = "Нужен доступ «Универсальный доступ» для Tolk"
-    static let qwenDown = "Модель на vkbox недоступна — причесать текст без неё нельзя"
+    static let qwenDown = ServerText.needsServer("причесать текст")
     static let appChanged = "Окно сменилось — вставлять некуда, результат в буфере обмена"
     static let readOnly = "Здесь нельзя заменить текст — результат в буфере обмена"
     /// Waiting for the first word: a cold model on the server is being loaded.

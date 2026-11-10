@@ -57,14 +57,21 @@ final class QuickActionsController {
         actions.filter { hotKey(for: $0) != nil && tokens[$0.id] == nil }
     }
 
+    /// After the user changed a shortcut in settings.
+    @discardableResult func reregister() -> Bool { registerAll() }
+
     private func registerAll() -> Bool {
         actions.reduce(true) { ok, a in registerOne(a) && ok }
     }
 
     private func registerOne(_ action: QuickAction) -> Bool {
         if let t = tokens.removeValue(forKey: action.id) { hotKeys.unregister(t) }
+        QuickActionHotKeyStore.failedIDs.remove(action.id)
         guard let combo = hotKey(for: action) else { return true } // disabled
-        guard let t = hotKeys.register(combo, handler: { [weak self] in self?.perform(action) }) else { return false }
+        guard let t = hotKeys.register(combo, handler: { [weak self] in self?.perform(action) }) else {
+            QuickActionHotKeyStore.failedIDs.insert(action.id)
+            return false
+        }
         tokens[action.id] = t
         return true
     }
@@ -87,7 +94,8 @@ final class QuickActionsController {
         pasting = false
         timedOut = false
         registerEsc()
-        hud.showProgress(QuickActionText.progress(verb: action.progressVerb, provider: nil, tone: tone), at: mouse)
+        hud.showProgress(action.isLayoutFix ? QuickActionText.fixingLayout
+                         : QuickActionText.progress(verb: action.progressVerb, provider: nil, tone: tone), at: mouse)
 
         let limit = timeout
         let timer = Task { @MainActor [weak self] in
@@ -127,6 +135,9 @@ final class QuickActionsController {
         }
         Diagnostics.log("quick \(action.id): \(selected.count) chars selected in \(app?.bundleIdentifier ?? "?")")
         if Task.isCancelled { return cancelled() }
+
+        // Wrong keyboard layout: no model, the answer is instant.
+        if action.isLayoutFix { return await executeLayoutFix(selected, app: app, id: action.id) }
 
         // 3. Model. While the first word has not arrived, show how long the (maybe cold) model has been loading.
         let waitStart = Date()
@@ -187,6 +198,24 @@ final class QuickActionsController {
         unregisterEsc()
         await paste(text)
         hud.showMessage(QuickActionText.done, kind: .success)
+    }
+
+    private func executeLayoutFix(_ selected: String, app: NSRunningApplication?, id: String) async {
+        let result = LayoutFix.fix(selected, oracle: SpellCheckOracle.shared)
+        Diagnostics.log("quick \(id): \(result.changedWords) words fixed\(result.ukrainian ? " (uk)" : "")")
+        guard result.changed else { hud.showMessage(QuickActionText.layoutAlreadyOK, kind: .info); return }
+        if let app, NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier {
+            leaveOnClipboard(result.text)
+            hud.showMessage(QuickActionText.appChanged, kind: .error); return
+        }
+        if FocusProbe.focusedFieldIsReadOnly() {
+            leaveOnClipboard(result.text)
+            hud.showMessage(QuickActionText.readOnly, kind: .info); return
+        }
+        pasting = true
+        unregisterEsc()
+        await paste(result.text)
+        hud.showMessage(QuickActionText.layoutFixed(words: result.changedWords), kind: .success)
     }
 
     private func leaveOnClipboard(_ text: String) {

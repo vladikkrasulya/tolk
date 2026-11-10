@@ -1,4 +1,5 @@
 import AppKit
+import TolkCore
 
 /// Small non-activating plate near the mouse cursor: spinner + status, or a short result message.
 /// Never takes focus and ignores the mouse, so the user's app keeps the keyboard and the selection.
@@ -10,7 +11,7 @@ final class QuickActionHUD {
     private let spinner = NSProgressIndicator()
     private let icon = NSImageView()
     private let label = NSTextField(labelWithString: "")
-    private let hint = NSTextField(labelWithString: "Esc — отмена")
+    private let hint = NSTextField(labelWithString: EscText.cancelHint)
     private var hideWork: DispatchWorkItem?
     private var anchor: NSPoint = .zero
 

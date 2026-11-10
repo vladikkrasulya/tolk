@@ -103,6 +103,10 @@ final class HistoryRecordingEngine: TranslationEngine, @unchecked Sendable {
 
     func explain(message: String) async throws -> MessageExplanation { try await base.explain(message: message) }
 
+    func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String?) async throws -> ComposeResult {
+        try await base.compose(points: points, tone: tone, to: to, partnerMessage: partnerMessage)
+    }
+
     func replyRequest(message: String, reply: String, tone: Tone) -> TranslationRequest {
         base.replyRequest(message: message, reply: reply, tone: tone)
     }

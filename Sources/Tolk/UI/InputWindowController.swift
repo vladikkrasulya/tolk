@@ -23,7 +23,7 @@ final class InputWindowController: NSObject, NSWindowDelegate {
     private(set) lazy var page: TranslatePageViewController = {
         let p = TranslatePageViewController(engine: engine)
         p.topInset = 34 // below the transparent title bar
-        p.footerHint = "⌘↩ — скопировать и закрыть   ·   Esc — закрыть"
+        p.footerHint = "⌘↩ — скопировать и закрыть   ·   \(EscText.closeHint)"
         p.onCommandReturn = { [weak self] in self?.copyAndClose() }
         p.onEscape = { [weak self] in self?.window?.performClose(nil) }
         pageIfLoaded = p

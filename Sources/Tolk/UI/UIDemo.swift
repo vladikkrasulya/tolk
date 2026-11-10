@@ -9,6 +9,9 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
     let mode: Mode
     /// Demo: no check warnings (shows the plain, long status line).
     nonisolated(unsafe) static var noWarnings = false
+    /// Demo: a fixed translation text (popup render) and the «из кеша» mark.
+    nonisolated(unsafe) static var fixedTranslation: String?
+    nonisolated(unsafe) static var fromCache = false
     init(mode: Mode) { self.mode = mode }
 
     static let longRussian = """
@@ -74,12 +77,12 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
                     } else {
                         c.yield(.started(provider: "qwen", source: src, target: dst))
                     }
-                    let text = request.replyTo != nil ? Self.myReplyEnglish
+                    let text = Self.fixedTranslation ?? (request.replyTo != nil ? Self.myReplyEnglish
                         : request.text == Self.partnerMessage ? Self.partnerRussian
                         : request.text == Self.myReplyEnglish ? Self.myReplyBack
                         : request.target == .english && request.source == .russian ? Self.backEnglish
                         : request.text.count > 80 ? Self.longRussian
-                        : "[\(request.tone.rawValue)] " + Self.longRussian.prefix(140) + "…"
+                        : "[\(request.tone.rawValue)] " + Self.longRussian.prefix(140) + "…")
                     var chunk = ""
                     for ch in text {
                         chunk.append(ch)
@@ -91,7 +94,8 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
                     if !chunk.isEmpty { c.yield(.delta(chunk)) }
                     var stats = TranslationStats(provider: "gemma-translate", route: .home, firstChunk: 1.7, total: 6.8,
                                                  outputTokens: 110, tokensExact: true, fallbackReason: nil)
-                    stats.warnings = Self.noWarnings ? [] : ["в переводе нет времени 15:30", "потеряна ссылка example.com/ads.txt"]
+                    stats.fromCache = Self.fromCache
+                    stats.warnings = Self.noWarnings || Self.fixedTranslation != nil ? [] : ["в переводе нет времени 15:30", "потеряна ссылка example.com/ads.txt"]
                     stats.firstChunk = 2.0; stats.outputTokens = 100
                     c.yield(.stats(stats))
                     c.yield(.finished)
@@ -158,6 +162,13 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
             t = t.replacingOccurrences(of: "можете прислать", with: "не могли бы Вы прислать")
         case .informal:
             t = t.replacingOccurrences(of: "можете прислать", with: "можешь прислать")
+        case .professional:
+            t = t.replacingOccurrences(of: "Предлагаю откатить", with: "Прошу откатить")
+                .replacingOccurrences(of: "Спасибо, ждём обратной связи!", with: "Ждём обратной связи.")
+                .replacingOccurrences(of: "можете прислать", with: "просим прислать")
+        case .direct:
+            t = t.replacingOccurrences(of: "Предлагаю откатить флор до прежнего значения", with: "Нужно откатить флор до прежнего значения")
+                .replacingOccurrences(of: "Без этого часть DSP режет", with: "Без этого часть DSP режет")
         case .firmer:
             return RewriteResult(mode: mode, text: translation, accepted: false,
                                  rejection: "в тексте пропало число «64 %»", changed: false, pronounsChecked: false)
@@ -178,6 +189,17 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
                                 .replacingOccurrences(of: "раскатить изменения на", with: "раскатить на"),
                                label: "Короче", reason: "убраны вводные слова, фразы сжаты"),
         ]
+    }
+
+    static let composeSample = "Hello! We would like you to switch off all fraud traffic, all resale and all iframe traffic, and we will try once more tomorrow morning. If the traffic turns out to be low quality again, we will stop for good. If low-quality traffic keeps coming in, we will ask for a refund. We don't need to be overly careful with them, but without aggression: it is important to say plainly that we don't like this situation."
+    static let composeBack = "Здравствуйте! Мы хотели бы, чтобы вы отключили весь фродовый трафик, весь ресейл и весь iframe-трафик, и завтра с утра мы попробуем ещё раз. Если трафик снова окажется низкого качества, мы остановимся насовсем. Если некачественный трафик продолжит поступать, мы потребуем возврат средств. Но без агрессии: важно прямо сказать, что нас такая ситуация не устраивает."
+
+    func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String?) async throws -> ComposeResult {
+        try await Task.sleep(for: .milliseconds(900))
+        let hasMsg = partnerMessage?.isEmpty == false
+        return ComposeResult(text: Self.composeSample, language: hasMsg ? LanguageDetector.detect(partnerMessage ?? "") : to,
+                             backTranslation: Self.composeBack,
+                             warnings: points.contains("999") ? ["в сообщении пропало число «999»"] : [])
     }
 
     func explain(message: String) async throws -> MessageExplanation {

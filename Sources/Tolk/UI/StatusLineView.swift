@@ -2,7 +2,7 @@
 //   ● Qwen · жду ответ…            (grey)
 //   ● Qwen · генерация · 31 ток/с  (live, updated per chunk — no timers)
 //   ● Qwen дома · первое слово 0,4 с · 29 ток/с · 1,9 с   (green / blue when remote)
-//   ● Google · 0,8 с · vkbox не ответил                    (orange: fallback, no glossary)
+//   ● Google · 0,8 с · vkbox недоступен                    (orange: fallback, no glossary)
 import AppKit
 import TolkCore
 
@@ -19,6 +19,9 @@ final class StatusLineView: NSView {
     private var fallbackReason: String?
     /// The page shows the warnings in the «Проверка» card: here only a «⚠ 2» badge, so the line stays short.
     var compactWarnings = false
+    /// Set by the window: a click on the «из кеша» mark asks for a fresh translation (no cache).
+    var onRetranslate: (() -> Void)?
+    private var retranslatable = false
 
     init(fontSize: CGFloat = 11) {
         super.init(frame: .zero)
@@ -48,7 +51,18 @@ final class StatusLineView: NSView {
 
     // MARK: - States
 
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        retranslatable && !isHidden && frame.contains(point) ? self : super.hitTest(point)
+    }
+    override func mouseDown(with event: NSEvent) {
+        if retranslatable { onRetranslate?() } else { super.mouseDown(with: event) }
+    }
+    override func resetCursorRects() {
+        if retranslatable { addCursorRect(bounds, cursor: .pointingHand) }
+    }
+
     func reset() {
+        retranslatable = false
         stopHint()
         provider = ""; firstChunkAt = nil; chunks = 0; fallbackReason = nil
         set("", color: .clear, text: .secondaryLabelColor)
@@ -57,6 +71,7 @@ final class StatusLineView: NSView {
 
     /// A request went out; nothing has arrived yet.
     func waiting(provider: String) {
+        retranslatable = false
         stopHint()
         self.provider = provider
         firstChunkAt = nil; chunks = 0
@@ -87,7 +102,7 @@ final class StatusLineView: NSView {
     func fellBack(reason: String) {
         stopHint()
         fallbackReason = reason
-        set("переключаюсь на запасной перевод…", color: .systemOrange, text: .systemOrange)
+        set(ServerText.switching() + "…", color: .systemOrange, text: .systemOrange)
     }
 
     /// Called for every streamed chunk; the label is refreshed at most ~5 times a second.
@@ -113,6 +128,21 @@ final class StatusLineView: NSView {
             // Same text and settings as a recent translation: shown from memory, the model was not asked.
             parts.append("из кеша")
             set(parts.joined(separator: " · "), color: .systemGreen, text: .secondaryLabelColor)
+            if onRetranslate != nil {
+                let attr = NSMutableAttributedString(string: label.stringValue + " · ", attributes: [
+                    .font: label.font as Any, .foregroundColor: NSColor.secondaryLabelColor])
+                if let img = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Перевести заново") {
+                    let att = NSTextAttachment()
+                    att.image = img.withSymbolConfiguration(.init(pointSize: label.font?.pointSize ?? 11, weight: .regular))
+                    attr.append(NSAttributedString(attachment: att))
+                }
+                attr.append(NSAttributedString(string: " заново", attributes: [
+                    .font: label.font as Any, .foregroundColor: NSColor.controlAccentColor]))
+                label.attributedStringValue = attr
+                retranslatable = true
+                toolTip = "Перевод взят из памяти. Нажмите — перевести заново, без кеша"
+                window?.invalidateCursorRects(for: self)
+            }
             return
         }
         if let f = st.firstChunk, st.route == .home || st.route == .remote {
@@ -173,10 +203,7 @@ final class StatusLineView: NSView {
     }
 
     static func shortReason(_ r: String) -> String {
-        let l = r.lowercased()
-        if l.contains("vkbox") || l.contains("не отвечает") || l.contains("недоступ") { return "vkbox не ответил" }
-        if l.contains("таймаут") || l.contains("timed out") { return "сервер не успел ответить" }
-        return r
+        ServerText.statusReason(r)
     }
 
     /// Layer colours do not follow light/dark switches by themselves.

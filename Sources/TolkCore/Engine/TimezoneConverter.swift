@@ -244,3 +244,22 @@ public enum TimezoneConverter {
         return s
     }
 }
+
+/// «10:00 EST → 16:00 у вас»: one line per found time for the windows (popup line, hints panel). Only certain
+/// conversions: ambiguous zones («CST», «IST») and times that equal the local time are not shown.
+public enum TimezoneLine {
+    public static func lines(for conversions: [TimezoneConversion], limit: Int = 3) -> [String] {
+        var seen = Set<String>(), out: [String] = []
+        for c in conversions where !c.ambiguous && !c.sameAsLocal {
+            let line = "\(c.found) → \(c.local) у вас"
+            if seen.insert(line).inserted { out.append(line) }
+        }
+        return Array(out.prefix(limit))
+    }
+
+    public static func lines(in text: String, now: Date = Date(), localZone: TimeZone = .current, limit: Int = 3) -> [String] {
+        // Cheap guard: a time needs a digit — most texts have none, skip the regexes.
+        guard text.contains(where: \.isNumber) else { return [] }
+        return lines(for: TimezoneConverter.convert(in: text, now: now, localZone: localZone), limit: limit)
+    }
+}

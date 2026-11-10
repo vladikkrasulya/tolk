@@ -20,16 +20,49 @@ final class SettingsViewController: NSViewController {
         view = host
     }
 
+    // The 2-second poll (Accessibility / launch-at-login / autocomplete statistics) runs only while the page is on
+    // screen: started when it appears, stopped when it goes away or its window is covered / minimised.
+    private var ticker: Timer?
+    private var occlusionObserver: NSObjectProtocol?
+
     override func viewWillAppear() {
         super.viewWillAppear()
         model.refreshStatus()
         model.refreshStats()
+        updateTicker()
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification, object: view.window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateTicker() }
+        }
+        updateTicker()
     }
 
     override func viewWillDisappear() {
         super.viewWillDisappear()
         model.saveNow() // don't lose a pending debounced save
+        if let o = occlusionObserver { NotificationCenter.default.removeObserver(o); occlusionObserver = nil }
+        stopTicker()
     }
+
+    private func updateTicker() {
+        let onScreen = view.window?.occlusionState.contains(.visible) ?? false
+        if onScreen { startTicker() } else { stopTicker() }
+    }
+
+    private func startTicker() {
+        guard ticker == nil else { return }
+        let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.model.refreshStatus(); self?.model.refreshStats() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        ticker = t
+    }
+
+    private func stopTicker() { ticker?.invalidate(); ticker = nil }
 }
 
 // MARK: - Tabs
@@ -146,7 +179,15 @@ final class SettingsModel: ObservableObject {
 
     // MARK: Status
 
+    #if DEBUG
+    /// Dev: how many times the 2-second poll ran (idle measurement, TOLK_IDLE_TICKS).
+    nonisolated(unsafe) static var debugRefreshCount = 0
+    #endif
+
     func refreshStatus() {
+        #if DEBUG
+        Self.debugRefreshCount += 1
+        #endif
         // Assign only on change: every @Published write re-lays out the whole Form (was ~5% CPU at idle).
         let access = AXIsProcessTrusted()
         if access != hasAccessibility { hasAccessibility = access }
@@ -411,7 +452,6 @@ enum LaunchAgent {
 
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
-    private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -446,6 +486,7 @@ struct SettingsView: View {
                     acOffAppsSection
                 case .general:
                     launchSection
+                    HotKeysSection()
                     accessSection
                     aboutSection
                 }
@@ -454,7 +495,6 @@ struct SettingsView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .safeAreaInset(edge: .bottom) { footer }
-        .onReceive(timer) { _ in model.refreshStatus(); model.refreshStats() }
         .onChange(of: model.tab) { _, _ in model.refreshStats() }
     }
 
@@ -702,7 +742,7 @@ struct SettingsView: View {
         let names = model.config.typeTranslateApps.filter(\.value).keys.sorted()
         return Section {
             Toggle("Включать автоматически, если собеседник пишет на другом языке", isOn: $model.config.typeTranslateAuto)
-            hint("Пишете по-русски — под полем появляется перевод на язык собеседника, Tab вставляет его вместо вашего текста, Esc оставляет ваш. Tolk сам ничего не отправляет. Включить или выключить для текущего приложения: ⌃⌥R или пункт в меню строки меню.")
+            hint("Пишете по-русски — под полем появляется перевод на язык собеседника, Tab вставляет его вместо вашего текста, Esc оставляет ваш. Tolk сам ничего не отправляет. Включить или выключить для текущего приложения: горячая клавиша (по умолчанию ⌃⌥R, меняется во вкладке «Общие») или пункт в меню строки меню.")
             if !names.isEmpty {
                 HStack {
                     Text("Включено в: " + names.joined(separator: ", ")).font(.callout).foregroundStyle(.secondary)

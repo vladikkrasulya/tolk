@@ -23,6 +23,7 @@ private final class DropOverlay: NSView {
 /// Root view of the translate page: catches ⌘↩ wherever the focus is inside the page and accepts dropped files.
 private final class TranslatePageView: NSView {
     var onCommandReturn: (() -> Void)?
+    var onRetranslate: (() -> Void)?
     /// A document was dropped (nil: the page does not take files).
     var onFileDrop: ((URL) -> Void)?
     let dropOverlay = DropOverlay()
@@ -70,6 +71,11 @@ private final class TranslatePageView: NSView {
         if event.type == .keyDown, flags == .command, event.keyCode == 36 || event.keyCode == 76,
            window?.firstResponder.map({ ($0 as? NSView)?.isDescendant(of: self) ?? false }) ?? false {
             onCommandReturn?()
+            return true
+        }
+        if event.type == .keyDown, flags == .command, event.charactersIgnoringModifiers == "r",
+           window?.firstResponder.map({ ($0 as? NSView)?.isDescendant(of: self) ?? false }) ?? false {
+            onRetranslate?()
             return true
         }
         return super.performKeyEquivalent(with: event)
@@ -156,6 +162,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
     private var step: LiveTranslation.Step?
     private var keptPrefix = ""
     private var tail = ""
+    private var finalPassTask: Task<Void, Never>?
     // Editor pass
     private let refiner = RefineRunner()
     private var refineButton: NSButton!
@@ -173,11 +180,13 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
     private var appliedPronoun: RewriteMode?
     private var messageInfo = ""
     // Reply mode
-    enum Mode { case translate, reply }
+    enum Mode { case translate, reply, compose }
     private(set) var mode: Mode = .translate
     private var modeControl: NSSegmentedControl!
     private var swapButton: NSButton!
     private var messageCard: ReplyMessageCard!
+    private var composePanel: ComposePanel!
+    private var leftCardView: NSView!, rightCardView: NSView!, footerToneLabel: NSView!
     private var messageHeight: NSLayoutConstraint!
     private var leftTopPlain: NSLayoutConstraint!
     private var leftTopReply: NSLayoutConstraint!
@@ -294,6 +303,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         messageRunner.cancel()
         messageTask?.cancel()
         cancelRewrite()
+        composePanel?.cancel()
         hints?.invalidate()
         spinner.stopAnimation(nil)
         lastTranslatedRequest = nil
@@ -324,6 +334,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         cancelRewrite()
         hints?.suspend()
         pendingVariants = false
+        finalPassTask?.cancel() // typing cancels the quiet whole-text pass
         debounceTask?.cancel()
         debounceTask = Task { @MainActor [weak self, debounce] in
             try? await Task.sleep(for: debounce)
@@ -345,8 +356,17 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         return "символов"
     }
 
+    /// «Перевести заново» (⌘R, click on «из кеша»): the same text, a fresh request that skips the cache.
+    private func retranslate() {
+        guard !inputView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        bypassNext = true
+        translateNow(force: true)
+    }
+    private var bypassNext = false
+
     private func translateNow(force: Bool = false) {
         debounceTask?.cancel()
+        finalPassTask?.cancel()
         let text = inputView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         let replyActive = mode == .reply && !replyMessage.isEmpty
         let request = replyActive
@@ -393,7 +413,10 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
                                                         range: NSRange(location: 0, length: outputView.textStorage?.length ?? 0)) }
             spinner.startAnimation(nil)
             statusLine?.waiting(provider: "…")
-            runner.start(request)
+            var req = request
+            req.bypassCache = bypassNext
+            bypassNext = false
+            runner.start(req)
             return
         }
         let key = LiveTranslation.key(source: selectedSource, target: selectedTarget, tone: tone, mode: .translate,
@@ -418,6 +441,8 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         copyButton.isEnabled = false
         refineButton.isEnabled = false
         if let t = loadedThread, !t.isEmpty { toSend.threadContext = t }
+        toSend.bypassCache = bypassNext
+        bypassNext = false
         if st.kind == .partial {
             // The kept part stays on screen without flicker; the tail streams in after it.
             translation = st.kept
@@ -453,7 +478,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             updateStatus()
             view.needsLayout = true
             if let from = fellBackFrom {
-                showNotice("\(UIText.providerName(from)) недоступен — перевод от \(UIText.providerName(provider))",
+                showNotice(UIText.fallbackDone(from: from, to: provider),
                            color: .systemOrange)
             }
         case let .delta(chunk):
@@ -485,12 +510,61 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             if let st = step, !tail.isEmpty { live.commit(st, tail: tail) }
             refineButton.isEnabled = !translation.isEmpty
             pushHints(useStats: true)
+            scheduleFinalPass()
         case let .failed(message):
             statusLine?.failed(message)
             spinner.stopAnimation(nil)
             lastTranslatedRequest = nil // allow retry with the same text
             if translation.isEmpty { setOutput(message, color: .systemRed) } else { showNotice(message, color: .systemRed) }
         }
+    }
+
+    // MARK: Final whole-text pass (quiet)
+
+    /// After a pause of ≥ 2.5 s, if the translation on screen is stitched from partial pieces (live typing), translate the
+    /// whole short text in one request. Only a different result replaces the text — without flicker, scroll position kept.
+    private func scheduleFinalPass() {
+        finalPassTask?.cancel()
+        let text = inputView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard mode != .reply, !translation.isEmpty,
+              FinalPass.shouldRun(text: text, hadPartials: live.hadPartials) else { return }
+        let shownBefore = translation
+        let key = LiveTranslation.key(source: selectedSource, target: selectedTarget, tone: tone, mode: .translate,
+                                      config: TolkConfig.load())
+        var request = TranslationRequest(text: text, source: selectedSource, target: selectedTarget, tone: tone)
+        if let t = loadedThread, !t.isEmpty { request.threadContext = t }
+        let engine = self.engine
+        finalPassTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(FinalPass.pause))
+            guard !Task.isCancelled else { return }
+            let result = try? await TextCollector.collect(engine.translate(request)) { _ in }
+            guard let self, !Task.isCancelled, let result,
+                  // The user may have typed, refined or rewritten meanwhile: then the result is stale.
+                  self.translation == shownBefore, !self.runner.isRunning,
+                  self.inputView.string.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
+            let changed = FinalPass.differs(shown: shownBefore, final: result.text)
+            Diagnostics.log("incremental: final pass changed=\(changed)")
+            self.live.adoptFinal(text: text, key: key, translation: changed ? result.text : shownBefore)
+            guard changed else { return }
+            self.replaceOutputQuietly(with: result.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+    }
+
+    /// Replaces the translation text keeping the scroll position (no dimming, no placeholder).
+    private func replaceOutputQuietly(with text: String) {
+        let clip = outputView.enclosingScrollView?.contentView
+        let origin = clip?.bounds.origin
+        translation = text
+        keptPrefix = ""
+        tail = ""
+        setOutput(text, color: .labelColor)
+        if let clip, let origin {
+            clip.scroll(to: origin)
+            outputView.enclosingScrollView?.reflectScrolledClipView(clip)
+        }
+        copyButton.isEnabled = true
+        refineButton.isEnabled = true
+        pushHints(useStats: false)
     }
 
     private func textAttributes(color: NSColor = .labelColor) -> [NSAttributedString.Key: Any] {
@@ -630,6 +704,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
     }
 
     private func commandReturn() {
+        if mode == .compose { composePanel.run(); return }
         if let onCommandReturn { onCommandReturn() } else { copyTranslation() }
     }
 
@@ -662,6 +737,13 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         if r.location != NSNotFound { variantsForSentence(at: r.location) }
     }
     func debugRewrite(_ m: RewriteMode) { rewriteRequested(m) }
+    /// «Сформулировать» with filled fields (and optionally the run).
+    func debugCompose(points: String, message: String = "", tone: ComposeTone = .neutral, run: Bool) {
+        setMode(.compose)
+        composePanel.debugFill(points: points, message: message, tone: tone)
+        if run { composePanel.run() }
+    }
+    var debugComposeIdle: Bool { composePanel.debugIdle }
     func debugExplain() { hints.explainClicked() }
     func debugSuggestVariants() { hints.suggestTranslationVariants() }
     func debugTakeVariant(_ i: Int) { hints.debugTakeVariant(i) }
@@ -709,7 +791,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         // Touching the implicitly unwrapped `hints` here crashed Tolk on every settings save in that state.
         guard isViewLoaded, hints != nil else { return }
         let replyReady = mode == .reply && !replyMessage.isEmpty
-        if forceHide { hintsShown = false } else if hints.hasContext || replyReady { hintsShown = true }
+        if mode == .compose { hintsShown = false } else if forceHide { hintsShown = false } else if hints.hasContext || replyReady { hintsShown = true }
         hints.isHidden = !hintsShown
         hintsWidth?.constant = hintsShown ? 300 : 0
         hintsGap?.constant = hintsShown ? -12 : 0
@@ -722,9 +804,9 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         super.viewWillLayout()
         messageHeight?.constant = mode == .reply ? min(max(view.bounds.height * 0.28, 120), 230) : 200
         let columns: CGFloat = view.bounds.width >= Self.wideThreshold && hintsShown ? 312 : 0
-        rewriteBar?.setCompact((view.bounds.width - 48 - columns) / 2 < 380)
+        rewriteBar?.setWidth((view.bounds.width - 48 - columns) / 2)
         // A narrow translation column has no room for the provider badge next to the mode switch (the status line names it anyway).
-        let narrowColumn = (view.bounds.width - 48 - columns) / 2 < 400
+        let narrowColumn = (view.bounds.width - 48 - columns) / 2 < 470
         if let providerBadge { providerBadge.isHidden = narrowColumn || providerBadge.text.isEmpty }
         let wide = view.bounds.width >= Self.wideThreshold
         guard wide != wideLayout, !wideConstraints.isEmpty else { return }
@@ -773,13 +855,41 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
 
     private var replyMessage: String { messageCard.messageView.string.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    @objc private func modeChanged(_ sender: NSSegmentedControl) { setMode(sender.selectedSegment == 1 ? .reply : .translate) }
+    @objc private func modeChanged(_ sender: NSSegmentedControl) {
+        setMode(sender.selectedSegment == 2 ? .compose : sender.selectedSegment == 1 ? .reply : .translate)
+    }
+
+    /// «Сформулировать» replaces both panes (and the hints panel); the mode switch stays.
+    private func setComposeVisible(_ on: Bool) {
+        composePanel.isHidden = !on
+        hintLabel.stringValue = on ? "⌘↩ — сформулировать" : footerHint
+        for v in [sourcePopup, targetPopup, leftCardView, rightCardView, footerToneLabel, toneControl, recentButton] as [NSView?] { v?.isHidden = on }
+        if on {
+            swapButton.isHidden = true; messageCard.isHidden = true; providerBadge.isHidden = true
+            spinner.stopAnimation(nil)
+        } else {
+            swapButton.isHidden = mode == .reply
+            messageCard.isHidden = mode != .reply
+            recentButton.isHidden = history == nil
+        }
+    }
 
     func setMode(_ new: Mode) {
         loadViewIfNeeded()
-        modeControl.selectedSegment = new == .reply ? 1 : 0
+        modeControl.selectedSegment = new == .compose ? 2 : new == .reply ? 1 : 0
         guard new != mode else { return }
         mode = new
+        setComposeVisible(new == .compose)
+        if new == .compose {
+            debounceTask?.cancel(); runner.cancel(); refiner.cancel(); messageTask?.cancel(); messageRunner.cancel()
+            cancelRewrite()
+            hints.invalidate()
+            lastTranslatedRequest = nil
+            updateHintsVisibility(forceHide: true)
+            view.needsLayout = true
+            composePanel.focus()
+            return
+        }
         let reply = new == .reply
         messageCard.isHidden = !reply
         leftTopPlain.isActive = !reply
@@ -882,7 +992,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         guard !translation.isEmpty, !runner.isRunning, rewriteTask == nil, !refiner.isRunning, !source.isEmpty,
               let from = selectedSource ?? detectedSource, let to = selectedTarget ?? detectedTarget else { return }
         if UIText.isFallbackProvider(lastProvider) {
-            showTransientNotice("Переписывание делает домашняя модель — сейчас перевод от запасного сервиса.", color: .systemOrange)
+            showTransientNotice(ServerText.homeOnly("Переписывание"), color: .systemOrange)
             return
         }
         guard slotAvailable() else {
@@ -1071,7 +1181,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
     /// Puts a saved pair on the page: the original and its translation, no new request.
     func loadFromHistory(_ e: HistoryEntry) {
         loadViewIfNeeded()
-        if mode == .reply { setMode(.translate) }
+        if mode != .translate { setMode(.translate) }
         debounceTask?.cancel(); runner.cancel(); refiner.cancel(); cancelRewrite()
         resetRefine(); clearPairs()
         inputView.string = e.source
@@ -1199,6 +1309,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
     override func loadView() {
         let root = TranslatePageView()
         root.onCommandReturn = { [weak self] in self?.commandReturn() }
+        root.onRetranslate = { [weak self] in self?.retranslate() }
         view = root
 
         // Language bar: [source]  ⇄  [target]      tone      spinner badge
@@ -1215,12 +1326,13 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         swap.symbolConfiguration = .init(pointSize: 13, weight: .semibold)
         swapButton = swap
 
-        modeControl = NSSegmentedControl(labels: ["Перевод", "Ответ"], trackingMode: .selectOne, target: self, action: #selector(modeChanged(_:)))
+        modeControl = NSSegmentedControl(labels: ["Перевод", "Ответ", "Составить"], trackingMode: .selectOne, target: self, action: #selector(modeChanged(_:)))
         modeControl.controlSize = .small
         modeControl.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         modeControl.selectedSegment = 0
         modeControl.setToolTip("Обычный перевод: текст слева, перевод справа", forSegment: 0)
         modeControl.setToolTip("Ответ собеседнику: сообщение сверху, мой ответ ниже, перевод ответа справа", forSegment: 1)
+        modeControl.setToolTip("Сформулировать сообщение из тезисов: что нужно сказать — своими словами, на выходе готовый текст на языке получателя", forSegment: 2)
         modeControl.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         toneControl = UIFactory.toneControl(target: self, action: #selector(toneChanged(_:)))
@@ -1291,6 +1403,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         copyButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         statusLine = StatusLineView()
         statusLine.compactWarnings = true
+        statusLine.onRetranslate = { [weak self] in self?.retranslate() }
         statusLine.setContentCompressionResistancePriority(.init(1), for: .horizontal)
         noticeLabel.setContentCompressionResistancePriority(.init(250), for: .horizontal)
         noticeLabel.lineBreakMode = .byTruncatingTail
@@ -1325,6 +1438,9 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
 
         hintLabel = UIFactory.label(footerHint, size: 11, color: .tertiaryLabelColor)
         let toneLabel = UIFactory.label("Тон", size: 12)
+        footerToneLabel = toneLabel
+        leftCardView = leftCard
+        rightCardView = rightCard
         recentButton = NSButton(title: "Последние", target: self, action: #selector(showRecents))
         recentButton.bezelStyle = .roundRect
         recentButton.controlSize = .small
@@ -1359,8 +1475,10 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         messageCard.isHidden = true
         messageCard.messageView.delegate = self
         applyFileDrop()
+        composePanel = ComposePanel(engine: engine)
+        composePanel.isHidden = true
 
-        for v in [leftBar, rightBar, swap, messageCard!, leftCard, rightCard, footer, hints!] {
+        for v in [leftBar, rightBar, swap, messageCard!, leftCard, rightCard, footer, hints!, composePanel!] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
         }
@@ -1384,6 +1502,10 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             messageCard.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: m),
             messageCard.trailingAnchor.constraint(equalTo: leftCard.trailingAnchor),
             leftCard.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: m),
+            composePanel.topAnchor.constraint(equalTo: leftBar.bottomAnchor, constant: 10),
+            composePanel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: m),
+            composePanel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -m),
+            composePanel.bottomAnchor.constraint(equalTo: leftCard.bottomAnchor),
             rightCard.topAnchor.constraint(equalTo: leftBar.bottomAnchor, constant: 10),
             rightCard.leadingAnchor.constraint(equalTo: leftCard.trailingAnchor, constant: 12),
             rightCard.widthAnchor.constraint(equalTo: leftCard.widthAnchor),

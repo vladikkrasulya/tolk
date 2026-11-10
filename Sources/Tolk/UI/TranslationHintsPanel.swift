@@ -506,7 +506,7 @@ final class TranslationHintsPanel: NSView {
     func requestVariants(sentence: String, current: String, range: NSRange, tone: Tone) {
         guard let c = ctx else { return }
         if UIText.isFallbackProvider(c.provider) {
-            flash("Варианты предложений делает домашняя модель — сейчас перевод от запасного сервиса.", color: .systemOrange)
+            flash(ServerText.homeOnly("Варианты предложений"), color: .systemOrange)
             return
         }
         variantsJob.cancel()
@@ -570,7 +570,7 @@ final class TranslationHintsPanel: NSView {
         if tvJob.isRunning { tvGeneration += 1; tvJob.cancel(); showTV(nil); refreshAll(); return }
         guard let c = ctx else { NSSound.beep(); return }
         if UIText.isFallbackProvider(c.provider) {
-            flash("Варианты перевода делает домашняя модель — сейчас перевод от запасного сервиса.", color: .systemOrange)
+            flash(ServerText.homeOnly("Варианты перевода"), color: .systemOrange)
             return
         }
         guard canStartRequest?() ?? true else {
@@ -671,7 +671,7 @@ final class TranslationHintsPanel: NSView {
         if explainJob.isRunning { clearExplanation(); refreshAll(); return }
         guard let text = currentExplainText() else { NSSound.beep(); return }
         if let c = ctx, UIText.isFallbackProvider(c.provider) {
-            flash("Разбор смысла делает домашняя модель — сейчас перевод от запасного сервиса.", color: .systemOrange)
+            flash(ServerText.homeOnly("Разбор смысла"), color: .systemOrange)
             return
         }
         guard canStartRequest?() ?? true else {
@@ -799,7 +799,21 @@ final class TranslationHintsPanel: NSView {
             row.spacing = 6
             addFull(row, to: warnBody)
         }
-        warnCard.isHidden = warnings.isEmpty
+        // Times with a zone in the text → the reader's local time (informational, not counted as a warning).
+        let times = ctx.map { TimezoneLine.lines(in: $0.source) } ?? []
+        for t in times {
+            let icon = NSImageView(image: NSImage(systemSymbolName: "clock", accessibilityDescription: nil) ?? NSImage())
+            icon.symbolConfiguration = .init(pointSize: 10.5, weight: .regular)
+            icon.contentTintColor = .secondaryLabelColor
+            icon.setContentHuggingPriority(.required, for: .horizontal)
+            let label = UIFactory.flexibleLabel(t, size: 12.5, color: .labelColor)
+            let row = NSStackView(views: [icon, label])
+            row.orientation = .horizontal
+            row.alignment = .firstBaseline
+            row.spacing = 6
+            addFull(row, to: warnBody)
+        }
+        warnCard.isHidden = warnings.isEmpty && times.isEmpty
         warnCard.setCount(warnings.isEmpty ? nil : warnings.count)
         // back-translation
         backCard.isHidden = !(HintsSettings.backEnabled && ctx != nil && backShown)

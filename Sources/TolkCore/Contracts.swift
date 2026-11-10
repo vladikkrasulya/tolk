@@ -228,6 +228,8 @@ public protocol TranslationEngine: AnyObject, Sendable {
     /// 2-3 alternative translations of the whole text, each with a label and a reason.
     func translationVariants(source: String, translation: String, from: Language, to: Language, tone: Tone, replyTo: String?) async throws -> [TranslationVariant]
     func explain(message: String) async throws -> MessageExplanation
+    /// «Сформулировать»: ready message from the user's points + honest back-translation.
+    func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String?) async throws -> ComposeResult
     /// The request for the reply flow (partner's message + the user's answer); stream it through `translate`.
     func replyRequest(message: String, reply: String, tone: Tone) -> TranslationRequest
     /// Glossary entries that fire for `text` when translating into `target` (no model, instant).
@@ -249,6 +251,9 @@ public extension TranslationEngine {
     }
     func translationVariants(source: String, translation: String, from: Language, to: Language, tone: Tone, replyTo: String?) async throws -> [TranslationVariant] {
         throw TolkError.unavailable("Варианты перевода недоступны для этого движка")
+    }
+    func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String?) async throws -> ComposeResult {
+        throw TolkError.unavailable("«Сформулировать» недоступно для этого движка")
     }
     func explain(message: String) async throws -> MessageExplanation {
         throw TolkError.unavailable("Разбор смысла недоступен для этого движка")

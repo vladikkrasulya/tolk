@@ -27,6 +27,9 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     private var statusLine: StatusLineView!
     private var context: ReplyContext?
     private var translation = ""
+    /// Earlier lines of this chat (ThreadMemory, same app) — context for pronouns and terms, never translated.
+    /// Fixed while the window is open, so live typing does not change the request.
+    private var threadContext: String?
     private var debounce: DispatchWorkItem?
     private var monitors: [Any] = []
     private var presentGeneration = 0
@@ -91,6 +94,8 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         presentGeneration += 1 // a fade-out of the previous close must not hide this window
         build()
         context = ctx
+        // The partner's message itself is `replyTo`; `turns(for:)` leaves it out and gives the lines before it.
+        threadContext = ThreadMemory.shared.context(for: ctx.partnerText, app: ctx.app?.bundleIdentifier)
         let appName = ctx.app?.localizedName ?? "чат"
         titleLabel.stringValue = "Ответ · \(appName) · \(ctx.partnerLanguage.flag) \(UIText.capitalized(ctx.partnerLanguage))"
         setOriginalVisible(false)
@@ -168,7 +173,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         step = st
         keptPrefix = st.kind == .partial ? st.kept : ""
         tail = ""
-        guard let request = st.request else {
+        guard var request = st.request else {
             // Nothing meaningful changed: the shown translation must equal the kept one.
             if wasRunning { statusLine?.reset() }
             spinner.stopAnimation(nil)
@@ -189,7 +194,16 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
             outputLabel.textColor = .tertiaryLabelColor
         }
         statusLine?.waiting(provider: "…")
+        request.threadContext = threadContext
         runner.start(request)
+    }
+
+    /// The reply the user takes (copy / paste) becomes a line of the chat for the next message.
+    private func rememberReply() {
+        guard let ctx = context, !translation.isEmpty else { return }
+        ThreadMemory.shared.record(source: inputView.string, translation: translation,
+                                   from: detected?.source ?? .russian, to: ctx.partnerLanguage,
+                                   app: ctx.app?.bundleIdentifier)
     }
 
     private var pendingFirstChunk = false
@@ -336,6 +350,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
 
     @objc private func copyReply() {
         guard !translation.isEmpty else { return }
+        rememberReply()
         Clipboard.copy(translation)
         copyButton.title = "Скопировано"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.copyButton.title = "Копировать" }
@@ -345,6 +360,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     @objc private func insertReply() {
         guard !translation.isEmpty, let app = context?.app else { return }
         let text = translation
+        rememberReply()
         Clipboard.copy(text)
         if let ctx = context { drafts[ctx.partnerText] = nil }
         inputView.string = ""
@@ -464,7 +480,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         let icon = NSImageView(image: NSImage(systemSymbolName: "arrowshape.turn.up.left.fill", accessibilityDescription: nil) ?? NSImage())
         icon.contentTintColor = .secondaryLabelColor
         icon.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
-        let close = UIFactory.symbolButton("xmark", tooltip: "Закрыть (Esc) — черновик сохранится", target: self, action: #selector(closeClicked))
+        let close = UIFactory.symbolButton("xmark", tooltip: EscText.closeKeepingDraftTip, target: self, action: #selector(closeClicked))
         let header = NSStackView(views: [icon, titleLabel, UIFactory.spacer(), close])
         header.orientation = .horizontal
         header.spacing = 6

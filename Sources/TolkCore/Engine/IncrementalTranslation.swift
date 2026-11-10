@@ -166,3 +166,26 @@ public final class IncrementalSession {
         }
     }
 }
+
+/// «Финальный перевод по паузе»: пока человек печатает, переводятся только изменённые предложения — перевод
+/// склеен из кусков и может быть чуть менее связным. Когда он замолчал, весь короткий текст переводится
+/// одним запросом (результат попадает в кеш); если он отличается — перевод тихо заменяется.
+public enum FinalPass {
+    public static let pause: TimeInterval = 2.5
+    public static let maxChars = 600
+
+    /// Нужен ли финальный проход: в этом сеансе были частичные переводы, текст короткий и в нём больше одного предложения.
+    public static func shouldRun(text: String, hadPartials: Bool) -> Bool {
+        guard hadPartials else { return false }
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, t.count <= maxChars else { return false }
+        return SentenceSplitter.split(t).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count > 1
+    }
+
+    /// Заменять ли показанный перевод финальным: различие только в регистре пробелов/переводов строк — не считается.
+    public static func differs(shown: String, final: String) -> Bool {
+        func norm(_ s: String) -> String { s.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ") }
+        let f = norm(final)
+        return !f.isEmpty && norm(shown) != f
+    }
+}

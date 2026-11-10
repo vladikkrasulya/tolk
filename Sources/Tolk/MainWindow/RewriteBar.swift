@@ -1,5 +1,5 @@
-// Row of compact rewrite buttons above the translation: Короче · Мягче · Твёрже · Проще · [ты|Вы].
-// In a narrow card the buttons fold into one «Переписать ▾» menu. While a request runs: spinner and «Отмена».
+// Row of compact rewrite buttons above the translation: Короче · Мягче · Твёрже · Проще · [ты|Вы] · По-деловому · Прямо.
+// Medium card: the last two go into «Ещё ▾». Narrow card: everything folds into one «Переписать ▾» menu. While a request runs: spinner and «Отмена».
 import AppKit
 import TolkCore
 
@@ -9,6 +9,9 @@ final class RewriteBar: NSView {
     var onCancel: (() -> Void)?
 
     private let buttons: [(RewriteMode, NSButton)]
+    private let extraButtons: [(RewriteMode, NSButton)]
+    private let moreMenu = NSPopUpButton(frame: .zero, pullsDown: true)
+    private var extended = false
     private let pronoun = NSSegmentedControl(labels: ["ты", "Вы"], trackingMode: .selectOne, target: nil, action: nil)
     private let foldMenu = NSPopUpButton(frame: .zero, pullsDown: true)
     private let spinner = NSProgressIndicator()
@@ -20,8 +23,20 @@ final class RewriteBar: NSView {
     private var enabled = false
 
     static let plainModes: [RewriteMode] = [.shorter, .softer, .firmer, .simpler]
+    static let extraModes: [RewriteMode] = [.professional, .direct]
+
+    private static func makeButton(_ mode: RewriteMode) -> NSButton {
+        let b = NSButton(title: mode.russianTitle, target: nil, action: nil)
+        b.bezelStyle = .roundRect
+        b.controlSize = .small
+        b.font = .systemFont(ofSize: 11.5)
+        b.toolTip = tip(mode)
+        b.setContentCompressionResistancePriority(.init(700), for: .horizontal)
+        return b
+    }
 
     override init(frame: NSRect) {
+        extraButtons = Self.extraModes.map { ($0, Self.makeButton($0)) }
         buttons = Self.plainModes.map { mode in
             let b = NSButton(title: mode.russianTitle, target: nil, action: nil)
             b.bezelStyle = .roundRect
@@ -33,10 +48,20 @@ final class RewriteBar: NSView {
         }
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
-        for (i, (mode, b)) in buttons.enumerated() {
-            b.target = self; b.action = #selector(plainClicked(_:)); b.tag = i
-            _ = mode
+        for (i, (_, b)) in buttons.enumerated() { b.target = self; b.action = #selector(plainClicked(_:)); b.tag = i }
+        for (i, (_, b)) in extraButtons.enumerated() { b.target = self; b.action = #selector(extraClicked(_:)); b.tag = i }
+        moreMenu.controlSize = .small
+        moreMenu.font = .systemFont(ofSize: 11.5)
+        moreMenu.bezelStyle = .roundRect
+        moreMenu.addItem(withTitle: "Ещё")
+        for mode in Self.extraModes {
+            let item = NSMenuItem(title: mode.russianTitle, action: #selector(menuPicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.toolTip = Self.tip(mode)
+            moreMenu.menu?.addItem(item)
         }
+        moreMenu.isHidden = true
         pronoun.target = self
         pronoun.action = #selector(pronounClicked(_:))
         pronoun.controlSize = .small
@@ -51,7 +76,7 @@ final class RewriteBar: NSView {
         foldMenu.font = .systemFont(ofSize: 11.5)
         foldMenu.bezelStyle = .roundRect
         foldMenu.addItem(withTitle: "Переписать")
-        for mode in Self.plainModes + [.informal, .formal] {
+        for mode in Self.plainModes + [.informal, .formal] + Self.extraModes {
             let item = NSMenuItem(title: mode.russianTitle, action: #selector(menuPicked(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = mode.rawValue
@@ -72,7 +97,7 @@ final class RewriteBar: NSView {
         busyLabel.lineBreakMode = .byTruncatingTail
         busyLabel.setContentCompressionResistancePriority(.init(300), for: .horizontal)
 
-        row.setViews(buttons.map(\.1) + [pronoun, foldMenu, busyLabel, UIFactory.spacer(), spinner, cancel], in: .leading)
+        row.setViews(buttons.map(\.1) + [pronoun] + extraButtons.map(\.1) + [moreMenu, foldMenu, busyLabel, UIFactory.spacer(), spinner, cancel], in: .leading)
         row.orientation = .horizontal
         row.spacing = 5
         row.setClippingResistancePriority(.init(1), for: .horizontal)
@@ -95,6 +120,8 @@ final class RewriteBar: NSView {
         case .simpler: "Проще слова и короче фразы"
         case .informal: "Перейти на «ты»"
         case .formal: "Перейти на «Вы»"
+        case .professional: "Деловой тон: чётко и нейтрально, без жаргона, лишних «пожалуйста» и извинений"
+        case .direct: "Позиция вместо просьбы, последствия названы прямо, без смягчений и без агрессии"
         }
     }
 
@@ -120,11 +147,21 @@ final class RewriteBar: NSView {
 
     func setCompact(_ c: Bool) { guard c != compact else { return }; compact = c; apply() }
 
+    /// Width of the card: < 400 everything folds into one menu, < 560 «По-деловому» and «Прямо» are in «Ещё ▾».
+    func setWidth(_ w: CGFloat) {
+        let c = w < 400, e = w >= 560
+        guard c != compact || e != extended else { return }
+        compact = c; extended = e; apply()
+    }
+
     private func apply() {
         // While a request runs the buttons give way to «Переписываю…», a spinner and «Отмена»: the row never gets wider.
         for (_, b) in buttons { b.isHidden = compact || busy; b.isEnabled = enabled && !busy }
         pronoun.isHidden = compact || busy
         pronoun.isEnabled = enabled && !busy
+        for (_, b) in extraButtons { b.isHidden = compact || busy || !extended; b.isEnabled = enabled && !busy }
+        moreMenu.isHidden = compact || busy || extended
+        moreMenu.isEnabled = enabled && !busy
         foldMenu.isHidden = !compact || busy
         foldMenu.isEnabled = enabled && !busy
     }
@@ -132,6 +169,7 @@ final class RewriteBar: NSView {
     // MARK: Actions
 
     @objc private func plainClicked(_ sender: NSButton) { onMode?(buttons[sender.tag].0) }
+    @objc private func extraClicked(_ sender: NSButton) { onMode?(extraButtons[sender.tag].0) }
     @objc private func pronounClicked(_ sender: NSSegmentedControl) {
         onMode?(sender.selectedSegment == 0 ? .informal : .formal)
     }

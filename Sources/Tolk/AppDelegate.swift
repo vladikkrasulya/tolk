@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var acController: AutocompleteController!
     private var ttController: TypeTranslateController!
     private var ttItem: NSMenuItem!
+    private var quickMenuItems: [(QuickAction, NSMenuItem)] = []
     private var settingsVC: SettingsViewController!
     private var termSources: [DispatchSourceSignal] = []
     private var acItem: NSMenuItem!
@@ -56,6 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         if ProcessInfo.processInfo.environment["TOLK_AC_STATS_SHOT"] != nil { ACStatsDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_HINTS_SHOT"] != nil { TranslateHintsDemo.run(); return }
+        // Invisible popup render (never shown): TOLK_RENDER_POPUP=dir
+        if ProcessInfo.processInfo.environment["TOLK_RENDER_POPUP"] != nil { PopupDemo.run(); return }
+        if ProcessInfo.processInfo.environment["TOLK_IDLE_TICKS"] != nil { IdleTicksDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_TYPE_TRANSLATE_SHOT"] != nil { TypeTranslateDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_MAIN_DEMO"] != nil { MainWindowDemo.runIfRequested(); return }
         // Dev: TOLK_TEST_OLLAMA=http://127.0.0.1:11999 points this run at a fake server (cold-model / down tests); not saved.
@@ -110,6 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         quickActions = QuickActionsController(engine: withHistory("quick"), config: config)
         quickActions.onWillPerform = { [weak self] in self?.popup.hideNow() }
+        NotificationCenter.default.addObserver(self, selector: #selector(hotKeysChanged),
+                                               name: QuickActionHotKeyStore.didChange, object: nil)
         if !quickActions.start() { NSLog("Tolk: hotkeys taken: \(quickActions.failedActions.map(\.title))") }
 
         screenCapture = ScreenCaptureController()
@@ -191,22 +197,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Dev: TOLK_RENDER_MENUICON=file.png renders the menu bar icon preview and quits.
         if let path = ProcessInfo.processInfo.environment["TOLK_RENDER_MENUICON"] {
             MenuBarIcon.renderPreview(to: path); exit(0)
-        }
-        // Dev: TOLK_RENDER_POPUP=dir shows the popup with a sample, waits for the translation, renders PNG, quits.
-        if let dir = ProcessInfo.processInfo.environment["TOLK_RENDER_POPUP"] {
-            UserDefaults.standard.set(false, forKey: "tolk.popup.notes")
-            popup.replaceEngine(engine) // no history entries from dev renders
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
-                let env = ProcessInfo.processInfo.environment
-                let at = (env["TOLK_RENDER_POPUP_AT"] ?? "500,700").split(separator: ",").compactMap { Double($0) }
-                popup.show(text: env["TOLK_RENDER_POPUP_TEXT"] ?? "Hey Vlad, our CR on your push zones dropped to 0.4%. Can you check the sub IDs?",
-                           at: NSPoint(x: at.first ?? 500, y: at.last ?? 700))
-                DispatchQueue.main.asyncAfter(deadline: .now() + (Double(env["TOLK_RENDER_POPUP_WAIT"] ?? "") ?? 9)) { [self] in
-                    popup.renderForReview(to: "\(dir)/popup.png")
-                    UserDefaults.standard.removeObject(forKey: "tolk.popup.notes")
-                    exit(0)
-                }
-            }
         }
         // Dev: TOLK_STRESS_POPUP=N opens/closes the popup N times at random intervals (races, leaks), then logs
         // memory + open file/thread counts to stderr.log and quits.
@@ -417,7 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let retry = acRetryItem { retry.isHidden = !acServer.isFailedState }
         if let app = lastExternalApp, let id = app.bundleIdentifier {
             let ttOn = config.typeTranslateApps[id] == true
-            ttItem.title = "Перевод при наборе в \(app.localizedName ?? id): \(ttOn ? "выключить" : "включить")  ⌃⌥R"
+            ttItem.title = "Перевод при наборе в \(app.localizedName ?? id): \(ttOn ? "выключить" : "включить")" + Self.hotKeySuffix(typeTranslateHotKey)
             ttItem.state = ttOn ? .on : .off
             let off = config.autocompleteOffApps.contains(id)
             acAppItem.title = "\(off ? "Включить" : "Выключить") в \(app.localizedName ?? id)"
@@ -502,10 +492,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showHealth(_ qwenOK: Bool) {
         statusItem.button?.image = MenuBarIcon.image(qwenOK ? .ready : .unavailable)
-        statusLine.title = qwenOK
-            ? "● Переводит \(engine.primary.name) (vkbox)"
-            : (config.fallback == .none ? "○ vkbox недоступен"
-                                         : "○ vkbox недоступен — переводит \(config.fallback == .apple ? "Apple" : "Google")")
+        statusLine.title = ServerText.menuLine(available: qwenOK, model: engine.primary.name,
+                                               fallback: config.fallback == .none ? nil : (config.fallback == .apple ? "Apple" : "Google"))
         statusItem.button?.toolTip = statusLine.title
     }
 
@@ -514,7 +502,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let menu = NSMenu()
-        statusLine = NSMenuItem(title: "Проверяю vkbox…", action: nil, keyEquivalent: "")
+        statusLine = NSMenuItem(title: ServerText.menuChecking, action: nil, keyEquivalent: "")
         statusLine.isEnabled = false
         menu.addItem(statusLine)
         accessItem = item("⚠︎ Нужен доступ Accessibility для двойного ⌘C", #selector(openAccessibility))
@@ -524,10 +512,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item("Перевести буфер обмена", #selector(translateClipboard)))
         menu.addItem(item("Перевести область экрана  ⌥⇧S", #selector(captureScreen)))
         menu.addItem(.separator())
-        menu.addItem(item("Перевести и заменить выделенное  ⌃⌥T", #selector(quickTranslate)))
-        menu.addItem(item("Причесать выделенное  ⌃⌥P", #selector(quickPolish)))
+        quickMenuItems = [
+            (QuickAction.translateReplace, item("", #selector(quickTranslate))),
+            (QuickAction.polishReplace, item("", #selector(quickPolish))),
+            (QuickAction.fixLayout, item("", #selector(quickFixLayout))),
+        ]
+        for (_, mi) in quickMenuItems { menu.addItem(mi) }
+        refreshHotKeyLabels()
         menu.addItem(.separator())
-        ttItem = item("Перевод при наборе  ⌃⌥R", #selector(toggleTypeTranslate))
+        ttItem = item("Перевод при наборе", #selector(toggleTypeTranslate))
         menu.addItem(ttItem)
         let acMenuItem = NSMenuItem(title: "Автодополнение", action: nil, keyEquivalent: "")
         let acMenu = NSMenu()
@@ -588,7 +581,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Выйти из Tolk", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
         showHealth(true)
-        statusLine.title = "Проверяю vkbox…"
+        statusLine.title = ServerText.menuChecking
     }
 
     private func item(_ title: String, _ action: Selector) -> NSMenuItem {
@@ -692,6 +685,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func quickTranslate() { quickActions.perform(.translateReplace) }
     @objc private func quickPolish() { quickActions.perform(.polishReplace) }
+    @objc private func quickFixLayout() { quickActions.perform(.fixLayout) }
+
+    private var typeTranslateHotKey: HotKeyCombo? {
+        QuickActionHotKeyStore().hotKey(id: QuickActionHotKeyStore.typeTranslateID, default: TypeTranslateController.defaultHotKey)
+    }
+    private static func hotKeySuffix(_ combo: HotKeyCombo?) -> String { combo.map { "  " + $0.display } ?? "" }
+
+    /// Menu titles show the user's current shortcuts (settings → «Горячие клавиши»).
+    private func refreshHotKeyLabels() {
+        let titles: [String: String] = [
+            QuickAction.translateReplace.id: "Перевести и заменить выделенное",
+            QuickAction.polishReplace.id: "Причесать выделенное",
+            QuickAction.fixLayout.id: "Исправить раскладку выделенного",
+        ]
+        for (action, mi) in quickMenuItems {
+            mi.title = (titles[action.id] ?? action.title) + Self.hotKeySuffix(QuickActionHotKeyStore().hotKey(for: action))
+        }
+        if let ttItem, lastExternalApp == nil { ttItem.title = "Перевод при наборе" + Self.hotKeySuffix(typeTranslateHotKey) }
+    }
+
+    @objc private func hotKeysChanged() {
+        quickActions.reregister()
+        ttController?.reregister()
+        refreshHotKeyLabels()
+        refreshAutocompleteMenu()
+    }
 
     @objc private func translateClipboard() {
         guard let text = NSPasteboard.general.string(forType: .string),

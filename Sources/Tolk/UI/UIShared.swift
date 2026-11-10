@@ -103,7 +103,12 @@ enum UIText {
 
     /// One wording for «the home model failed, the fallback service is working» on every page and in the popup.
     static func fallbackSwitching(from: String) -> String {
-        "\(providerName(from)) недоступен — переключаюсь на запасной перевод"
+        ServerText.switching(fromHome: !isFallbackProvider(from), name: providerName(from))
+    }
+
+    /// «vkbox недоступен — перевод от Google» (the fallback has started to answer).
+    static func fallbackDone(from: String, to: String) -> String {
+        ServerText.switched(fromHome: !isFallbackProvider(from), name: providerName(from), to: providerName(to))
     }
 
     static func capitalized(_ l: Language) -> String {
