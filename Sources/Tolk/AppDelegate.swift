@@ -408,7 +408,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .stopped: acStatusItem.title = "\(acServer.modelName): остановлена"
         case .starting: acStatusItem.title = "\(acServer.modelName) загружается…"
         case .ready: acStatusItem.title = "\(acServer.modelName): готово"
-        case .failed(let e): acStatusItem.title = "Ошибка: \(e)"
+        case .failed(let e): acStatusItem.title = "\(acServer.modelName): не запустилась"; acStatusItem.toolTip = e
         }
         if let retry = acRetryItem { retry.isHidden = !acServer.isFailedState }
         if let app = lastExternalApp, let id = app.bundleIdentifier {
@@ -513,7 +513,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusLine = NSMenuItem(title: "Проверяю vkbox…", action: nil, keyEquivalent: "")
         statusLine.isEnabled = false
         menu.addItem(statusLine)
-        accessItem = item("⚠︎ Дай доступ Accessibility для двойного ⌘C", #selector(openAccessibility))
+        accessItem = item("⚠︎ Нужен доступ Accessibility для двойного ⌘C", #selector(openAccessibility))
         menu.addItem(accessItem)
         menu.addItem(.separator())
         menu.addItem(item("Открыть Tolk", #selector(openMain)))
@@ -648,12 +648,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func reportProblem() { Diagnostics.copyProblemReport() }
     @objc private func openGlossary() { mainWindow.show(.glossary) }
     @objc private func openSettings() { mainWindow.show(.settings) }
-    /// Screen area capture (⌥⇧S or menu): main window open → the image page gets the picture
-    /// (preview, paragraphs, translation); otherwise → OCR text in the popup.
+    /// Screen area capture (⌥⇧S or menu). Rule (`CaptureFocus.route`): Tolk was the frontmost app and its big
+    /// window is open → the image page gets the picture (preview, paragraphs, translation) and Tolk stays active;
+    /// otherwise → OCR text in the popup and the focus goes back to the app the user was in.
     @objc private func captureScreen() {
+        // Read at the moment of the press: a window that is merely visible behind another app does not count.
+        let tolkWasFrontmost = NSWorkspace.shared.frontmostApplication == NSRunningApplication.current
         // Async: let the status menu close first, so it is not in the screenshot.
         DispatchQueue.main.async { [self] in
-            if mainWindowOnScreen {
+            if CaptureFocus.route(tolkWasFrontmost: tolkWasFrontmost, mainWindowUsable: mainWindowOnScreen) == .mainWindow {
                 Diagnostics.log("capture → image page")
                 mainWindow.show(.image)
                 imagePage.captureArea(nil)

@@ -101,6 +101,11 @@ enum UIText {
         }
     }
 
+    /// One wording for «the home model failed, the fallback service is working» on every page and in the popup.
+    static func fallbackSwitching(from: String) -> String {
+        "\(providerName(from)) недоступен — переключаюсь на запасной перевод"
+    }
+
     static func capitalized(_ l: Language) -> String {
         l.russianName.prefix(1).uppercased() + l.russianName.dropFirst()
     }
@@ -120,7 +125,7 @@ enum UIText {
             case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
                 return "Не удалось подключиться к серверу перевода."
             default:
-                return "Ошибка сети: \(url.localizedDescription)"
+                return "Сбой сети. Попробуйте ещё раз."
             }
         }
         if let le = error as? LocalizedError, let d = le.errorDescription, !d.isEmpty {

@@ -101,6 +101,7 @@ enum AutocompletePrompt {
         if !ex.isEmpty {
             out += "Examples of how I write:\n" + ex.prefix(5).map { "- " + $0.replacingOccurrences(of: "\n", with: " ") }.joined(separator: "\n") + "\n\n"
         }
+        out += RecentMessages.block(e.recent)
         return out
     }
 

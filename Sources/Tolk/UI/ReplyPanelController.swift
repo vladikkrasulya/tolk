@@ -337,7 +337,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     @objc private func copyReply() {
         guard !translation.isEmpty else { return }
         Clipboard.copy(translation)
-        copyButton.title = "Скопировано ✓"
+        copyButton.title = "Скопировано"
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.copyButton.title = "Копировать" }
     }
 
@@ -402,7 +402,17 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         guard abs(f.height - h) > 0.5 else { return }
         f.origin.y = f.maxY - h // grow downwards, top edge stays
         f.size.height = h
-        panel.setFrame(clampToScreen(f), display: true, animate: panel.isVisible)
+        let target = clampToScreen(f)
+        if panel.isVisible, !runner.isRunning, !refiner.isRunning {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.12
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().setFrame(target, display: true)
+            }
+        } else {
+            // While tokens stream in, a new animation per token (the blocking AppKit `animate: true`) makes the window judder.
+            panel.setFrame(target, display: true)
+        }
     }
 
     private func place(near p: NSPoint) {

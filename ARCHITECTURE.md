@@ -224,3 +224,16 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   shared `Actions/ClipboardPaste.swift` (pasteboard restored, transient types) so the app's ⌘Z works. Enter is never
   intercepted. Same exclusions as autocomplete; autocomplete stays silent in apps where the mode is on.
 - CLI: `tolk-cli --type-sim "partner" "my text"`. Self-test: 526 checks.
+
+## v0.6.6 — focus, wording, own windows, my previous messages
+- Screen capture (`TolkCore/CaptureFocus.swift`): result goes to the main window only if Tolk was the active app when
+  ⌥⇧S was pressed (then Tolk stays active); otherwise the popup at the area and focus returns to the previous app;
+  ⌘Tab during the selection leaves focus alone.
+- Autocomplete, typo fixes, emoji and «Перевод при наборе» stay silent while the key window is Tolk's own
+  (`AutocompleteSafety.focusIsInOwnWindow`: popup and reply panels do not activate Tolk, so the front app is not enough).
+- Typo-fix Tab: invisible tails after the caret (zero-width, U+FFFC, BOM…) count as blank (`isBlankTail`); instant
+  suggestions are re-checked 120/350 ms after showing and hidden early if the field no longer fits.
+- Prompt: up to 3 of my messages sent in the same app within 15 min (`RecentMessages`, from `StyleMemory`, only when
+  style learning is on) before the screen conversation.
+- Wording unified (Копировать, Письмо, Отмена, one fallback notice, no raw errors); reply window no longer animates per
+  token. Self-test: 555 checks.

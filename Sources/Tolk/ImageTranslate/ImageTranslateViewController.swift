@@ -589,10 +589,16 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         // Let the window disappear before the overlay appears.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self else { return }
-            self.screenCapture.selectImage { [weak self] image, _ in
+            self.screenCapture.selectImage(route: .mainWindow) { [weak self] image, _, end in
                 guard let self, let image else {
-                    // Cancelled (Esc, ⌘Tab…): put the window back, but don't pull focus from where the user went.
-                    window?.orderFront(nil)
+                    // Esc / right click: the user was in Tolk — window back and active.
+                    // ⌘Tab to another app: window back too, but don't pull focus from where the user went.
+                    if CaptureFocus.target(route: .mainWindow, end: end) == .tolk {
+                        window?.makeKeyAndOrderFront(nil)
+                        NSApp.activate()
+                    } else {
+                        window?.orderFront(nil)
+                    }
                     return
                 }
                 window?.makeKeyAndOrderFront(nil)
@@ -753,7 +759,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         case let .progress(index, total):
             progressLabel.stringValue = total > 1 ? "часть \(index + 1) из \(total)" : ""
         case let .fellBack(from, _):
-            showNotice("\(UIText.providerName(from)) недоступен — перевожу через запасной сервис.", color: .secondaryLabelColor)
+            showNotice(UIText.fallbackSwitching(from: from), color: .systemOrange)
         case .finished:
             translateSpinner.stopAnimation(nil)
             progressLabel.stringValue = ""

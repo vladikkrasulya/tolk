@@ -22,6 +22,8 @@ struct PromptExtras {
     var clipboard: String?
     /// The user's own earlier messages in a similar situation (style examples).
     var examples: [String] = []
+    /// The user's last few messages in this app (last ~15 min), oldest first; only with style learning on.
+    var recent: [String] = []
     /// Max words in a suggestion (nil = default).
     var maxWords: Int?
 }

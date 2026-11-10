@@ -128,6 +128,10 @@ final class TypeTranslateController {
     func handleKey(_ event: CGEvent) -> KeyResult {
         let front = NSWorkspace.shared.frontmostApplication
         guard let bid = front?.bundleIdentifier, front?.processIdentifier != Self.ownPID else { return .proceed }
+        if AutocompleteController.focusIsInOwnWindow() {   // typing in Tolk's own (non-activating) window
+            if shown != nil || task != nil { reset(reason: "own-window") }
+            return .proceed
+        }
         if IsSecureEventInputEnabled() || isOff(bid) {
             if shown != nil || task != nil { reset(reason: "secure-or-off") }
             return .proceed
@@ -193,7 +197,7 @@ final class TypeTranslateController {
             Diagnostics.log("type-translate: field not readable app=\(bundleID)")
         }
         guard let field = read, !Task.isCancelled, planner.generation == g,
-              field.pid != Self.ownPID, field.bundleID == bundleID, !IsSecureEventInputEnabled() else { return }
+              field.pid != Self.ownPID, !AutocompleteController.focusIsInOwnWindow(), field.bundleID == bundleID, !IsSecureEventInputEnabled() else { return }
         let explicit = config.typeTranslateApps[bundleID]
         guard explicit != false else { return }
 

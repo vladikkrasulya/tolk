@@ -590,7 +590,7 @@ final class GlossaryViewController: NSViewController {
             a.informativeText = "\(overlap) из них уже есть в глоссарии. Обновить их перевод и комментарий из файла?"
             a.addButton(withTitle: "Обновить")
             a.addButton(withTitle: "Только новые")
-            a.addButton(withTitle: "Отменить")
+            a.addButton(withTitle: "Отмена")
             switch a.runModal() {
             case .alertFirstButtonReturn: overwrite = true
             case .alertSecondButtonReturn: overwrite = false

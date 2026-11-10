@@ -3,6 +3,7 @@ import AppKit
 import Carbon.HIToolbox
 import ImageIO
 import ScreenCaptureKit
+import TolkCore
 
 /// Global hotkey (default ⌥⇧S) -> the user selects a screen area -> OCR -> `onText(text, point)`.
 /// `point` is the bottom-left corner of the selection in global screen coordinates — the popup opens under it.
@@ -46,7 +47,7 @@ final class ScreenCaptureController {
 
     /// Starts an area selection immediately (menu item / hotkey): OCR result goes to `onText`.
     func captureNow() {
-        selectImage { [weak self] image, rect in
+        selectImage(route: .popup) { [weak self] image, rect, _ in
             guard let self, let image else { return }
             let point = NSPoint(x: rect.minX + 24, y: rect.minY)
             Task { @MainActor in
@@ -101,28 +102,29 @@ final class ScreenCaptureController {
 
     /// Lets the user select an area and returns its picture (nil = cancelled / no permission / failed).
     /// `rect` is the selection in global screen coordinates (bottom-left origin).
-    func selectImage(_ completion: @escaping (_ image: CGImage?, _ rect: NSRect) -> Void) {
+    /// `route` decides who gets the focus when the overlay closes (see `CaptureFocus`); `end` tells how it ended.
+    func selectImage(route: CaptureRoute, _ completion: @escaping (_ image: CGImage?, _ rect: NSRect, _ end: CaptureEnd) -> Void) {
         guard overlay == nil else { return }
-        guard Self.ensurePermission() else { completion(nil, .zero); return }
+        guard Self.ensurePermission() else { completion(nil, .zero, .cancelled); return }
         let overlay = SelectionOverlay()
         self.overlay = overlay
-        overlay.run { [weak self] screen, rect, reason in
+        overlay.run(route: route) { [weak self] screen, rect, reason, end in
             self?.overlay = nil
             guard let screen, rect.width >= 6, rect.height >= 6 else {
                 Diagnostics.log("capture: selection cancelled reason=\(reason)")
-                completion(nil, .zero); return
+                completion(nil, .zero, end == .selected ? .cancelled : end); return
             }
             Diagnostics.log("capture: selection screen=\(Int(screen.frame.minX)),\(Int(screen.frame.minY)) rect=\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))")
             Task { @MainActor in
                 do {
                     let img = try await Self.snapshot(rect, on: screen)
                     Diagnostics.log("capture: snapshot ok px=\(img.width)x\(img.height)")
-                    completion(img, rect)
+                    completion(img, rect, .selected)
                 } catch {
                     Diagnostics.log("capture: snapshot failed \(error)")
                     Toast.show("Не удалось снять экран", near: NSPoint(x: rect.midX, y: rect.midY))
                     NSLog("Tolk: screen capture failed: \(error)")
-                    completion(nil, rect)
+                    completion(nil, rect, .cancelled)
                 }
             }
         }
@@ -253,14 +255,16 @@ final class GlobalHotKey {
 @MainActor
 final class SelectionOverlay {
     private var windows: [NSWindow] = []
-    private var completion: ((NSScreen?, NSRect, String) -> Void)?
+    private var completion: ((NSScreen?, NSRect, String, CaptureEnd) -> Void)?
+    private var route: CaptureRoute = .popup
     private var keyMonitor: Any?
     private var resignObserver: Any?
     private var previousApp: NSRunningApplication?
     private var shownAt = Date()
 
-    func run(_ completion: @escaping (NSScreen?, NSRect, String) -> Void) {
+    func run(route: CaptureRoute, _ completion: @escaping (NSScreen?, NSRect, String, CaptureEnd) -> Void) {
         self.completion = completion
+        self.route = route
         previousApp = NSWorkspace.shared.frontmostApplication
         shownAt = Date()
         for screen in NSScreen.screens {
@@ -279,7 +283,8 @@ final class SelectionOverlay {
             view.onFinish = { [weak self, weak w] local in
                 guard let self, let w else { return }
                 let global = local.map { $0.offsetBy(dx: w.frame.minX, dy: w.frame.minY) }
-                self.finish(screen: global == nil ? nil : screen, rect: global ?? .zero, reason: global == nil ? "view-cancel(esc/right-click/too-small)" : "selected")
+                self.finish(screen: global == nil ? nil : screen, rect: global ?? .zero, reason: global == nil ? "view-cancel(esc/right-click/too-small)" : "selected",
+                            end: global == nil ? .cancelled : .selected)
             }
             w.contentView = view
             windows.append(w)
@@ -292,16 +297,16 @@ final class SelectionOverlay {
         Diagnostics.log("capture: overlay shown screens=\(windows.count) active=\(NSApp.isActive) key=\(mouseWindow?.isKeyWindow ?? false)")
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
-            if e.keyCode == UInt16(kVK_Escape) { self?.finish(screen: nil, rect: .zero, reason: "esc"); return nil }
+            if e.keyCode == UInt16(kVK_Escape) { self?.finish(screen: nil, rect: .zero, reason: "esc", end: .cancelled); return nil }
             return e
         }
         resignObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification,
                                                                 object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.finish(screen: nil, rect: .zero, reason: "app-resigned-active front=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?") dt=\(Int(Date().timeIntervalSince(self?.shownAt ?? Date()) * 1000))ms") }
+            MainActor.assumeIsolated { self?.finish(screen: nil, rect: .zero, reason: "app-resigned-active front=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?") dt=\(Int(Date().timeIntervalSince(self?.shownAt ?? Date()) * 1000))ms", end: .appSwitched) }
         }
     }
 
-    private func finish(screen: NSScreen?, rect: NSRect, reason: String) {
+    private func finish(screen: NSScreen?, rect: NSRect, reason: String, end: CaptureEnd) {
         guard let completion else { return }
         self.completion = nil
         NSCursor.pop()
@@ -310,11 +315,13 @@ final class SelectionOverlay {
         keyMonitor = nil; resignObserver = nil
         for w in windows { w.orderOut(nil); w.close() }
         windows = []
-        // Give focus back to the app the user was reading.
-        if let prev = previousApp, prev != NSRunningApplication.current {
+        // Focus: popup → back to the app the user was reading; big window → stays with Tolk (the caller
+        // brings the window back); the user switched apps themselves → leave them where they went.
+        if CaptureFocus.target(route: route, end: end) == .previousApp,
+           let prev = previousApp, prev != NSRunningApplication.current {
             prev.activate()
         }
-        completion(screen, rect, reason)
+        completion(screen, rect, reason, end)
     }
 }
 

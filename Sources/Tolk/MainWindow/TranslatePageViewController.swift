@@ -452,7 +452,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             setOutput(keptPrefix, color: .labelColor)
             awaitingFirstDelta = keptPrefix.isEmpty
             copyButton.isEnabled = false
-            showNotice("\(UIText.providerName(from)) недоступен — переключаюсь на запасной перевод", color: .systemOrange)
+            showNotice(UIText.fallbackSwitching(from: from), color: .systemOrange)
             noticeLabel.toolTip = reason
         case .finished:
             spinner.stopAnimation(nil)
@@ -1231,7 +1231,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
         copyButton.imagePosition = .imageLeading
         copyButton.isEnabled = false
-        copyButton.toolTip = "Скопировать перевод (⌘↩)"
+        copyButton.toolTip = "Копировать перевод (⌘↩)"
         let follow = FollowButton(title: "Отредактировать", target: self, action: #selector(refineClicked))
         follow.onEnabledChange = { [weak self] in self?.syncRewrite() }
         refineButton = follow

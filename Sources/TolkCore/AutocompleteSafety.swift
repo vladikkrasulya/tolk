@@ -67,8 +67,27 @@ public enum AutocompleteSafety {
         if now.bundleID != shown.bundleID { return .skip("bundle") }
         if !sameElement { return .skip("element") }
         if now.textBefore.suffix(contextLimit) != shown.textBefore.suffix(contextLimit) { return .skip("text") }
-        if requireLineEnd, !restOfLine.allSatisfy({ $0.isWhitespace }) { return .skip("rest-of-line") }
+        if requireLineEnd, !isBlankTail(restOfLine) { return .skip("rest-of-line") }
         return .apply
+    }
+
+    /// Nothing visible after the caret: whitespace plus invisible characters that editors (Electron/ProseMirror,
+    /// Slack, Notion) leave after the caret: zero-width space/joiners, word joiner, BOM, soft hyphen, object
+    /// replacement char (\u{FFFC}), directional marks, no-break and other Unicode spaces.
+    public static func isBlankTail(_ s: String) -> Bool {
+        s.unicodeScalars.allSatisfy { u in
+            u.properties.isWhitespace || invisibleScalars.contains(u.value) || u.properties.generalCategory == .format
+        }
+    }
+    private static let invisibleScalars: Set<UInt32> = [0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF, 0x00AD, 0xFFFC, 0x034F, 0x180E]
+
+    // MARK: Own windows
+
+    /// Is the keyboard focus in one of Tolk's own windows? The popup and reply panels do not activate the app, so the
+    /// frontmost application is still the one under them: look at the key window and at the process of the focused
+    /// accessibility element (nil = not read; reading it costs an AX call, so callers pass it only when cheap).
+    public static func focusIsInOwnWindow(keyWindowIsOurs: Bool, focusedPID: Int32?, frontPID: Int32?, ownPID: Int32) -> Bool {
+        keyWindowIsOurs || focusedPID == ownPID || frontPID == ownPID
     }
 
     // MARK: Typo-fix rejections
@@ -136,6 +155,12 @@ extension SelfTest {
         check(S.decide(shown: shown, now: shown, restOfLine: "x") == .skip("rest-of-line"), "safety: text after caret skips")
         check(S.decide(shown: shown, now: shown, restOfLine: "  ") == .apply, "safety: blank rest of line applies")
         check(S.decide(shown: shown, now: shown, restOfLine: "x", requireLineEnd: false) == .apply, "safety: line end not required")
+        check(S.isBlankTail("") && S.isBlankTail(" \u{00A0}\t") && S.isBlankTail("\u{200B}\u{FFFC}\u{FEFF}\u{2060}"), "safety: invisible tail is blank")
+        check(!S.isBlankTail("\u{200B}a") && !S.isBlankTail("."), "safety: visible tail is not blank")
+        check(S.decide(shown: shown, now: shown, restOfLine: "\u{200B}\u{FFFC}") == .apply, "safety: zero-width tail applies")
+        check(S.focusIsInOwnWindow(keyWindowIsOurs: true, focusedPID: nil, frontPID: 5, ownPID: 9), "safety: own key window")
+        check(S.focusIsInOwnWindow(keyWindowIsOurs: false, focusedPID: 9, frontPID: 5, ownPID: 9), "safety: own focused element")
+        check(!S.focusIsInOwnWindow(keyWindowIsOurs: false, focusedPID: 5, frontPID: 5, ownPID: 9), "safety: other app's focus is not ours")
         let long = String(repeating: "a", count: 1500) + "b"
         check(S.decide(shown: .init(pid: 1, bundleID: nil, textBefore: long),
                        now: .init(pid: 1, bundleID: nil, textBefore: String(long.suffix(1500)))) == .apply, "safety: sliding 1500-char window equals")

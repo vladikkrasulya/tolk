@@ -72,6 +72,13 @@ final class AutocompleteController {
         AutocompleteSafety.isOffApp(bundleID, userList: disabledApps)
     }
 
+    /// Keyboard focus is in a Tolk window (popup, reply, main window). Their panels do not activate the app, so the
+    /// frontmost application is still the one underneath: the key window tells. Cheap (no AX call).
+    static func focusIsInOwnWindow() -> Bool {
+        AutocompleteSafety.focusIsInOwnWindow(keyWindowIsOurs: NSApp.keyWindow != nil, focusedPID: nil,
+                                              frontPID: NSWorkspace.shared.frontmostApplication?.processIdentifier, ownPID: ownPID)
+    }
+
     /// Quick re-read of the field for a key handler: returns it only if it is still the field (process, element,
     /// text before the caret, end of line) the visible suggestion was built for. Otherwise (or when the read does
     /// not finish within the budget) the suggestion is dropped and nil is returned: the caller must pass the key on.
@@ -191,6 +198,14 @@ final class AutocompleteController {
         }
         if event.getIntegerValueField(.eventSourceUserData) == DoubleCopyMonitor.syntheticMarker { return false }
 
+        // Typing in Tolk's own windows: no suggestions, no fixes, nothing shown.
+        if Self.focusIsInOwnWindow() {
+            if suggestion != nil || instant != nil { hide(reason: "own-window") }
+            cancelPending()
+            recentTyped = ""
+            return false
+        }
+
         if let tt = typeTranslate {
             switch tt.handleKey(event) {
             case .swallow: return true
@@ -229,7 +244,7 @@ final class AutocompleteController {
             // A stale suggestion (focus or text changed under it) is dropped and the key goes to the app.
             if mods.isEmpty, code == Key.tab || code == Key.rightArrow { return acceptInstant() ? { recentTyped = ""; return true }() : false }
             if mods.isEmpty, code == Key.escape { cancelPending(); hide(reason: "esc"); suppressed = true; return true }
-            hide(reason: typed != nil ? "typed" : "key")
+            hide(reason: typed != nil ? "typed" : "key code=\(code) mods=\(mods.rawValue)")
         } else if suggestion != nil {
             if mods.isEmpty {
                 switch code {
@@ -251,7 +266,7 @@ final class AutocompleteController {
                 consumed(typed)
                 return false
             }
-            hide(reason: typed != nil ? "typed" : "key")
+            hide(reason: typed != nil ? "typed" : "key code=\(code) mods=\(mods.rawValue)")
         }
 
         cancelPending()
@@ -303,8 +318,29 @@ final class AutocompleteController {
         suggestion = nil
         instant = nil
         anchor = nil
+        recheck?.cancel(); recheck = nil
         panel?.hide()
     }
+
+    /// An instant replacement deletes text, so it must not stay on screen if the field no longer fits it: re-read
+    /// shortly after showing and hide it BEFORE the user presses Tab (a Tab that would not insert must not look like
+    /// one that will).
+    private func scheduleInstantRecheck() {
+        let shownInstant = instant?.text
+        recheck?.cancel()
+        recheck = Task { [weak self] in
+            for delay in [120, 350] as [Int] {
+                try? await Task.sleep(for: .milliseconds(delay))
+                guard let self, !Task.isCancelled, self.instant?.text == shownInstant, shownInstant != nil else { return }
+                guard let f = await FocusedField.readAsync(), self.instant?.text == shownInstant, !Task.isCancelled else { continue }
+                if !self.anchorStillMatches(f) || Self.focusIsInOwnWindow() {
+                    self.hide(reason: "stale-preview")
+                    return
+                }
+            }
+        }
+    }
+    private var recheck: Task<Void, Never>?
 
     private func cancelPending() {
         generation += 1
@@ -549,7 +585,7 @@ final class AutocompleteController {
         guard !Task.isCancelled, gen == generation, !IsSecureEventInputEnabled() else { return }
         if field.pid == Self.ownPID { return }
         if isOff(field.bundleID) { return }
-        guard field.restOfLine.allSatisfy({ $0.isWhitespace }) else { return }
+        guard AutocompleteSafety.isBlankTail(field.restOfLine) else { return }
 
         // Instant suggestions (emoji, typo fix) need no model and win over it.
         for p in instantProviders {
@@ -563,6 +599,7 @@ final class AutocompleteController {
             journal.instant(bundleID: field.bundleID, before: field.textBefore, replaceCount: s.replaceCount, display: s.display, caret: field.caret, panel: panel)
             Diagnostics.log("autocomplete: instant replace=\(s.replaceCount) app=\(field.bundleID ?? "?")")
             stats.instantShown(model: statsModel, app: field.bundleID); onStatsChanged?()
+            scheduleInstantRecheck()
             if s.blocksModel { return }
             break
         }
@@ -596,7 +633,7 @@ final class AutocompleteController {
         guard !Task.isCancelled, gen == generation else { return }
         // The text may have changed while the model was thinking.
         guard !IsSecureEventInputEnabled(), let now = await FocusedField.readAsync(), now.pid == field.pid,
-              now.textBefore == field.textBefore, now.restOfLine.allSatisfy({ $0.isWhitespace }),
+              now.textBefore == field.textBefore, AutocompleteSafety.isBlankTail(now.restOfLine),
               !isOff(now.bundleID), !Task.isCancelled, gen == generation else { return }
         if let a = field.element, let b = now.element, !CFEqual(a, b) { return }
         guard let text = AutocompletePrompt.clean(result.text, textBefore: field.textBefore, maxWords: extras.maxWords),

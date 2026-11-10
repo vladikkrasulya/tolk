@@ -393,7 +393,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
             showMessage("Перевожу через запасной сервис…", color: .tertiaryLabelColor)
             showsPlaceholder = true
             copyButton.isEnabled = false
-            showNotice("\(UIText.providerName(from)) недоступен — переключаюсь на запасной перевод", color: .systemOrange)
+            showNotice(UIText.fallbackSwitching(from: from), color: .systemOrange)
             noticeLabel.toolTip = reason
         case .finished:
             spinner.stopAnimation(nil)

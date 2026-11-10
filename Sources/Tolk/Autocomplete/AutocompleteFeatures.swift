@@ -61,7 +61,7 @@ enum AutocompleteFeatures {
             let prevExtras = c.promptExtras
             c.promptExtras = { field in
                 var e = prevExtras?(field) ?? PromptExtras()
-                if StyleMemory.shared.generation == gen { e.examples += StyleMemory.shared.examples(for: field) }
+                if StyleMemory.shared.generation == gen { e.examples += StyleMemory.shared.examples(for: field); e.recent = StyleMemory.shared.recent(for: field) }
                 return e
             }
             let prevAccepted = c.onAccepted

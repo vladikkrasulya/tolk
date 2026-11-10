@@ -57,7 +57,7 @@ enum MainWindowDemo {
         translate.load(text: TolkUIDemo.sampleEnglish)
         try? await Task.sleep(for: .seconds(4))
         render(main.window, to: "\(dir)/main-translate-\(suffix).png")
-        for section in [MainWindowController.Section.settings, .glossary, .image] {
+        for section in [MainWindowController.Section.settings, .glossary, .image, .help] {
             main.show(section)
             try? await Task.sleep(for: .seconds(1))
             render(main.window, to: "\(dir)/main-\(section.rawValue)-\(suffix).png")

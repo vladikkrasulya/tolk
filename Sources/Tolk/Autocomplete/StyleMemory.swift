@@ -8,6 +8,7 @@
 import Foundation
 import CryptoKit
 import Security
+import TolkCore
 
 struct StyleRecord: Codable {
     var t: String      // text
@@ -172,6 +173,19 @@ final class StyleMemory {
         let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
         Diagnostics.log("style: examples n=\(out.count) pool=\(entries.count) ms=\(String(format: "%.1f", ms))")
         return out
+    }
+
+    /// The user's own last messages in this app within `RecentMessages.window` (oldest first): «what I just said».
+    func recent(for field: FocusedField, now: Date = Date()) -> [String] {
+        let app = field.bundleID ?? ""
+        let cutoff = now.timeIntervalSince1970 - RecentMessages.window
+        var items: [RecentMessages.Item] = []
+        for e in entries.reversed() {            // newest first; stop at the first record older than the window
+            if e.rec.d < cutoff { break }
+            if e.rec.a == app { items.append(.init(text: e.rec.t, app: app, at: Date(timeIntervalSince1970: e.rec.d))) }
+            if items.count >= RecentMessages.limit + 2 { break }
+        }
+        return RecentMessages.select(items, app: app, now: now, typing: field.textBefore)
     }
 
     func deleteAll() {

@@ -765,7 +765,7 @@ struct SettingsView: View {
                         set: { model.config.toneByApp[id] = $0 })) {
                         Text("Авто").tag(Tone.auto)
                         Text("Чат").tag(Tone.chat)
-                        Text("Официально").tag(Tone.formal)
+                        Text("Письмо").tag(Tone.formal)
                     }
                     .labelsHidden().fixedSize()
                     Button(role: .destructive) { model.config.toneByApp[id] = nil } label: { Image(systemName: "minus.circle") }

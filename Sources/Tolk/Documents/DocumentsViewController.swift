@@ -741,7 +741,8 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
             providerBadge.text = UIText.providerName(p)
             providerBadge.tint = UIText.isFallbackProvider(p) ? .systemOrange : .secondaryLabelColor
         case let .fellBack(from, reason):
-            showNotice("\(UIText.providerName(from)) недоступен (\(reason)) — перевожу через запасной сервис.", color: .secondaryLabelColor)
+            showNotice(UIText.fallbackSwitching(from: from), color: .systemOrange)
+            noticeLabel.toolTip = reason
         case let .began(i):
             markCurrent(i)
             reloadRow(i)

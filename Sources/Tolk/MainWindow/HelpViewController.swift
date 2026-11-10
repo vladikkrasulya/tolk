@@ -43,13 +43,15 @@ struct AnimCanvas<Content: View>: View {
 }
 
 struct HelpView: View {
-    private let cols = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
+    private let cols = [GridItem(.flexible(), spacing: 14, alignment: .top), GridItem(.flexible(), spacing: 14, alignment: .top)]
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 Text("Всё самое нужное — на одной странице. Наведите курсор на карточку — анимация покажет, как это работает.")
                     .foregroundStyle(.secondary)
+                Text("Клавиши: ⌘ — Command (на PC-клавиатуре Win), ⌥ — Option (Alt), ⌃ — Control (Ctrl), ⇧ — Shift.")
+                    .font(.callout).foregroundStyle(.tertiary)
                 LazyVGrid(columns: cols, spacing: 14) {
                     HelpCard(title: "Перевести выделенное", keys: ["⌘", "C", "⌘", "C"], keysNote: "дважды быстро",
                              text: "Выделите текст в любой программе и дважды нажмите ⌘C — рядом появится перевод.") { hovering in
@@ -68,7 +70,7 @@ struct HelpView: View {
                         AnimCanvas(active: hovering) { phase in ReplaceAnim(phase: phase, from: "we was checked yours traffic", to: "we've checked your traffic") }
                     }
                     HelpCard(title: "Перевести с экрана", keys: ["⌥", "⇧", "S"], keysNote: "по умолчанию",
-                             text: "Выделите мышью область экрана — текст распознается прямо на Mac и переведётся. Если открыто окно Tolk — результат появится в «Фото и скриншоты».") { hovering in
+                             text: "Выделите мышью область экрана — текст распознается прямо на Mac и переведётся. Если вы в окне Tolk — результат появится в «Фото и скриншоты», иначе — рядом с областью.") { hovering in
                         AnimCanvas(active: hovering) { phase in CaptureAnim(phase: phase) }
                     }
                     HelpCard(title: "Фото и документы", keys: [], keysNote: "разделы «Фото и скриншоты» и «Документы»",
