@@ -97,6 +97,10 @@ final class HistoryRecordingEngine: TranslationEngine, @unchecked Sendable {
         try await base.rewrite(translation: translation, source: source, from: from, to: to, mode: mode)
     }
 
+    func translationVariants(source: String, translation: String, from: Language, to: Language, tone: Tone, replyTo: String?) async throws -> [TranslationVariant] {
+        try await base.translationVariants(source: source, translation: translation, from: from, to: to, tone: tone, replyTo: replyTo)
+    }
+
     func explain(message: String) async throws -> MessageExplanation { try await base.explain(message: message) }
 
     func replyRequest(message: String, reply: String, tone: Tone) -> TranslationRequest {

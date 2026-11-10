@@ -129,6 +129,11 @@ final class TranslationHintsPanel: NSView {
     var onReplace: ((NSRange, String) -> Void)?
     /// «Вернуть» in the editor card.
     var onRevertEdit: (() -> Void)?
+    /// «Взять» in «Варианты перевода»: replace the whole translation with this text (`label` names the variant).
+    var onTakeVariant: ((_ text: String, _ label: String) -> Void)?
+    /// Tone of the page and the partner's message (reply mode) for the variants request.
+    var toneProvider: (() -> Tone)?
+    var replyContext: (() -> String?)?
     /// Asked before every button-started request: the server has two slots, the page counts them all.
     var canStartRequest: (() -> Bool)?
     /// The text «Что он имел в виду» is about (the original; in reply mode the partner's message). nil/empty = no button.
@@ -152,6 +157,13 @@ final class TranslationHintsPanel: NSView {
     private let altJob = HintTask()
     private let variantsJob = HintTask()
     private let explainJob = HintTask()
+    private let tvJob = HintTask()
+    private var tvGeneration = 0
+    private var tvKeep = false
+    private var tvSource = ""
+    private var tvBase = ""
+    private var tvList: [TranslationVariant] = []
+    private var tvDone = false
     private var explainedText: String?
     private var altWork: DispatchWorkItem?
     private var flashWork: DispatchWorkItem?
@@ -178,6 +190,11 @@ final class TranslationHintsPanel: NSView {
     private let editAfter = UIFactory.flexibleLabel("", size: 12.5, color: .labelColor)
     private let variantsBody = NSStackView()
     private let explainBody = NSStackView()
+    private let tvBody = NSStackView()
+    private let tvResults = NSStackView()
+    private let tvButton = NSButton(title: "Подобрать варианты", target: nil, action: nil)
+    private let tvSpinner = NSProgressIndicator()
+    private var tvCard: HintCard!
     private let explainButton = NSButton(title: "Что он имел в виду", target: nil, action: nil)
     private let explainSpinner = NSProgressIndicator()
     private let glossary = GlossaryFormView(stacked: true, showsTitle: false)
@@ -216,13 +233,14 @@ final class TranslationHintsPanel: NSView {
         requestsStarted = false
         backShown = false
         clearNotes(); clearAlternatives(); clearVariants()
+        if !tvKeep { clearTV() }
         // The explanation belongs to the text it was made for: it stays while that text stays (reply mode: typing the answer).
         if explainedText != nil, explainedText != currentExplainText() { clearExplanation() }
         refreshAll()
     }
 
     /// Requests running now that count against the server's two slots.
-    var busyCount: Int { [back.isRunning, notesJob.isRunning, altJob.isRunning, variantsJob.isRunning, explainJob.isRunning].filter { $0 }.count }
+    var busyCount: Int { [back.isRunning, notesJob.isRunning, altJob.isRunning, variantsJob.isRunning, explainJob.isRunning, tvJob.isRunning].filter { $0 }.count }
 
     /// A button request needs the slot: the automatic hints (back-translation, footnotes) give way.
     func cancelBackground() {
@@ -254,8 +272,13 @@ final class TranslationHintsPanel: NSView {
     /// `statsWarnings` are the engine's own findings (nil = keep the last ones for the same text).
     func ready(source: String, translation: String, from: Language, to: Language, provider: String,
                statsWarnings: [String]?) {
+        // The variants stay while the translation on screen is the one they were made for or one of them (after «Взять» / «Вернуть»).
+        tvKeep = !tvList.isEmpty && tvSource == source && (translation == tvBase || tvList.contains { $0.text == translation })
+        let keepTV = tvKeep
         suspend()
+        tvKeep = false
         ctx = Context(source: source, translation: translation, from: from, to: to, provider: provider)
+        if keepTV, tvDone { showTV(nil) }
         if let statsWarnings {
             var all = TranslationCheck.warnings(source: source, translation: translation, from: from, to: to)
             for w in statsWarnings where !all.contains(w) { all.append(w) }
@@ -283,6 +306,7 @@ final class TranslationHintsPanel: NSView {
         ctx = c
         warnings = TranslationCheck.warnings(source: c.source, translation: translation, from: c.from, to: c.to)
         clearAlternatives(); clearVariants()
+        if !tvList.isEmpty { showTV(nil) }
         refreshAll()
     }
 
@@ -539,6 +563,100 @@ final class TranslationHintsPanel: NSView {
         }
     }
 
+    // MARK: - «Варианты перевода»
+
+    /// Button (and the popup's «Варианты»): 2–3 alternatives of the whole translation, one request. A second press cancels.
+    @objc func suggestTranslationVariants() {
+        if tvJob.isRunning { tvGeneration += 1; tvJob.cancel(); showTV(nil); refreshAll(); return }
+        guard let c = ctx else { NSSound.beep(); return }
+        if UIText.isFallbackProvider(c.provider) {
+            flash("Варианты перевода делает домашняя модель — сейчас перевод от запасного сервиса.", color: .systemOrange)
+            return
+        }
+        guard canStartRequest?() ?? true else {
+            flash("Сервер занят двумя запросами — подождите или отмените один.", color: .systemOrange)
+            return
+        }
+        tvGeneration += 1
+        let gen = tvGeneration
+        tvSource = c.source; tvBase = c.translation; tvList = []; tvDone = false
+        showTV(nil, loading: true)
+        let engine = self.engine, source = c.source, translation = c.translation, from = c.from, to = c.to
+        let tone = toneProvider?() ?? .auto, reply = replyContext?()
+        tvJob.run({ () async -> Result<[TranslationVariant], Error> in
+            do {
+                return .success(try await engine.translationVariants(source: source, translation: translation, from: from, to: to,
+                                                                     tone: tone, replyTo: reply))
+            } catch { return .failure(error) }
+        }) { [weak self] result in
+            guard let self, self.tvGeneration == gen else { return }
+            self.tvDone = true
+            switch result {
+            case let .success(list): self.tvList = list; self.showTV(nil)
+            case let .failure(e): self.showTV(UIText.errorMessage(e))
+            }
+            self.refreshAll()
+        }
+        refreshAll()
+    }
+
+    private func showTV(_ error: String?, loading: Bool = false) {
+        tvResults.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        if loading {
+            addFull(UIFactory.label("подбираю варианты…", size: 12, color: .tertiaryLabelColor), to: tvResults)
+            tvCard.setCount(nil)
+            return
+        }
+        if let error {
+            addFull(UIFactory.flexibleLabel(error, size: 12, color: .systemRed, selectable: false), to: tvResults)
+            tvCard.setCount(nil)
+            return
+        }
+        let current = ctx?.translation ?? tvBase
+        for v in tvList {
+            let row = TranslationVariantRow(variant: v, base: tvBase, taken: v.text == current)
+            row.onTake = { [weak self] in self?.take(v) }
+            addFull(row, to: tvResults)
+        }
+        if tvDone, tvList.isEmpty {
+            addFull(UIFactory.flexibleLabel("Достойных вариантов не нашлось: модель предложила только то, что меняет смысл или похоже на текущий перевод.",
+                                            size: 12, color: .tertiaryLabelColor, selectable: false), to: tvResults)
+        }
+        tvCard.setCount(tvList.isEmpty ? nil : tvList.count)
+        if tvDone {
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, !self.tvCard.isHidden else { return }
+                    self.tvCard.superview?.layoutSubtreeIfNeeded()
+                    // The card is taller than the panel: bring its TOP (button, first variant) into view.
+                    guard let scroll = self.tvCard.enclosingScrollView, let doc = scroll.documentView else { return }
+                    let top = self.tvCard.convert(self.tvCard.bounds, to: doc).minY
+                    scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, top - 4)))
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                }
+            }
+        }
+    }
+
+    private func take(_ v: TranslationVariant) {
+        onTakeVariant?(v.text, v.label)
+        flash("Перевод заменён на «\(v.label)»", color: .systemGreen)
+        showTV(nil)
+    }
+
+    #if DEBUG
+    func debugTakeVariant(_ i: Int) { if tvList.indices.contains(i) { take(tvList[i]) } }
+    var debugVariantsRunning: Bool { tvJob.isRunning }
+    #endif
+
+    private func clearTV() {
+        tvGeneration += 1
+        tvJob.cancel()
+        tvList = []; tvDone = false; tvSource = ""; tvBase = ""
+        tvResults.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        tvCard?.setCount(nil)
+    }
+
     private func clearVariants() {
         variantsJob.cancel()
         variantsBody.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -693,6 +811,10 @@ final class TranslationHintsPanel: NSView {
         explainButton.image = NSImage(systemSymbolName: explainJob.isRunning ? "xmark" : "questionmark.bubble", accessibilityDescription: nil)
         if explainJob.isRunning { explainSpinner.startAnimation(nil) } else { explainSpinner.stopAnimation(nil) }
         explainRow.isHidden = !canExplain
+        tvCard.isHidden = ctx == nil
+        tvButton.title = tvJob.isRunning ? "Отмена" : (tvDone ? "Подобрать заново" : "Подобрать варианты")
+        tvButton.image = NSImage(systemSymbolName: tvJob.isRunning ? "xmark" : "list.bullet.rectangle", accessibilityDescription: nil)
+        if tvJob.isRunning { tvSpinner.startAnimation(nil) } else { tvSpinner.stopAnimation(nil) }
         scrollTopPlain.isActive = !canExplain
         scrollTopExplain.isActive = canExplain
         if let c = ctx, c.stale, backShown { backCaption.stringValue = "Перевод изменён — обратный перевод устарел" }
@@ -700,6 +822,7 @@ final class TranslationHintsPanel: NSView {
     }
 
     private func refreshEmpty() {
+        // (the «Варианты перевода» card is always there with a translation: it does not count as a hint)
         let visible = [explainCard, warnCard, variantsCard, backCard, notesCard, altCard, editCard].contains { $0?.isHidden == false }
         emptyLabel.isHidden = visible
         let anyEnabled = HintsSettings.backEnabled || HintsSettings.notesEnabled
@@ -801,8 +924,22 @@ final class TranslationHintsPanel: NSView {
         explainRow.translatesAutoresizingMaskIntoConstraints = false
         explainRow.isHidden = true
 
+        tvButton.target = self
+        tvButton.action = #selector(suggestTranslationVariants)
+        tvButton.bezelStyle = .push
+        tvButton.controlSize = .small
+        tvButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        tvButton.imagePosition = .imageLeading
+        tvButton.toolTip = "2–3 варианта всего перевода с пояснением, чем они отличаются — один запрос к модели"
+        tvSpinner.style = .spinning
+        tvSpinner.controlSize = .small
+        tvSpinner.isDisplayedWhenStopped = false
+        let tvRow = NSStackView(views: [tvButton, tvSpinner, UIFactory.spacer()])
+        tvRow.orientation = .horizontal
+        tvRow.spacing = 6
+
         // Card bodies
-        for s in [warnBody, notesBody, altBody, variantsBody, explainBody] {
+        for s in [warnBody, notesBody, altBody, variantsBody, explainBody, tvBody, tvResults] {
             s.orientation = .vertical
             s.alignment = .leading
             s.spacing = 8
@@ -842,6 +979,12 @@ final class TranslationHintsPanel: NSView {
         altCard = HintCard(id: "alternatives", title: "Варианты слова", symbol: "text.word.spacing", body: altBody)
         editCard = HintCard(id: "editor", title: "Правка", symbol: "wand.and.stars", body: editBody)
         variantsCard = HintCard(id: "variants", title: "Варианты предложения", symbol: "text.quote", body: variantsBody)
+        tvBody.setViews([tvRow, tvResults], in: .leading)
+        tvBody.orientation = .vertical
+        tvBody.alignment = .leading
+        tvBody.spacing = 8
+        tvResults.widthAnchor.constraint(equalTo: tvBody.widthAnchor).isActive = true
+        tvCard = HintCard(id: "tvariants", title: "Варианты перевода", symbol: "list.bullet.rectangle", body: tvBody)
         explainCard = HintCard(id: "explain", title: "Что он имел в виду", symbol: "questionmark.bubble", body: explainBody, tint: .systemBlue)
         variantsCancel = UIFactory.symbolButton("xmark.circle", tooltip: "Отменить запрос", target: self, action: #selector(cancelVariants))
         variantsCard.accessory.addArrangedSubview(variantsCancel)
@@ -860,11 +1003,11 @@ final class TranslationHintsPanel: NSView {
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
         emptyLabel.maximumNumberOfLines = 0
-        let cards = [explainCard!, warnCard!, variantsCard!, notesCard!, backCard!, altCard!, editCard!, glossaryCard!]
+        let cards = [explainCard!, warnCard!, variantsCard!, tvCard!, notesCard!, backCard!, altCard!, editCard!, glossaryCard!]
         for v in [emptyLabel] + cards { stack.addArrangedSubview(v) }
         for v in [emptyLabel] + cards { v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: v === emptyLabel ? -8 : 0).isActive = true }
         emptyLabel.setContentCompressionResistancePriority(.init(250), for: .horizontal)
-        for c in [explainCard!, warnCard!, variantsCard!, notesCard!, backCard!, altCard!, editCard!] { c.isHidden = true }
+        for c in [explainCard!, warnCard!, variantsCard!, tvCard!, notesCard!, backCard!, altCard!, editCard!] { c.isHidden = true }
 
         let doc = FlippedView()
         doc.translatesAutoresizingMaskIntoConstraints = false

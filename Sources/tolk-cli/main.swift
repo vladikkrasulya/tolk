@@ -21,7 +21,7 @@ var wantRefine = false, selfTest = false
 var contextSource: String?, contextTranslation: String?
 var checkOnly: String?
 var cancelAfter: Double?, addTerm: String?
-var pairsTranslation: String?, variantsCurrent: String?, rewriteMode: RewriteMode?, rewriteTranslation: String?, wantExplain = false
+var pairsTranslation: String?, variantsCurrent: String?, rewriteMode: RewriteMode?, rewriteTranslation: String?, wantExplain = false, variantsAll: String?
 var maskShow: String?, maskEval: String?, maskFormats = "brackets,section,square", noMask = false, maskFormat: String?
 var prevTurns: [String] = [], calquesText: String?, tzText: String?, tzLocal: String?, tzNow: String?, showFingerprint = false
 var words: [String] = []
@@ -79,6 +79,7 @@ while let a = args.next() {
     case "--warm": warmOnly = true                          // load the model on vkbox and report the time
     case "--pairs": pairsTranslation = value()               // text = source; value = translation: sentence pairs (no model)
     case "--variants": variantsCurrent = value()             // text = source sentence; value = its translation; full texts via --context-*
+    case "--variants-all": variantsAll = value()             // text = source; value = its translation: 2-3 whole-translation variants (--reply-to works)
     case "--rewrite":                                        // --rewrite MODE TRANSLATION, text = source
         guard let m = RewriteMode(rawValue: value()) else { fail("--rewrite: " + RewriteMode.allCases.map(\.rawValue).joined(separator: "|") + " TRANSLATION") }
         rewriteMode = m; rewriteTranslation = value()
@@ -294,6 +295,13 @@ if let variantsCurrent {
         let vs = try await engine.sentenceVariants(sentence: text, current: variantsCurrent, fullSource: contextSource ?? text,
                                                    fullTranslation: contextTranslation ?? variantsCurrent, from: lsrc, to: ldst, tone: tone)
         for v in vs { print("• [\(v.label)] \(v.text)") }
+        if vs.isEmpty { print("(нет вариантов)") }
+    }
+}
+if let variantsAll {
+    timed("variants-all") {
+        let vs = try await engine.translationVariants(source: text, translation: variantsAll, from: lsrc, to: ldst, tone: tone, replyTo: replyTo)
+        for v in vs { print("• [\(v.label)] \(v.reason)\n    \(v.text.replacingOccurrences(of: "\n", with: "\n    "))") }
         if vs.isEmpty { print("(нет вариантов)") }
     }
 }

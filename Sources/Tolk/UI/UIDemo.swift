@@ -165,6 +165,21 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
         return RewriteResult(mode: mode, text: t, accepted: true, rejection: nil, changed: t != translation, pronounsChecked: false)
     }
 
+    func translationVariants(source: String, translation: String, from: Language, to: Language, tone: Tone, replyTo: String?) async throws -> [TranslationVariant] {
+        try await Task.sleep(for: .milliseconds(900))
+        return [
+            TranslationVariant(text: translation.replacingOccurrences(of: "можете прислать", with: "не могли бы Вы прислать")
+                                .replacingOccurrences(of: "Предлагаю откатить", with: "Прошу откатить"),
+                               label: "Строже", reason: "на «Вы», просьба звучит как формальное требование"),
+            TranslationVariant(text: translation.replacingOccurrences(of: "Предлагаю откатить", with: "Давайте, пожалуй, откатим")
+                                .replacingOccurrences(of: "Спасибо, ждём обратной связи!", with: "Буду рада любой обратной связи :)"),
+                               label: "Дружелюбнее", reason: "смягчено, разговорный порядок слов"),
+            TranslationVariant(text: translation.replacingOccurrences(of: "Мы посмотрели статистику по кампании", with: "Посмотрели статистику кампании")
+                                .replacingOccurrences(of: "раскатить изменения на", with: "раскатить на"),
+                               label: "Короче", reason: "убраны вводные слова, фразы сжаты"),
+        ]
+    }
+
     func explain(message: String) async throws -> MessageExplanation {
         try await Task.sleep(for: .milliseconds(900))
         return MessageExplanation(

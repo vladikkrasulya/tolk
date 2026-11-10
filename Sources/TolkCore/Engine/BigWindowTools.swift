@@ -17,6 +17,16 @@ public struct SentenceVariant: Sendable, Equatable {
     public init(text: String, label: String) { self.text = text; self.label = label }
 }
 
+/// One of 2-3 whole-translation alternatives with the model's own label and reason.
+public struct TranslationVariant: Sendable, Equatable {
+    public var text: String
+    /// 1-3 words in the user's language, chosen by the model for this situation: «Строже», «Дружелюбнее», «Ближе к тексту».
+    public var label: String
+    /// One short phrase in the user's language: HOW this variant differs from the current translation.
+    public var reason: String
+    public init(text: String, label: String, reason: String) { self.text = text; self.label = label; self.reason = reason }
+}
+
 public enum RewriteMode: String, CaseIterable, Sendable {
     case shorter, softer, firmer, simpler, formal, informal
 
@@ -81,6 +91,25 @@ extension DefaultTranslationEngine {
         guard let content = try await ollama.chatContent(system: system, user: user, json: true, maxTokens: 500, temperature: 0.5, timeout: 60)
         else { throw TolkError.badResponse("Модель не ответила") }
         return ExtrasParsing.variants(content, sentence: sentence, current: current, from: from, to: to)
+    }
+
+    /// 2-3 alternative translations of the WHOLE text, each with a label and a reason (one JSON request).
+    /// Variants that lose a number/link/time, turn a question into a statement or drop a greeting are discarded,
+    /// so the result can have 0...3 items (never the current translation, never repeats). Typical time 6-15 s.
+    public func translationVariants(source: String, translation: String, from: Language, to: Language,
+                                    tone: Tone = .auto, replyTo: String? = nil) async throws -> [TranslationVariant] {
+        let ollama = try await readyOllama()
+        let userLang = config.primaryLanguage
+        let selector = [source, replyTo].compactMap { $0 }.joined(separator: "\n")
+        let system = ExtrasPrompt.translationVariants(from: from, to: to, userLanguage: userLang, tone: tone,
+                                                      rules: rules.promptBlock(for: selector, target: to))
+        var user = "SOURCE:\n\(source.prefix(4000))\n\nCURRENT TRANSLATION:\n\(translation.prefix(4000))"
+        if let r = replyTo?.trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty {
+            user += "\n\nThe source is the user's REPLY to this message (keep the form of address and terms of the other person):\n\(r.prefix(2000))"
+        }
+        guard let content = try await ollama.chatContent(system: system, user: user, json: true, maxTokens: 1800, temperature: 0.5, timeout: 90)
+        else { throw TolkError.badResponse("Модель не ответила") }
+        return ExtrasParsing.translationVariants(content, source: source, current: translation, from: from, to: to)
     }
 
     /// Rewrites the current translation. `source` = original text, `translation` = current translation (language `to`).
@@ -202,6 +231,29 @@ enum ExtrasPrompt {
         return s
     }
 
+    static func translationVariants(from: Language, to: Language, userLanguage: Language, tone: Tone, rules: String) -> String {
+        var s = """
+        You help a translator. You get a \(from.englishName) SOURCE text and its CURRENT TRANSLATION into \(to.englishName).
+        Give 2 or 3 ALTERNATIVE translations of the WHOLE text into \(to.englishName). The alternatives must really differ from the current one and from each other
+        in style, register, form of address or closeness to the source. Choose the axes that matter for THIS text: a letter to a boss, a chat message to a colleague
+        and a note to a spouse call for different alternatives (e.g. stricter / friendlier / closer to the source / shorter / more colloquial).
+        Never output the current translation again and never output two alternatives that are almost the same.
+        Keep exactly, in every alternative: the meaning and every fact, all numbers, dates, times, prices, links, e-mails, IDs, names, emoji, the glossary terms below,
+        and the type of every sentence (a question stays a question, a request stays a request). Do not add information. Natural native wording, no calques.
+        For each alternative give:
+        - "label": 1-3 words in \(userLanguage.englishName) naming how it differs, for example «Строже», «Дружелюбнее», «Ближе к тексту», «Короче», «Разговорнее».
+        - "reason": ONE short phrase in \(userLanguage.englishName) (at most 12 words) listing the CONCRETE changes you actually made compared with the current translation:
+          form of address, words replaced, word order, what was cut or softened. Describe only real differences you can see in the text; never praise the style in general and never invent changes.
+          Good: «на «Вы», без смайлов, просьба как формальное требование»; «смягчено, разговорный порядок слов»; «почти дословно, сохранены англицизмы».
+          Bad: «более профессиональный стиль, характерный для деловой переписки».
+        If the text is short, still give 2 alternatives that differ in wording, not only in punctuation.
+        Answer with JSON only: {"variants":[{"label":"...","reason":"...","text":"..."}]}
+        """
+        if !rules.isEmpty { s += "\n\n# User's rules and glossary (authoritative)\n" + rules }
+        s += "\n\n# Tone of the text\n" + Prompt.tone(tone)
+        return s
+    }
+
     static func rewrite(mode: RewriteMode, from: Language, to: Language, rules: String) -> String {
         let what: String
         switch mode {
@@ -296,6 +348,69 @@ enum ExtrasParsing {
             if out.count == 3 { break }
         }
         return out
+    }
+
+    /// Whole-translation variants: JSON with fallbacks (fence, junk around, bare array, «alternatives» key), then the safety net.
+    static func translationVariants(_ content: String, source: String, current: String, from: Language, to: Language) -> [TranslationVariant] {
+        var raw: [Any]?
+        if let root = jsonObject(content) {
+            raw = (root["variants"] ?? root["alternatives"] ?? root["translations"]) as? [Any]
+        }
+        if raw == nil, let a = content.firstIndex(of: "["), let b = content.lastIndex(of: "]"), a < b,
+                  let arr = try? JSONSerialization.jsonObject(with: Data(content[a...b].utf8)) as? [Any] {
+            raw = arr
+        }
+        guard let raw else { return [] }
+        var seen: Set<String> = [norm(current)]
+        var shown: [String] = [current]
+        var out: [TranslationVariant] = []
+        for item in raw {
+            var text: String?, label = "", reason = ""
+            if let o = item as? [String: Any] {
+                text = (o["text"] ?? o["translation"] ?? o["variant"]) as? String
+                label = (o["label"] ?? o["title"]) as? String ?? ""
+                reason = (o["reason"] ?? o["why"] ?? o["explanation"]) as? String ?? ""
+            } else if let s = item as? String { text = s }
+            guard let t = text.map({ cleanText($0, original: current) }), !t.isEmpty,
+                  seen.insert(norm(t)).inserted else { continue }
+            if variantRejection(source: source, current: current, variant: t, from: from, to: to) != nil { continue }
+            if shown.contains(where: { nearlySame($0, t) }) { continue }   // a one-letter difference is not a variant
+            shown.append(t)
+            label = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            if label.split(separator: " ").count > 4 { label = label.split(separator: " ").prefix(3).joined(separator: " ") }
+            out.append(TranslationVariant(text: t, label: label.isEmpty ? "Другой вариант" : label,
+                                          reason: reason.trimmingCharacters(in: .whitespacesAndNewlines)))
+            if out.count == 3 { break }
+        }
+        return out
+    }
+
+    /// Why a whole-translation variant must not be shown (nil = fine). Same net as `rewrite`: numbers/links/times,
+    /// question -> statement, lost greeting. A different greeting is allowed (a stricter variant says «Здравствуйте» instead of «Привет»).
+    static func variantRejection(source: String, current: String, variant: String, from: Language, to: Language) -> String? {
+        let lost = TranslationCheck.warnings(source: source, translation: variant, from: from, to: to)
+            .filter { !$0.hasPrefix("текст") && !$0.lowercased().contains("язык") }
+        if let w = lost.first { return w }
+        if RefineGuard.endsWithQuestion(current) && !RefineGuard.endsWithQuestion(variant) { return "вопрос стал утверждением" }
+        if opensWithGreeting(current), !opensWithGreeting(variant) { return "пропало приветствие" }
+        return nil
+    }
+
+    /// Word sets overlap by 80 % or more (case and punctuation ignored).
+    static func nearlySame(_ a: String, _ b: String) -> Bool {
+        let x = Set(RewriteGuard.words(a.lowercased())), y = Set(RewriteGuard.words(b.lowercased()))
+        guard !x.isEmpty, !y.isEmpty else { return false }
+        return Double(x.intersection(y).count) / Double(x.union(y).count) >= 0.8
+    }
+
+    /// A greeting among the first three words («Привет, Анна», «Анна, привет!», «Good morning»).
+    static func opensWithGreeting(_ s: String) -> Bool {
+        let words = s.trimmingCharacters(in: .whitespacesAndNewlines).split(whereSeparator: { $0.isWhitespace }).prefix(3)
+        for i in words.indices {
+            let tail = words[i...].joined(separator: " ")
+            if RefineGuard.greetingKey(tail) != nil { return true }
+        }
+        return false
     }
 
     static func explanation(_ content: String, message: String) -> MessageExplanation? {

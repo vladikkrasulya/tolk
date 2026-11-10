@@ -221,9 +221,15 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
 
     static let inputFontSize: CGFloat = 18
 
+    /// The tone of the popup a text was opened from (same request = the translation comes from the cache). Not saved;
+    /// until the user touches the tone switch or opens other text.
+    private var loadedTone: Tone?
+    private var loadedThread: String?
+    /// Start «Подобрать варианты» as soon as the loaded text is translated.
+    private var pendingVariants = false
     private var tone: Tone {
-        get { Tone(rawValue: UserDefaults.standard.string(forKey: "tolk.input.tone") ?? "") ?? .auto }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "tolk.input.tone") }
+        get { loadedTone ?? Tone(rawValue: UserDefaults.standard.string(forKey: "tolk.input.tone") ?? "") ?? .auto }
+        set { loadedTone = nil; UserDefaults.standard.set(newValue.rawValue, forKey: "tolk.input.tone") }
     }
 
     init(engine: TranslationEngine) {
@@ -251,6 +257,22 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
     /// Puts text into the input and translates it (used by the popup's "expand" button).
     func load(text: String) {
         loadViewIfNeeded()
+        loadedTone = nil; loadedThread = nil; pendingVariants = false
+        open(text)
+    }
+
+    /// The popup's «Варианты»: the same request as the popup made (its tone and chat context), so the translation
+    /// comes from the cache, and «Подобрать варианты» starts by itself when the translation is on screen.
+    func load(text: String, tone popupTone: Tone, threadContext: String?, suggestVariants: Bool) {
+        loadViewIfNeeded()
+        loadedTone = popupTone
+        loadedThread = threadContext
+        pendingVariants = suggestVariants
+        open(text)
+    }
+
+    private func open(_ text: String) {
+        toneControl.selectedSegment = Tone.allCases.firstIndex(of: tone) ?? 0
         inputView.string = text
         inputView.needsDisplay = true
         updateCounter()
@@ -301,6 +323,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         clearPairs()
         cancelRewrite()
         hints?.suspend()
+        pendingVariants = false
         debounceTask?.cancel()
         debounceTask = Task { @MainActor [weak self, debounce] in
             try? await Task.sleep(for: debounce)
@@ -380,7 +403,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         step = st
         keptPrefix = st.kind == .partial ? st.kept : ""
         tail = ""
-        guard let toSend = st.request else {
+        guard var toSend = st.request else {
             // Nothing meaningful changed: the shown translation must equal the kept one.
             if wasRunning { statusLine?.reset() }
             spinner.stopAnimation(nil)
@@ -394,6 +417,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         }
         copyButton.isEnabled = false
         refineButton.isEnabled = false
+        if let t = loadedThread, !t.isEmpty { toSend.threadContext = t }
         if st.kind == .partial {
             // The kept part stays on screen without flicker; the tail streams in after it.
             translation = st.kept
@@ -639,6 +663,8 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
     }
     func debugRewrite(_ m: RewriteMode) { rewriteRequested(m) }
     func debugExplain() { hints.explainClicked() }
+    func debugSuggestVariants() { hints.suggestTranslationVariants() }
+    func debugTakeVariant(_ i: Int) { hints.debugTakeVariant(i) }
     /// Reply mode with the partner's message and the user's answer, without typing.
     func debugReply(message: String, answer: String) {
         setMode(.reply)
@@ -674,6 +700,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         refreshPairs()
         decorateOutput()
         updateHintsVisibility()
+        if pendingVariants { pendingVariants = false; hints.suggestTranslationVariants() }
     }
 
     /// The panel shows up with the first finished translation and goes away when the input is empty.
@@ -877,6 +904,23 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             self.refineButton.isEnabled = !self.translation.isEmpty
             self.rewriteFinished(mode, old: current, result: result)
         }
+    }
+
+    /// «Взять» in «Варианты перевода»: the variant replaces the translation; «Вернуть» goes back to the text before any edit.
+    private func takeVariant(_ text: String, label: String) {
+        guard !runner.isRunning, rewriteTask == nil, !refiner.isRunning,
+              text.trimmingCharacters(in: .whitespacesAndNewlines) != translation.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        let original = beforeRefine ?? translation
+        beforeRefine = original
+        translation = text
+        setOutput(text, color: .labelColor)
+        refineButton.title = "Вернуть"
+        copyButton.isEnabled = true
+        appliedPronoun = nil
+        rewriteBar.setPronoun(nil)
+        live.reset()
+        pushHints(useStats: false)
+        hints.setEditorChange(before: original, after: text, title: "Правка · \(label)")
     }
 
     private func rewriteFinished(_ mode: RewriteMode, old: String, result: Result<RewriteResult, Error>) {
@@ -1298,6 +1342,12 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         hints.onRetranslate = { [weak self] in self?.translateNow(force: true) }
         hints.onReplace = { [weak self] range, text in self?.replaceInOutput(range, with: text) }
         hints.onRevertEdit = { [weak self] in if self?.beforeRefine != nil { self?.refineClicked() } }
+        hints.onTakeVariant = { [weak self] text, label in self?.takeVariant(text, label: label) }
+        hints.toneProvider = { [weak self] in self?.tone ?? .auto }
+        hints.replyContext = { [weak self] in
+            guard let self, self.mode == .reply, !self.replyMessage.isEmpty else { return nil }
+            return self.replyMessage
+        }
         hints.canStartRequest = { [weak self] in self?.slotAvailable() ?? false }
         hints.explainSource = { [weak self] in
             guard let self else { return nil }

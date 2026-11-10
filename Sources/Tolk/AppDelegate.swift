@@ -96,6 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.mainWindow.show(.translate)
             self?.translatePage.load(text: text)
         }
+        popup.onVariants = { [weak self] text, tone, thread in
+            self?.mainWindow.show(.translate)
+            self?.translatePage.load(text: text, tone: tone, threadContext: thread, suggestVariants: true)
+        }
         popup.toneForApp = { [weak self] in self?.config.tone(forApp: $0) ?? .auto }
         reply = ReplyPanelController(engine: withHistory("reply"))
         reply.toneForApp = { [weak self] in self?.config.tone(forApp: $0) ?? .auto }

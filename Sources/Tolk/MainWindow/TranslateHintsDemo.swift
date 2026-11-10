@@ -79,6 +79,15 @@ enum TranslateHintsDemo {
             await settle(1.0)
             print("[hints-demo] notice \(shots[0].page.debugNotice)")
             shot("4b-rewrite-rejected")
+            // 4c. «Варианты перевода»: loading, three variants, one taken (+ «Вернуть»)
+            for s in shots { s.page.debugSuggestVariants() }
+            try? await Task.sleep(for: .milliseconds(300))
+            shot("4c-tvariants-loading")
+            await settle(1.2)
+            shot("4d-tvariants")
+            for s in shots { s.page.debugTakeVariant(0) }
+            await settle(0.5)
+            shot("4e-tvariants-taken")
             // 5. reply mode
             for s in shots { s.page.debugReply(message: DemoTranslationEngine.partnerMessage, answer: DemoTranslationEngine.myReply) }
             await settle(1.0)

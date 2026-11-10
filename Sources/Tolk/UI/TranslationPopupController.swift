@@ -55,6 +55,10 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
 
     /// Called with the source text when the user expands the popup into the input window.
     var onExpand: ((String) -> Void)?
+    /// «Варианты»: the big window opens with this text, the tone and chat context of this popup, and starts the variants.
+    var onVariants: ((_ text: String, _ tone: Tone, _ threadContext: String?) -> Void)?
+    private var variantsButton: NSButton!
+    private var lastThreadContext: String?
     /// Tone for the app the user copied from (bundle id); used when the tone switch is "Авто".
     var toneForApp: ((String?) -> Tone)?
     /// «Ответить» (R): the app opens the reply window with this message.
@@ -330,6 +334,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         copyButton.isEnabled = false
         insertButton.isEnabled = false
         replyButton.isEnabled = false
+        variantsButton?.isEnabled = false
         glossaryButton.isEnabled = false
         notesAfterBack = false
         resetBack()
@@ -353,6 +358,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
                                          target: requestedTarget, tone: effectiveTone)
         // Short replies from the same chat get the previous lines as context (pronouns), never translated.
         request.threadContext = ThreadMemory.shared.context(for: sourceText, app: frontApp)
+        lastThreadContext = request.threadContext
         runner.start(request)
     }
 
@@ -384,6 +390,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
             copyButton.isEnabled = true
             insertButton.isEnabled = frontApp != Bundle.main.bundleIdentifier
             replyButton.isEnabled = true
+            variantsButton.isEnabled = true
             glossaryButton.isEnabled = true
             updateSize()
         case let .fellBack(from, reason):
@@ -553,6 +560,12 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
                                anchor: NSPoint(x: panel.frame.minX + 24, y: panel.frame.maxY + 18))
         dismiss()
         onReply?(ctx)
+    }
+
+    @objc private func variantsClicked() {
+        let text = sourceText, tone = effectiveTone, thread = lastThreadContext
+        dismiss()
+        onVariants?(text, tone, thread)
     }
 
     @objc private func expandClicked() {
@@ -972,7 +985,11 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         let expand = UIFactory.symbolButton("arrow.up.left.and.arrow.down.right", tooltip: "Открыть в окне перевода",
                                             target: self, action: #selector(expandClicked))
 
-        let header = NSStackView(views: [directionButton, swapButton, providerBadge, spinner, UIFactory.spacer(), expand, close])
+        // «Варианты» sits beside «Открыть в окне»: it opens the same window and starts the variants there (the footer has no room).
+        variantsButton = UIFactory.symbolButton("list.bullet.rectangle", tooltip: "Варианты перевода: 2–3 версии с пояснением, чем отличаются (откроется окно перевода)",
+                                                target: self, action: #selector(variantsClicked))
+        variantsButton.isEnabled = false
+        let header = NSStackView(views: [directionButton, swapButton, providerBadge, spinner, UIFactory.spacer(), variantsButton, expand, close])
         header.orientation = .horizontal
         header.spacing = 6
 

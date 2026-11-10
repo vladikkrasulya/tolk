@@ -251,3 +251,11 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   fields, address bars, table cells and small or login/email/IBAN fields.
 - Studied: KeyType and TabType (MIT): both use raw prompts + token healing and request per keystroke; notes in the
   side-session report. Self-test: 575 checks.
+
+## Translation variants (whole text)
+- `translationVariants(source:translation:from:to:tone:replyTo:)` (`Engine/BigWindowTools.swift`): one JSON request,
+  ≤3 `TranslationVariant { text, label, reason }`, label and reason in the user's language; variants that lose numbers,
+  links, times, a question or the greeting, and near-copies (≥80 % same words) are dropped. 9–15 s per request.
+- Big window: «Варианты перевода» card (button only; word diff against the current translation, «Взять» / «Вернуть»).
+  Popup: «Варианты» in the header opens the big window with the same text, tone and chat context (translation comes
+  from the cache) and starts the request. CLI: `--variants-all`. Self-test: 587 checks.

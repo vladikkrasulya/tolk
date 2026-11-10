@@ -225,6 +225,8 @@ public protocol TranslationEngine: AnyObject, Sendable {
     func sentenceVariants(sentence: String, current: String, fullSource: String, fullTranslation: String,
                           from: Language, to: Language, tone: Tone) async throws -> [SentenceVariant]
     func rewrite(translation: String, source: String, from: Language, to: Language, mode: RewriteMode) async throws -> RewriteResult
+    /// 2-3 alternative translations of the whole text, each with a label and a reason.
+    func translationVariants(source: String, translation: String, from: Language, to: Language, tone: Tone, replyTo: String?) async throws -> [TranslationVariant]
     func explain(message: String) async throws -> MessageExplanation
     /// The request for the reply flow (partner's message + the user's answer); stream it through `translate`.
     func replyRequest(message: String, reply: String, tone: Tone) -> TranslationRequest
@@ -244,6 +246,9 @@ public extension TranslationEngine {
     }
     func rewrite(translation: String, source: String, from: Language, to: Language, mode: RewriteMode) async throws -> RewriteResult {
         throw TolkError.unavailable("Переписывание недоступно для этого движка")
+    }
+    func translationVariants(source: String, translation: String, from: Language, to: Language, tone: Tone, replyTo: String?) async throws -> [TranslationVariant] {
+        throw TolkError.unavailable("Варианты перевода недоступны для этого движка")
     }
     func explain(message: String) async throws -> MessageExplanation {
         throw TolkError.unavailable("Разбор смысла недоступен для этого движка")

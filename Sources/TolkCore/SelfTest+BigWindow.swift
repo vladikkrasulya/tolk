@@ -48,6 +48,43 @@ extension SelfTest {
         check(vs.map(\.text) == ["Старт 15 марта"], "variants: repeat of the current text and a variant that loses «15» dropped; plain string accepted; fenced JSON read", "\(vs)")
         check(vs.first?.label == "другой вариант", "variants: missing label gets a default")
         check(ExtrasParsing.variants("not json", sentence: "a", current: "b", from: .english, to: .russian).isEmpty, "variants: garbage -> empty")
+        // MARK: whole-translation variants
+        let tvSrc = "Hi Anna, could you send the report by 5 PM today? Thanks!"
+        let tvCur = "Привет, Анна, можешь прислать отчёт до 17:00 сегодня? Спасибо!"
+        let tvJSON = """
+        {"variants":[{"label":"Строже","reason":"на «Вы», просьба как требование","text":"Здравствуйте, Анна. Не могли бы Вы прислать отчёт до 17:00 сегодня? Благодарю."},
+        {"label":"Дружелюбнее","reason":"смягчено","text":"Анна, привет! Пришлёшь отчёт сегодня до 17:00? Спасибо!"},
+        {"label":"Ближе к тексту","reason":"почти дословно","text":"Привет, Анна, можешь прислать отчёт до 17:00 сегодня? Спасибо!"}]}
+        """
+        var tv = ExtrasParsing.translationVariants(tvJSON, source: tvSrc, current: tvCur, from: .english, to: .russian)
+        check(tv.count == 2 && tv[0].label == "Строже" && tv[0].reason.contains("Вы") && tv[1].label == "Дружелюбнее", "tvariants: parsed, the copy of the current translation dropped", "\(tv)")
+        tv = ExtrasParsing.translationVariants("Вот:\n```json\n" + tvJSON + "\n```\nГотово.", source: tvSrc, current: tvCur, from: .english, to: .russian)
+        check(tv.count == 2, "tvariants: fenced JSON with junk around is read", "\(tv)")
+        tv = ExtrasParsing.translationVariants("[{\"label\":\"Короче\",\"reason\":\"r\",\"text\":\"Привет, Анна, отчёт до 17:00 сегодня?\"}, \"Привет, Анна, отчёт до 17:00 сегодня?\"]",
+                                               source: tvSrc, current: tvCur, from: .english, to: .russian)
+        check(tv.count == 1 && tv[0].label == "Короче", "tvariants: bare array read, duplicate of an earlier variant dropped", "\(tv)")
+        let tvBad = """
+        {"variants":[{"label":"a","reason":"r","text":"Привет, Анна, пришли отчёт сегодня."},
+        {"label":"b","reason":"r","text":"Привет, Анна, можешь прислать отчёт до 18:00 сегодня. Спасибо!"},
+        {"label":"c","reason":"r","text":"Анна, отправь отчёт до 17:00 сегодня. Спасибо!"},
+        {"label":"d","reason":"r","text":"Привет, Анна, пришли отчёт до 17:00 сегодня, спасибо!"}]}
+        """
+        tv = ExtrasParsing.translationVariants(tvBad, source: tvSrc, current: tvCur, from: .english, to: .russian)
+        check(tv.map(\.label) == ["d"], "tvariants: lost number, changed time and lost greeting are rejected (the one safe variant stays)", "\(tv.map(\.label))")
+        check(ExtrasParsing.translationVariants("not json", source: "a", current: "b", from: .english, to: .russian).isEmpty
+              && ExtrasParsing.translationVariants("{\"variants\":\"x\"}", source: "a", current: "b", from: .english, to: .russian).isEmpty, "tvariants: garbage -> empty")
+        tv = ExtrasParsing.translationVariants("{\"variants\":[{\"text\":\"Здравствуйте\"},{\"text\":\"Добрый день\",\"label\":\"Очень длинная метка из пяти слов\"}]}",
+                                               source: "Hello", current: "Привет", from: .english, to: .russian)
+        check(tv.count == 2 && tv[0].label == "Другой вариант" && tv[0].reason.isEmpty && tv[1].label.split(separator: " ").count <= 3, "tvariants: default label, long label cut, a different greeting is allowed", "\(tv)")
+        check(ExtrasParsing.translationVariants("{\"variants\":[{\"label\":\"x\",\"reason\":\"r\",\"text\":\"Пришли отчёт.\"},{\"label\":\"y\",\"reason\":\"r\",\"text\":\"Не могли бы Вы прислать отчёт?\"}]}",
+                                                source: "Can you send the report?", current: "Можешь прислать отчёт?", from: .english, to: .russian).map(\.label) == ["y"],
+              "tvariants: a question that became a statement is rejected")
+        check(ExtrasParsing.translationVariants("{\"variants\":[{\"label\":\"x\",\"reason\":\"r\",\"text\":\"Кохана, я затримаюсь на роботі до 20:00, вечеряйте без мене. Цілую!\"}]}",
+                                                source: "Любимая, я задержусь на работе до 20:00, ужинайте без меня. Целую!", current: "Кохана, я затримаюся на роботі до 20:00, вечеряйте без мене. Цілую!", from: .russian, to: .ukrainian).isEmpty,
+              "tvariants: a one-letter difference is not a variant")
+        let tvPrompt = ExtrasPrompt.translationVariants(from: .english, to: .russian, userLanguage: .ukrainian, tone: .chat, rules: "GLOSSARY-X")
+        check(tvPrompt.contains("Ukrainian") && tvPrompt.contains("GLOSSARY-X") && tvPrompt.contains("WHOLE") && tvPrompt.contains("Never output the current translation"), "tvariants: prompt carries user language, rules and the difference demands")
+
         let eJSON = """
         Вот ответ: {"meaning":"Собеседник вежливо отказывается, потому что нет бюджета.","tone":"вежливый отказ","terms":[{"term":"circle back","meaning":"вернуться к теме позже"},{"term":"ballpark","meaning":"примерная оценка"},{"term":"synergy","meaning":"выдумка"}]}
         """
