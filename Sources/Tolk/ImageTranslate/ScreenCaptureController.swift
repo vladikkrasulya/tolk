@@ -258,17 +258,23 @@ final class SelectionOverlay {
     private var completion: ((NSScreen?, NSRect, String, CaptureEnd) -> Void)?
     private var route: CaptureRoute = .popup
     private var keyMonitor: Any?
+    private var globalKeyMonitor: Any?
     private var resignObserver: Any?
     private var previousApp: NSRunningApplication?
     private var shownAt = Date()
 
     func run(route: CaptureRoute, _ completion: @escaping (NSScreen?, NSRect, String, CaptureEnd) -> Void) {
+        // A second hotkey press while the selection is already on screen must not stack another overlay.
+        guard self.completion == nil else { return }
         self.completion = completion
         self.route = route
         previousApp = NSWorkspace.shared.frontmostApplication
         shownAt = Date()
         for screen in NSScreen.screens {
-            let w = OverlayWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            let w = OverlayWindow(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            w.isFloatingPanel = true
+            w.hidesOnDeactivate = false
+            w.becomesKeyOnlyIfNeeded = false
             w.setFrame(screen.frame, display: false)
             w.level = .screenSaver
             w.isOpaque = false
@@ -289,7 +295,9 @@ final class SelectionOverlay {
             w.contentView = view
             windows.append(w)
         }
-        NSApp.activate(ignoringOtherApps: true)
+        // Tolk is NOT activated: the overlay is a non-activating panel that takes the mouse and the keyboard while the
+        // user's app stays frontmost. Activating used to race with the app the hotkey was pressed in — it took focus
+        // back ~170 ms later, `didResignActive` fired and the selection vanished before the user could drag.
         for w in windows { w.orderFrontRegardless() }
         let mouseWindow = windows.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? windows.first
         mouseWindow?.makeKey()
@@ -300,9 +308,23 @@ final class SelectionOverlay {
             if e.keyCode == UInt16(kVK_Escape) { self?.finish(screen: nil, rect: .zero, reason: "esc", end: .cancelled); return nil }
             return e
         }
-        resignObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification,
-                                                                object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.finish(screen: nil, rect: .zero, reason: "app-resigned-active front=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?") dt=\(Int(Date().timeIntervalSince(self?.shownAt ?? Date()) * 1000))ms", end: .appSwitched) }
+        // Esc when the panel could not become key (another app holds the keyboard): global monitor (needs the
+        // Accessibility permission Tolk already has; the key also reaches the front app, which is harmless for Esc).
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard e.keyCode == UInt16(kVK_Escape) else { return }
+            MainActor.assumeIsolated { self?.finish(screen: nil, rect: .zero, reason: "esc-global", end: .cancelled) }
+        }
+        // The user really switched to another app (⌘Tab, Dock click): drop the selection and leave them there.
+        // The first 0.5 s are ignored — activation notifications from the hotkey press itself are still settling.
+        let me = NSRunningApplication.current
+        let before = previousApp
+        resignObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+                                                                           object: nil, queue: .main) { [weak self] n in
+            let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            MainActor.assumeIsolated {
+                guard let self, let app, app != me, app != before, Date().timeIntervalSince(self.shownAt) > 0.5 else { return }
+                self.finish(screen: nil, rect: .zero, reason: "app-switched front=\(app.bundleIdentifier ?? "?")", end: .appSwitched)
+            }
         }
     }
 
@@ -311,8 +333,9 @@ final class SelectionOverlay {
         self.completion = nil
         NSCursor.pop()
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
-        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
-        keyMonitor = nil; resignObserver = nil
+        if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor) }
+        if let resignObserver { NSWorkspace.shared.notificationCenter.removeObserver(resignObserver) }
+        keyMonitor = nil; globalKeyMonitor = nil; resignObserver = nil
         for w in windows { w.orderOut(nil); w.close() }
         windows = []
         // Focus: popup → back to the app the user was reading; big window → stays with Tolk (the caller
@@ -325,9 +348,9 @@ final class SelectionOverlay {
     }
 }
 
-private final class OverlayWindow: NSWindow {
+private final class OverlayWindow: NSPanel {
     override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+    override var canBecomeMain: Bool { false }
 }
 
 private final class OverlayView: NSView {

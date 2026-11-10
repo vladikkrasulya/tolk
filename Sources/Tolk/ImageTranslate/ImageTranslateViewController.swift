@@ -588,24 +588,34 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
 
     @objc func captureArea(_ sender: Any?) {
         let window = view.window
-        window?.orderOut(nil)
+        // The window is made invisible, NOT ordered out. Ordering out Tolk's only window makes macOS hand the
+        // active state to the previous app, and on macOS 14+ Tolk cannot take it back (`NSApp.activate` is only a
+        // request): the result then lands in a window behind another app — it looked as if Tolk "flew away"
+        // after every capture. An invisible window keeps Tolk active and is not in the screenshot.
+        let oldAlpha = window?.alphaValue ?? 1
+        window?.alphaValue = 0
+        window?.ignoresMouseEvents = true
+        let restore: (Bool) -> Void = { activate in
+            window?.ignoresMouseEvents = false
+            window?.alphaValue = oldAlpha
+            if activate {
+                window?.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            } else {
+                window?.orderFront(nil)
+            }
+        }
         // Let the window disappear before the overlay appears.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            guard let self else { return }
+            guard let self else { restore(true); return }
             self.screenCapture.selectImage(route: .mainWindow) { [weak self] image, _, end in
                 guard let self, let image else {
                     // Esc / right click: the user was in Tolk — window back and active.
                     // ⌘Tab to another app: window back too, but don't pull focus from where the user went.
-                    if CaptureFocus.target(route: .mainWindow, end: end) == .tolk {
-                        window?.makeKeyAndOrderFront(nil)
-                        NSApp.activate()
-                    } else {
-                        window?.orderFront(nil)
-                    }
+                    restore(CaptureFocus.target(route: .mainWindow, end: end) == .tolk)
                     return
                 }
-                window?.makeKeyAndOrderFront(nil)
-                NSApp.activate(ignoringOtherApps: true)
+                restore(true)
                 self.load(image: image, name: "Снимок области экрана")
             }
         }
