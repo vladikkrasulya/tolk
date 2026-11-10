@@ -47,6 +47,7 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
     }
 
     public func translate(_ request: TranslationRequest) -> AsyncThrowingStream<TranslationEvent, Error> {
+        ModelUsage.markUsed()
         let resolved = LanguageDetector.resolve(request, config: config)
         let primary = self.primary, fallback = self.fallback
         let cache = self.cache
@@ -226,4 +227,20 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
         }
         return (error as? LocalizedError)?.errorDescription ?? "\(error)"
     }
+}
+
+
+/// When the user last asked for a translation. The background health check reloads the model on vkbox only if the
+/// user translated recently: a model that was unloaded on purpose (vkbox is used for games) must stay unloaded.
+public enum ModelUsage {
+    nonisolated(unsafe) private static var last: Date?
+    private static let lock = NSLock()
+    public static func markUsed(at date: Date = Date()) { lock.lock(); last = date; lock.unlock() }
+    public static func usedRecently(within seconds: TimeInterval = 15 * 60, now: Date = Date()) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let last else { return false }
+        return now.timeIntervalSince(last) <= seconds
+    }
+    /// For the self-test.
+    public static func reset() { lock.lock(); last = nil; lock.unlock() }
 }

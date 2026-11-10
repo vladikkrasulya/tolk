@@ -37,6 +37,7 @@ public enum SelfTest {
         layoutFix(check)
         hotKeyRules(check)
         tails(check)
+        modelUsage(check)
         return (check.total, check.failures)
     }
 
@@ -56,6 +57,18 @@ public enum SelfTest {
         check(ok("Thanks for the update.", "Thank you for the update."), "refine guard: no greeting, no question accepted")
         check(!ok("Thanks.", "  "), "refine guard: empty edit rejected")
         check(ok("Hi there. Can you come? (please)?", "Hi there. Could you come?"), "refine guard: question kept accepted")
+    }
+
+    // MARK: Model usage (background warm-up only after recent use)
+
+    static func modelUsage(_ check: Check) {
+        ModelUsage.reset()
+        check(!ModelUsage.usedRecently(), "usage: never used → no background warm-up")
+        let t = Date(timeIntervalSince1970: 2_000_000)
+        ModelUsage.markUsed(at: t)
+        check(ModelUsage.usedRecently(now: t.addingTimeInterval(14 * 60)), "usage: used 14 min ago → warm-up allowed")
+        check(!ModelUsage.usedRecently(now: t.addingTimeInterval(16 * 60)), "usage: used 16 min ago → leave vkbox alone")
+        ModelUsage.reset()
     }
 
     // MARK: Glossary

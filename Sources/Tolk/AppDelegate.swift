@@ -469,8 +469,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.lastHealth = ok
             self?.showHealth(ok)
             // Model fell out of memory (idle > keep_alive, Ollama restart): load it in the background now,
-            // so the next translation is not a 35+ s cold start.
-            if ok, let ollama = primary as? OllamaProvider { await ollama.warmUpIfNeeded() }
+            // so the next translation is not a 35+ s cold start — but only if the user translated in the last
+            // 15 minutes. Otherwise vkbox may be busy with something else (games): an unloaded model stays unloaded,
+            // and the first translation loads it.
+            if ok, ModelUsage.usedRecently(), let ollama = primary as? OllamaProvider { await ollama.warmUpIfNeeded() }
         }
     }
 
