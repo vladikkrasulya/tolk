@@ -4,7 +4,7 @@ import AppKit
 import TolkCore
 
 enum TypeTranslateContent: Equatable {
-    case translation(text: String, label: String)
+    case translation(text: String, label: String, warning: String? = nil)
     case error(String)
     case notice(String)
 }
@@ -52,9 +52,10 @@ private final class TypeTranslateView: NSView {
     /// Panel height for `content` at `width`.
     static func height(for content: TypeTranslateContent, width: CGFloat) -> CGFloat {
         switch content {
-        case let .translation(text, label):
-            let body = layout(text, width: textWidth(forPanelWidth: width, chip: label), font: font, maxLines: maxLines).3.height
-            let hint = NSAttributedString(string: TypeTranslate.hint, attributes: [.font: hintFont]).size().height
+        case let .translation(text, label, warning):
+            let x = textWidth(forPanelWidth: width, chip: label)
+            let body = layout(text, width: x, font: font, maxLines: maxLines).3.height
+            let hint = layout(warning ?? TypeTranslate.hint, width: x, font: hintFont, maxLines: 2).3.height
             return ceil(body + 3 + hint) + 2 * padY
         case let .error(s), let .notice(s):
             return layout(s, width: width - 2 * padX, font: font, maxLines: 2).3.height + 2 * padY
@@ -68,7 +69,7 @@ private final class TypeTranslateView: NSView {
         Self.background.setFill(); card.fill()
         Self.border.setStroke(); card.lineWidth = 1; card.stroke()
         switch content {
-        case let .translation(text, label):
+        case let .translation(text, label, warning):
             let chip = Self.chipSize(label)
             let chipRect = NSRect(x: Self.padX, y: Self.padY + 1, width: chip.width, height: chip.height)
             Self.chipFill.setFill()
@@ -80,8 +81,11 @@ private final class TypeTranslateView: NSView {
             storage.addAttribute(.foregroundColor, value: Self.text, range: NSRange(location: 0, length: storage.length))
             let glyphs = lm.glyphRange(for: container)
             lm.drawGlyphs(forGlyphRange: glyphs, at: NSPoint(x: x, y: Self.padY))
-            NSAttributedString(string: TypeTranslate.hint, attributes: [.font: Self.hintFont, .foregroundColor: Self.hintColor])
-                .draw(at: NSPoint(x: x, y: Self.padY + size.height + 3))
+            let (hlm, hcontainer, hstorage, _) = Self.layout(warning ?? TypeTranslate.hint, width: bounds.width - x - Self.padX,
+                                                              font: Self.hintFont, maxLines: 2)
+            hstorage.addAttribute(.foregroundColor, value: warning == nil ? Self.hintColor : NSColor.systemOrange,
+                                  range: NSRange(location: 0, length: hstorage.length))
+            hlm.drawGlyphs(forGlyphRange: hlm.glyphRange(for: hcontainer), at: NSPoint(x: x, y: Self.padY + size.height + 3))
         case let .error(s):
             draw(s, color: Self.errorColor)
         case let .notice(s):

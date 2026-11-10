@@ -221,6 +221,18 @@ public enum TypeTranslate {
     // MARK: Texts (shown in the line)
 
     public static let hint = "Tab — вставить, Esc — оставить"
+
+    /// Check warnings that must not be inserted with a single Tab: lost links, numbers, times, money. Calques and
+    /// the language heuristic (unreliable on technical text: version numbers, IPs) are ignored here.
+    public static func blockingWarnings(_ warnings: [String]) -> [String] {
+        warnings.filter { !CalqueDetector.isCalque($0) && !$0.contains("не на том языке") }
+    }
+
+    /// Hint shown instead of the normal one when the check found a loss: the first Tab only arms the insert.
+    public static func warningHint(_ warnings: [String]) -> String {
+        let w = warnings.prefix(2).map { $0.replacingOccurrences(of: "⚠️ ", with: "") }.joined(separator: "; ")
+        return "⚠ " + w + " — Tab ещё раз, чтобы вставить как есть"
+    }
     public static let selectFailed = "Поле не даёт выделить текст — перевод не вставлен"
     public static let changedMeanwhile = "Текст в поле изменился — перевод не вставлен"
 
@@ -237,6 +249,16 @@ public enum TypeTranslate {
 extension SelfTest {
     static func typeTranslate(_ check: Check) {
         typealias T = TypeTranslate
+        // Check before Tab: losses block a one-key insert, calques and the language heuristic do not
+        let lostLink = TranslationCheck.warnings(source: "Отчёт тут: https://example.com/r?id=88123, глянь",
+                                                 translation: "The report is here, take a look", from: .russian, to: .english)
+        check(!T.blockingWarnings(lostLink).isEmpty, "type-translate: lost link blocks Tab", lostLink.joined(separator: "; "))
+        let kept = TranslationCheck.warnings(source: "Ставка 0,35 $, бюджет 12 500 $, ссылка https://x.io/a?b=1",
+                                             translation: "Bid $0.35, budget $12,500, link https://x.io/a?b=1", from: .russian, to: .english)
+        check(T.blockingWarnings(kept).isEmpty, "type-translate: localized numbers + same link pass", kept.joined(separator: "; "))
+        check(T.blockingWarnings(["калька: «a» → «b»", "⚠️ перевод не на том языке: французский вместо английский"]).isEmpty,
+              "type-translate: calque and language warnings do not block")
+        check(T.warningHint(["⚠️ потеряна ссылка https://x"]).hasPrefix("⚠ потеряна ссылка"), "type-translate: warning hint text")
         // Partner detection
         let screen = """
         Anna Müller 10:41

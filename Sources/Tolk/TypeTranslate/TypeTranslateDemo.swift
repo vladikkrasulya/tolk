@@ -19,6 +19,9 @@ enum TypeTranslateDemo {
             ("long", .translation(text: "Okay, I will send you the updated invoice this evening, together with the revised delivery schedule, the signed copy of the contract and the list of open questions we discussed on the call yesterday, and I will let you know as soon as everything has been uploaded to the shared folder so that your team can start the review before Friday.",
                                    label: TypeTranslate.label(for: .english)), true),
             ("error", .error(TypeTranslate.selectFailed), true),
+            ("warning", .translation(text: "Okay, I'll send the updated invoice tonight, the report is in the shared folder.",
+                                     label: TypeTranslate.label(for: .english),
+                                     warning: TypeTranslate.warningHint(["⚠️ потеряна ссылка https://dash.example.com/r?id=88123"])), true),
             ("atcaret", .translation(text: "Gut, ich schicke die Rechnung heute Abend.", label: TypeTranslate.label(for: .german)), false),
         ]
         for (aname, ap, bg, fg, fieldBG) in [

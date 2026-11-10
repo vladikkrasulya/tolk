@@ -40,6 +40,9 @@ final class TypeTranslateController {
         let translation: String
         let source: Language
         let target: Language
+        /// Lost links/numbers/times found by the check: the first Tab only arms the insert.
+        var warning: String? = nil
+        var armed = false
     }
     private var shown: Shown?
     /// After Esc nothing is requested until the text changes again.
@@ -230,8 +233,14 @@ final class TypeTranslateController {
         if let a = field.element, let b = now.element { same = CFEqual(a, b) }
         guard TypeTranslate.decideReplace(shown: field.snapshot, now: now.snapshot, sameElement: same) == .replace else { return }
 
-        shown = Shown(snapshot: now.snapshot, element: now.element, translation: translation, source: source, target: target)
-        panel.show(.translation(text: translation, label: TypeTranslate.label(for: target)), fieldFrame: now.frame, caret: now.caret)
+        let lost = TypeTranslate.blockingWarnings(
+            TranslationCheck.warnings(source: text, translation: translation, from: source, to: target))
+        let warning = lost.isEmpty ? nil : TypeTranslate.warningHint(lost)
+        if !lost.isEmpty { Diagnostics.log("type-translate: check warnings=\(lost.count) app=\(bundleID)") }
+        shown = Shown(snapshot: now.snapshot, element: now.element, translation: translation, source: source, target: target,
+                      warning: warning)
+        panel.show(.translation(text: translation, label: TypeTranslate.label(for: target), warning: warning),
+                   fieldFrame: now.frame, caret: now.caret)
         Diagnostics.log("type-translate: shown \(source.rawValue)->\(target.rawValue) in=\(text.count) out=\(translation.count) ms=\(Int(Date().timeIntervalSince(t0) * 1000)) reply=\(partner != nil) app=\(bundleID)")
     }
 
@@ -240,7 +249,13 @@ final class TypeTranslateController {
     /// Replaces the field's text with the translation. true = the key is swallowed; false = the field is not the one
     /// the translation was made for (the key goes to the app untouched and nothing is changed).
     private func accept() -> Bool {
-        guard let s = shown, panel.isVisible, !IsSecureEventInputEnabled() else { return false }
+        guard var s = shown, panel.isVisible, !IsSecureEventInputEnabled() else { return false }
+        if s.warning != nil, !s.armed {
+            // Something looks lost (link, number, time): make the user look once more before inserting.
+            s.armed = true
+            shown = s
+            return true
+        }
         let now = TypeTranslateField.readQuick()
         var same = true
         if let a = s.element, let b = now?.element { same = CFEqual(a, b) }
