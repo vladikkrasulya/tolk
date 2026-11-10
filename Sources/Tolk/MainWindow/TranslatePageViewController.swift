@@ -678,6 +678,9 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
 
     /// The panel shows up with the first finished translation and goes away when the input is empty.
     private func updateHintsVisibility(forceHide: Bool = false) {
+        // Settings can change (model, ⌃⌥R toggle…) before the page was ever opened: no views yet, nothing to update.
+        // Touching the implicitly unwrapped `hints` here crashed Tolk on every settings save in that state.
+        guard isViewLoaded, hints != nil else { return }
         let replyReady = mode == .reply && !replyMessage.isEmpty
         if forceHide { hintsShown = false } else if hints.hasContext || replyReady { hintsShown = true }
         hints.isHidden = !hintsShown
