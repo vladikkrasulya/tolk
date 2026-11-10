@@ -79,6 +79,8 @@ public enum CalqueDetector {
         (.english, "en-hearing-you", "looking\\s+forward\\s+to\\s+hearing\\s+you", "hearing from you"),
         (.english, "en-in-attachment", "(?:please\\s+)?find\\s+in\\s+(?:the\\s+)?attachment", "please find attached"),
         (.english, "en-please-comma", "(?<![\\p{L}])please,\\s", "please (no comma)"),
+        (.english, "en-ill-ask-you", "I(?:'ll|\\s+will|\\s+would\\s+like\\s+to)\\s+ask\\s+you\\s+to", "Please …"),
+        (.english, "en-from-our-side", "from\\s+(?:our|your)\\s+side", "on our end / to our feeds / in your traffic (who does what?)"),
     ]
 
     private static let entries: [Entry] = raw.compactMap { lang, id, body, sug in

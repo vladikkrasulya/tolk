@@ -81,7 +81,10 @@ enum Prompt {
         case .russian, .ukrainian:
             "Avoid English-shaped constructions in \(target.englishName) (no «имеет смысл», «дайте мне знать», «в конце дня», «взять душ»-type calques; no English word order, no literal idioms): say it the way a native \(target.englishName) speaker would."
         case .english:
-            "Avoid Slavic word order and literal idioms in English (no «Did you forget to take?» for «ты не забыл забрать?», no «I have a question to you»): say it the way a native English speaker would."
+            "Avoid Slavic word order and literal idioms in English (no «Did you forget to take?» for «ты не забыл забрать?», no «I have a question to you»): say it the way a native English speaker would. " +
+            "«Попрошу вас / прошу вас сделать X» is a request: write «Please do X», never «I'll ask you to». " +
+            "«С нашей стороны / с вашей стороны» about traffic, feeds or data means where it goes or comes from (to our feeds, in your traffic), not «from our side»; keep who does what unambiguous. " +
+            "«Значит / раз так, вы видите…» is a conclusion: write «so you can see / you clearly see», not «you must see» (it reads as an order)."
         default:
             "Avoid literal idioms and the word order of the source language: say it the way a native \(target.englishName) speaker would."
         }
