@@ -315,6 +315,12 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public var autocompleteLearnStyle: Bool = false
     /// How often suggestions appear: "rare" (only confident), "normal", "often".
     public var autocompleteFrequency: String = "normal"
+    /// Context from a screen snapshot (OCR) when the window text via Accessibility is too short.
+    public var autocompleteScreenContext: Bool = true
+    /// On battery: only rare suggestions / no screen snapshots / short suggestions. All off by default.
+    public var autocompleteBatteryRare: Bool = false
+    public var autocompleteBatteryNoScreen: Bool = false
+    public var autocompleteBatteryShort: Bool = false
 
     public static let defaultAutocompleteOffApps: [String] = [
         "com.apple.Terminal", "com.googlecode.iterm2", "com.apple.dt.Xcode",
@@ -330,6 +336,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         case autocomplete, autocompleteModel, autocompleteOffApps
         case autocompleteLength, autocompleteInstructions, autocompleteAppInstructions, autocompleteUseGlossary
         case autocompleteClipboard, autocompleteEmoji, autocorrect, autocompleteLearnStyle, autocompleteFrequency
+        case autocompleteScreenContext, autocompleteBatteryRare, autocompleteBatteryNoScreen, autocompleteBatteryShort
     }
 
     /// Every key is optional: `{"model": "x"}` keeps all other defaults.
@@ -368,6 +375,10 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         autocorrect = try c.decodeIfPresent(Bool.self, forKey: .autocorrect) ?? d.autocorrect
         autocompleteLearnStyle = try c.decodeIfPresent(Bool.self, forKey: .autocompleteLearnStyle) ?? d.autocompleteLearnStyle
         autocompleteFrequency = try c.decodeIfPresent(String.self, forKey: .autocompleteFrequency) ?? d.autocompleteFrequency
+        autocompleteScreenContext = try c.decodeIfPresent(Bool.self, forKey: .autocompleteScreenContext) ?? d.autocompleteScreenContext
+        autocompleteBatteryRare = try c.decodeIfPresent(Bool.self, forKey: .autocompleteBatteryRare) ?? d.autocompleteBatteryRare
+        autocompleteBatteryNoScreen = try c.decodeIfPresent(Bool.self, forKey: .autocompleteBatteryNoScreen) ?? d.autocompleteBatteryNoScreen
+        autocompleteBatteryShort = try c.decodeIfPresent(Bool.self, forKey: .autocompleteBatteryShort) ?? d.autocompleteBatteryShort
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -396,6 +407,10 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         try c.encode(autocorrect, forKey: .autocorrect)
         try c.encode(autocompleteLearnStyle, forKey: .autocompleteLearnStyle)
         try c.encode(autocompleteFrequency, forKey: .autocompleteFrequency)
+        try c.encode(autocompleteScreenContext, forKey: .autocompleteScreenContext)
+        try c.encode(autocompleteBatteryRare, forKey: .autocompleteBatteryRare)
+        try c.encode(autocompleteBatteryNoScreen, forKey: .autocompleteBatteryNoScreen)
+        try c.encode(autocompleteBatteryShort, forKey: .autocompleteBatteryShort)
     }
 
     /// Tone for an app (bundle id), `.auto` if not configured.

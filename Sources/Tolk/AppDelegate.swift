@@ -37,8 +37,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Autocomplete
     private var acServer: LocalModelServer!
     private var acController: AutocompleteController!
+    private var settingsVC: SettingsViewController!
+    private var termSources: [DispatchSourceSignal] = []
     private var acItem: NSMenuItem!
     private var acStatusItem: NSMenuItem!
+    private var acRetryItem: NSMenuItem!
     private var acAppItem: NSMenuItem!
     private var acFlagItems: [(item: NSMenuItem, keyPath: WritableKeyPath<TolkConfig, Bool>)] = []
     private var acLengthItems: [NSMenuItem] = []
@@ -66,12 +69,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.mainWindow.show(.translate)
             self?.translatePage.load(text: e.source)
         }
+        settingsVC = SettingsViewController(config: config)
         mainWindow = MainWindowController(translate: translatePage,
                                           image: imagePage,
                                           documents: documentsPage,
                                           history: historyPage,
                                           glossary: glossaryPage,
-                                          settings: SettingsViewController(config: config))
+                                          settings: settingsVC)
 
         popup.onExpand = { [weak self] text in
             self?.mainWindow.show(.translate)
@@ -273,7 +277,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupAutocomplete() {
         acServer = LocalModelServer(modelPath: config.autocompleteModel)
         acController = AutocompleteController(server: acServer)
-        acServer.onStateChange = { [weak self] _ in self?.refreshAutocompleteMenu() }
+        acServer.onStateChange = { [weak self] _ in self?.serverStateChanged() }
+        settingsVC.model.onRetryAutocomplete = { [weak self] in self?.acServer.retry() }
+        // SIGTERM/SIGINT/SIGHUP end Tolk normally (applicationWillTerminate stops the server). After kill -9 the
+        // llama-server wrapper notices the missing parent within ~2 s (LocalModelServer).
+        for sig in [SIGTERM, SIGINT, SIGHUP] {
+            signal(sig, SIG_IGN)
+            let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            src.setEventHandler { NSApp.terminate(nil) }
+            src.resume()
+            termSources.append(src)
+        }
+        PowerMonitor.shared.onChange = { [weak self] in
+            guard let self, self.config.autocompleteBatteryRare || self.config.autocompleteBatteryNoScreen || self.config.autocompleteBatteryShort else { return }
+            self.applyAutocomplete()
+        }
+        PowerMonitor.shared.start()
         let me = Bundle.main.bundleIdentifier
         lastExternalApp = NSWorkspace.shared.frontmostApplication.flatMap { $0.bundleIdentifier == me ? nil : $0 }
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -288,6 +307,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lastExternalApp = app
         refreshAutocompleteMenu()
     }
+
+    /// Server state → menu, settings tab, and the gate for screen reading (no snapshots while the model is not ready).
+    private func serverStateChanged() {
+        ScreenContext.serverReady = acServer.state == .ready
+        if case .failed(let e) = acServer.state {
+            var text = e
+            if let at = acServer.nextRetryAt { text += " — повтор через \(max(1, Int(at.timeIntervalSinceNow.rounded()))) с" }
+            settingsVC.model.acError = text
+        } else {
+            settingsVC.model.acError = nil
+        }
+        refreshAutocompleteMenu()
+    }
+
+    @objc private func retryAutocompleteServer() { acServer.retry() }
 
     private var wantsTypingTap: Bool { config.autocomplete || config.autocorrect || config.autocompleteEmoji }
 
@@ -331,6 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .ready: acStatusItem.title = "\(acServer.modelName): готово"
         case .failed(let e): acStatusItem.title = "Ошибка: \(e)"
         }
+        if let retry = acRetryItem { retry.isHidden = !acServer.isFailedState }
         if let app = lastExternalApp, let id = app.bundleIdentifier {
             let off = config.autocompleteOffApps.contains(id)
             acAppItem.title = "\(off ? "Включить" : "Выключить") в \(app.localizedName ?? id)"
@@ -445,6 +480,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         acStatusItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         acStatusItem.isEnabled = false
         acMenu.addItem(acStatusItem)
+        acRetryItem = item("Повторить запуск модели", #selector(retryAutocompleteServer))
+        acRetryItem.isHidden = true
+        acMenu.addItem(acRetryItem)
         acMenu.addItem(.separator())
         let flags: [(String, WritableKeyPath<TolkConfig, Bool>)] = [
             ("Исправлять опечатки", \.autocorrect), ("Эмодзи", \.autocompleteEmoji),

@@ -21,7 +21,28 @@ public enum SelfTest {
         translationChecks(check)
         splitter(check)
         incremental(check)
+        autocompleteSafety(check)
+        autocompleteServer(check)
+        refineGuard(check)
         return (check.total, check.failures)
+    }
+
+    // MARK: Editor-pass guard
+
+    static func refineGuard(_ check: Check) {
+        let ok = RefineGuard.accepts
+        check(ok("Hello, how are you?", "Hello, how are you?"), "refine guard: unchanged text accepted")
+        check(ok("Hello, can you send it?", "Hello, could you send it over?"), "refine guard: a normal rewording accepted")
+        check(!ok("Can you call me?", "Call me."), "refine guard: question turned into a statement rejected")
+        check(!ok("Привет! Ты не забыл купить хлеб?", "Привет! Не забудь купить хлеб."), "refine guard: RU question turned into an order rejected")
+        check(!ok("Hello, can you send it?", "Good afternoon, can you send it?"), "refine guard: Hello -> Good afternoon rejected")
+        check(!ok("Привіт, як справи?", "Вітаю, як справи?"), "refine guard: Привіт -> Вітаю rejected")
+        check(!ok("Здравствуйте, это заказ.", "Добрый день, это заказ."), "refine guard: Здравствуйте -> Добрый день rejected")
+        check(ok("Good morning, all set.", "Good morning, everything is set."), "refine guard: same two-word greeting accepted")
+        check(!ok("Hi, thanks.", "Thanks."), "refine guard: dropped greeting rejected")
+        check(ok("Thanks for the update.", "Thank you for the update."), "refine guard: no greeting, no question accepted")
+        check(!ok("Thanks.", "  "), "refine guard: empty edit rejected")
+        check(ok("Hi there. Can you come? (please)?", "Hi there. Could you come?"), "refine guard: question kept accepted")
     }
 
     // MARK: Glossary

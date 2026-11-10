@@ -29,6 +29,12 @@ final class ScreenContext {
     static let refreshInterval: TimeInterval = 4
     private static let probeInterval: TimeInterval = 1
 
+    /// False while the model server is not ready: no point reading the screen for suggestions that cannot be made.
+    /// Set by AppDelegate from the server state.
+    static var serverReady = false
+    /// OCR of a screen snapshot (setting «Контекст со снимка экрана» and the battery profile). AX text is always used.
+    static var ocrAllowed = true
+
     private(set) var snapshot: Snapshot?
     private var inflight: Task<Void, Never>?
     private var lastProbe = Date.distantPast
@@ -38,6 +44,7 @@ final class ScreenContext {
 
     /// Call on every keystroke: cheap, returns at once. Starts a background refresh when the cache is stale.
     func prepare(pid: pid_t) {
+        guard Self.serverReady else { return }
         if inflight != nil { return }
         let now = Date()
         guard now.timeIntervalSince(lastProbe) >= Self.probeInterval else { return }
@@ -109,7 +116,7 @@ final class ScreenContext {
     private static func collect(_ t: Target) async -> (String, Source) {
         let ax = await Task.detached(priority: .utility) { axText(t) }.value
         if ax.count >= minAXChars { return (ax, .ax) }
-        guard CGPreflightScreenCaptureAccess() else { return (ax, ax.isEmpty ? .none : .ax) }
+        guard ocrAllowed, CGPreflightScreenCaptureAccess() else { return (ax, ax.isEmpty ? .none : .ax) }
         let ocr = await ocrText(t)
         if ocr.count > ax.count { return (ocr, .ocr) }
         return (ax, ax.isEmpty ? .none : .ax)

@@ -138,3 +138,24 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   `--context-translation`, `--check TRANSLATION`, `--refine`.
 - Measured (`~/Translate/test-corpus`): everyday corpus `verdict-home.md` — texts with calques 17 → 4 of 50;
   work corpus `results-2026-11-10-1122.md` — 50/50, ≈5.9 s per text.
+
+## v0.6.3 — safer autocomplete, server lifecycle, quieter Mac
+- Default suggestion model in use: Gemma 4 E2B abliterated Q4_K (`gemma-4-E2B-abl-Q4_K.gguf`, 3.4 GB) — same quality as
+  E4B on the 54-case set, ~105 ms per warm suggestion vs ~160–250 ms, 3.6 GB RAM. Comparison: E2B/E4B abliterated and
+  Qwen 3.5 4B abliterated, raw prompt and chat template (chat-template E4B scored best, 8/9 shown, but 530 ms; not used).
+- Insert safety (`TolkCore/AutocompleteSafety.swift`, `AutocompleteController.verifiedField`): Tab/→ and autocorrect
+  re-read the field within 25 ms and insert only if process, element and text before the caret are unchanged;
+  otherwise the key passes through. Nothing is read or shown while `IsSecureEventInputEnabled()` or in built-in off
+  apps (password managers, terminals, IDEs), which are added to the user's `autocompleteOffApps`.
+- AX reads in the key handler run with a time budget (`FocusedField.readQuick`); clipboard is read only when the
+  «Буфер обмена» switch is on. Autocorrect no longer rejects a word forever because the user typed past it.
+- Server lifecycle (`TolkCore/AutocompleteServerLogic.swift`, `LocalModelServer`): llama-server runs under an `sh`
+  wrapper that kills it when Tolk dies (also on kill -9); pid file `~/Library/Application Support/Tolk/llama-server.pid`
+  tells our orphan (stopped, restarted) from a foreign process on 8178 (left alone, «порт занят»). Errors are logged and
+  shown in Settings and the menu with «Повторить»; automatic restarts after 2, 10, 60 s. No screen snapshots while the
+  model is not ready.
+- Power saving: «на батарее» options (rare suggestions, no screen OCR, short suggestions; all off by default) and a
+  separate switch for screen OCR context (`ScreenContext`).
+- Editor pass guard (`RefineGuard` in `Refine.swift`): the edit is dropped if it removes a final «?», changes or drops
+  the greeting, or is empty. The edited text is buffered and shown at once (no streaming).
+- Self-test: 197 checks.

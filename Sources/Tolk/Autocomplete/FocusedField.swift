@@ -2,6 +2,8 @@
 // text before the caret, what follows on the same line, and where the caret is on screen.
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
+import TolkCore
 
 struct FocusedField {
     let pid: pid_t
@@ -18,14 +20,58 @@ struct FocusedField {
     var fontSize: CGFloat? = nil
     /// Right edge (Cocoa x) the ghost text must not cross: the field's, else the window's.
     var rightLimit: CGFloat? = nil
+    /// The focused AX element, to tell "same field" from "another field with the same text" (nil in tests).
+    var element: AXUIElement? = nil
 
     static let contextLimit = 1500
 
+    var snapshot: AutocompleteSafety.FieldSnapshot {
+        .init(pid: pid, bundleID: bundleID, textBefore: textBefore)
+    }
+
+    /// Time limit for a read. `light` skips everything that is only needed to place the ghost text
+    /// (caret rectangle, font, field width): the cheap path for key handlers.
+    struct Budget {
+        let deadline: TimeInterval   // systemUptime
+        let light: Bool
+        init(seconds: TimeInterval, light: Bool) { deadline = ProcessInfo.processInfo.systemUptime + seconds; self.light = light }
+        var remaining: TimeInterval { deadline - ProcessInfo.processInfo.systemUptime }
+        var expired: Bool { remaining <= 0.002 }
+        /// Messaging timeout for the next AX calls on `el`: never longer than what is left.
+        func apply(_ el: AXUIElement) { AXUIElementSetMessagingTimeout(el, Float(max(0.005, min(0.15, remaining)))) }
+    }
+
+    /// Main-screen height (AX → Cocoa conversion), cached on the main thread so reads can run off it.
+    nonisolated(unsafe) private static var mainScreenHeight: CGFloat = 0
+
+    /// Quick re-check for key handlers: same fields, no geometry, gives up after `seconds` (nil = could not tell).
+    /// Never blocks longer than about that (one AX call may overrun by a few ms).
+    static func readQuick(seconds: TimeInterval = 0.025) -> FocusedField? {
+        read(budget: Budget(seconds: seconds, light: true))
+    }
+
+    /// Full read on a background thread: the main thread (and the event tap running on it) is never held up by a slow app.
+    static func readAsync(seconds: TimeInterval = 0.4) async -> FocusedField? {
+        guard !IsSecureEventInputEnabled(), let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+        return await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                cont.resume(returning: readFocusedLogged(app, Budget(seconds: seconds, light: false)))
+            }
+        }
+    }
+
     /// nil when nothing editable is focused, it is a password field, text is selected,
     /// or the app does not report the caret position. Every refusal is logged (rate-limited, no user text).
-    static func read() -> FocusedField? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        switch readFocused(app) {
+    static func read(budget: Budget? = nil) -> FocusedField? {
+        // Secure input is on while a password is being typed (any app, web forms included): read nothing.
+        guard !IsSecureEventInputEnabled(), let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        mainScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+        return readFocusedLogged(app, budget ?? Budget(seconds: 0.4, light: false))
+    }
+
+    private static func readFocusedLogged(_ app: NSRunningApplication, _ budget: Budget) -> FocusedField? {
+        switch readFocused(app, budget) {
         case .success(let f): return f
         case .failure(let why):
             logFailure(app.bundleIdentifier ?? "pid\(app.processIdentifier)", why.reason)
@@ -45,24 +91,38 @@ struct FocusedField {
 
     private static let editableMarkers = ["AXEditable", "AXEditableAncestor", "AXHighestEditableAncestor"]
 
-    private static func readFocused(_ app: NSRunningApplication) -> Result<FocusedField, Refusal> {
+    private static func readFocused(_ app: NSRunningApplication, _ budget: Budget) -> Result<FocusedField, Refusal> {
         let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, 0.15)
+        budget.apply(system)
         // Electron/Chromium often fail the system-wide query but answer on the app element.
         var el: AXUIElement? = attr(system, kAXFocusedUIElementAttribute)
         var via = "system"
         if el == nil {
             let appEl = AXUIElementCreateApplication(app.processIdentifier)
-            AXUIElementSetMessagingTimeout(appEl, 0.15)
+            if budget.expired { return .failure(Refusal(reason: "step=budget")) }
+            budget.apply(appEl)
             el = attr(appEl, kAXFocusedUIElementAttribute)
             via = "app"
         }
         guard let el else { return .failure(Refusal(reason: "step=no-focused-element")) }
-        AXUIElementSetMessagingTimeout(el, 0.15)
+        if budget.expired { return .failure(Refusal(reason: "step=budget")) }
+        budget.apply(el)
 
         let role: String = attr(el, kAXRoleAttribute) ?? ""
         let sub: String = attr(el, kAXSubroleAttribute) ?? ""
-        if sub == kAXSecureTextFieldSubrole as String { return .failure(Refusal(reason: "step=secure-field")) }
+        let roleDesc: String = attr(el, kAXRoleDescriptionAttribute) ?? ""
+        // Labels are only worth the extra calls on the full read (the quick one re-checks a field already vetted).
+        var labels: [String] = []
+        if !budget.light {
+            for k in [kAXTitleAttribute, kAXDescriptionAttribute, kAXPlaceholderValueAttribute, "AXIdentifier"] {
+                if let v: String = attr(el, k as String) { labels.append(v) }
+            }
+        }
+        if AutocompleteSafety.looksLikeSecureField(role: role, subrole: sub, roleDescription: roleDesc, labels: labels) {
+            return .failure(Refusal(reason: "step=secure-field"))
+        }
+        if budget.expired { return .failure(Refusal(reason: "step=budget")) }
+        budget.apply(el)
 
         var names: CFArray?
         AXUIElementCopyAttributeNames(el, &names)
@@ -86,16 +146,16 @@ struct FocusedField {
 
         // 1) Classic CFRange attributes.
         if hasRange {
-            switch readByRange(el) {
-            case .success(let r): return .success(make(app, r, el))
+            switch readByRange(el, budget) {
+            case .success(let r): return .success(make(app, r, el, budget))
             case .failure(let why):
                 if !hasMarkers { return .failure(Refusal(reason: "step=\(why.reason) \(info)")) }
             }
         }
         // 2) Text markers (Chromium/WebKit when CFRange is not supported).
         if hasMarkers {
-            switch readByMarkers(el) {
-            case .success(let r): return .success(make(app, r, el))
+            switch readByMarkers(el, budget) {
+            case .success(let r): return .success(make(app, r, el, budget))
             case .failure(let why): return .failure(Refusal(reason: "step=markers:\(why.reason) \(info)"))
             }
         }
@@ -107,7 +167,8 @@ struct FocusedField {
     /// AX frame (origin top-left of the main screen) → Cocoa frame.
     private static func axFrame(_ el: AXUIElement) -> NSRect? {
         guard let pv: AXValue = attr(el, kAXPositionAttribute), let sv: AXValue = attr(el, kAXSizeAttribute),
-              let mainH = NSScreen.screens.first?.frame.height else { return nil }
+              mainScreenHeight > 0 else { return nil }
+        let mainH = mainScreenHeight
         var p = CGPoint.zero, sz = CGSize.zero
         guard AXValueGetValue(pv, .cgPoint, &p), AXValueGetValue(sv, .cgSize, &sz), sz.width > 0, sz.height > 0 else { return nil }
         return NSRect(x: p.x, y: mainH - p.y - sz.height, width: sz.width, height: sz.height)
@@ -120,14 +181,14 @@ struct FocusedField {
         return nil
     }
 
-    private static func make(_ app: NSRunningApplication, _ r: Raw, _ el: AXUIElement) -> FocusedField {
+    private static func make(_ app: NSRunningApplication, _ r: Raw, _ el: AXUIElement, _ budget: Budget) -> FocusedField {
         let rest = String(r.after.prefix { $0 != "\n" && $0 != "\r" })
         return FocusedField(pid: app.processIdentifier, bundleID: app.bundleIdentifier,
                             textBefore: r.before, restOfLine: rest, caret: r.caret, caretInfo: r.caretInfo, fontSize: r.fontSize,
-                            rightLimit: rightLimit(el, caret: r.caret))
+                            rightLimit: budget.light || budget.expired ? nil : rightLimit(el, caret: r.caret), element: el)
     }
 
-    private static func readByRange(_ el: AXUIElement) -> Result<Raw, Refusal> {
+    private static func readByRange(_ el: AXUIElement, _ budget: Budget) -> Result<Raw, Refusal> {
         guard let rangeValue: AXValue = attr(el, kAXSelectedTextRangeAttribute) else { return .failure(Refusal(reason: "no-selected-range")) }
         var sel = CFRange()
         guard AXValueGetValue(rangeValue, .cfRange, &sel), sel.location >= 0 else { return .failure(Refusal(reason: "bad-range")) }
@@ -138,6 +199,9 @@ struct FocusedField {
         let start = max(0, caretIndex - contextLimit)
         guard let before = string(el, CFRange(location: start, length: caretIndex - start)) else { return .failure(Refusal(reason: "no-text")) }
         let after = string(el, CFRange(location: caretIndex, length: 200), clamp: true) ?? ""
+        if budget.light { return .success(Raw(before: before, after: after, caret: .zero, caretInfo: "light")) }
+        if budget.expired { return .failure(Refusal(reason: "budget")) }
+        budget.apply(el)
 
         let afterNewline = before.last?.isNewline ?? false
         guard let (rect, info) = caretRect(
@@ -162,7 +226,7 @@ struct FocusedField {
         return unsafeBitCast(p, to: CopyMarkerFn.self)
     }
 
-    private static func readByMarkers(_ el: AXUIElement) -> Result<Raw, Refusal> {
+    private static func readByMarkers(_ el: AXUIElement, _ budget: Budget) -> Result<Raw, Refusal> {
         guard let copyStart, let copyEnd else { return .failure(Refusal(reason: "no-marker-symbols")) }
         guard let sel: CFTypeRef = attr(el, "AXSelectedTextMarkerRange") else { return .failure(Refusal(reason: "no-selected-markers")) }
         guard let caretM = copyEnd(sel)?.takeRetainedValue(), let selStart = copyStart(sel)?.takeRetainedValue() else {
@@ -197,6 +261,8 @@ struct FocusedField {
         let before = String(whole.suffix(contextLimit))
         var after = ""
         if let endM, let t = text(range(caretM, endM)) { after = String(t.prefix(200)) }
+        if budget.light { return .success(Raw(before: before, after: after, caret: .zero, caretInfo: "markers light")) }
+        if budget.expired { return .failure(Refusal(reason: "budget")) }
 
         let afterNewline = before.last?.isNewline ?? false
         var prevRect: CGRect?
@@ -288,8 +354,8 @@ struct FocusedField {
             return nil
         }
         // AX: origin top-left of the main screen, y down. Cocoa: bottom-left, y up.
-        guard let mainH = NSScreen.screens.first?.frame.height else { return nil }
-        rect.origin.y = mainH - rect.maxY
+        guard mainScreenHeight > 0 else { return nil }
+        rect.origin.y = mainScreenHeight - rect.maxY
         return (rect, info)
     }
 

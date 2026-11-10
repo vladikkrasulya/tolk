@@ -43,7 +43,7 @@ final class PromptPrefs {
             case .formal: lines.append("Polite, formal, businesslike tone (formal «Вы» in Russian).")
             case .auto: break
             }
-            let terms = glossaryLines(for: field.textBefore + "\n" + (ClipboardWatcher.shared.currentText ?? ""))
+            let terms = glossaryLines(for: field.textBefore + "\n" + (config.autocompleteClipboard ? (ClipboardWatcher.shared.currentText ?? "") : ""))
             if !terms.isEmpty { lines.append("Preferred terms: " + terms.joined(separator: " ")) }
         }
         return lines.isEmpty ? nil : lines.map { $0.replacingOccurrences(of: "\n", with: " ") }.joined(separator: "\n")
@@ -92,7 +92,12 @@ final class ClipboardWatcher {
 
     var currentText: String? { freshText(excluding: "") }
 
+    /// Only the "Буфер обмена" switch may start reading the pasteboard: the watcher is started by it, and
+    /// callers also check the setting. Without a started watcher nothing is read.
+    private var isActive: Bool { timer != nil }
+
     func freshText(excluding typed: String) -> String? {
+        guard isActive else { return nil }
         poll()
         guard Date().timeIntervalSince(changedAt) <= Self.maxAge else { return nil }
         let pb = NSPasteboard.general

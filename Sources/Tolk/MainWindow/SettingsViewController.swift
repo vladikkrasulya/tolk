@@ -77,6 +77,9 @@ final class SettingsModel: ObservableObject {
     @Published var hasAccessibility = AXIsProcessTrusted()
     @Published var launchAtLogin = LaunchAgent.isEnabled
     @Published var launchError: String?
+    /// Why the autocomplete model is not running (nil = fine); set by AppDelegate. «Повторить» calls `onRetryAutocomplete`.
+    @Published var acError: String?
+    var onRetryAutocomplete: (() -> Void)?
 
     private let path: String
     private var saveTask: Task<Void, Never>?
@@ -566,9 +569,17 @@ struct SettingsView: View {
 
     // MARK: Автодополнение
 
-    private var autocompleteSection: some View {
+    @ViewBuilder private var autocompleteSection: some View {
         Section {
             Toggle("Автодополнение (Tab)", isOn: $model.config.autocomplete)
+            if model.config.autocomplete, let err = model.acError {
+                HStack {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text("Модель не работает: \(err)").font(.callout).foregroundStyle(.red)
+                    Spacer()
+                    Button("Повторить") { model.onRetryAutocomplete?() }
+                }
+            }
             hint("Серый текст у курсора в любой программе: Tab принимает слово, → всё, Esc скрывает. Модель работает локально на этом Mac.")
             HStack {
                 Picker("Модель", selection: $model.config.autocompleteModel) {
@@ -591,8 +602,18 @@ struct SettingsView: View {
                 Text("Чаще").tag("often")
             }
             hint("Реже — подсказка появляется, только когда модель уверена (около 2 из 3 первых слов верные). Чаще — подсказок больше, но больше промахов.")
+            Toggle("Контекст со снимка экрана (распознавание текста)", isOn: $model.config.autocompleteScreenContext)
+            hint("Если текст окна не читается напрямую (Slack, Telegram, Teams), Tolk распознаёт его на снимке экрана. Нужно разрешение «Запись экрана».")
         } header: {
             Text("Основное")
+        }
+        Section {
+            Toggle("Подсказывать реже", isOn: $model.config.autocompleteBatteryRare)
+            Toggle("Без снимков экрана", isOn: $model.config.autocompleteBatteryNoScreen)
+            Toggle("Короткие подсказки", isOn: $model.config.autocompleteBatteryShort)
+            hint("Действует, пока Mac работает от батареи: меньше нагрузка, тише вентилятор.")
+        } header: {
+            Text("На батарее")
         }
     }
 

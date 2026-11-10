@@ -24,6 +24,45 @@ enum RefinePrompt {
     }
 }
 
+/// Cheap safety net against the editor's known failure modes: a question turned into a statement/order and a swapped
+/// greeting. When it trips, the original translation is kept.
+enum RefineGuard {
+    static let greetings: Set<String> = [
+        "hello", "hi", "hey", "dear", "good", "greetings", "привет", "здравствуйте", "здравствуй", "добрый", "доброе", "добрая",
+        "доброго", "приветствую", "вітаю", "привіт", "доброго", "добрий", "добре", "доброї", "вітання",
+    ]
+
+    static func firstWord(_ s: String) -> String {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        let word = t.prefix { $0.isLetter || $0 == "'" || $0 == "’" || $0 == "-" }
+        return word.lowercased()
+    }
+
+    /// Text up to and including the first line/sentence start words that make a greeting: first word + second for "Good …".
+    static func greetingKey(_ s: String) -> String? {
+        let words = s.trimmingCharacters(in: .whitespacesAndNewlines).split(whereSeparator: { $0.isWhitespace })
+        guard let w0 = words.first else { return nil }
+        let a = firstWord(String(w0))
+        guard greetings.contains(a) else { return nil }
+        if ["good", "добрый", "доброе", "добрая", "доброго", "добрий", "добре", "доброї"].contains(a), words.count > 1 {
+            return a + " " + firstWord(String(words[1]))
+        }
+        return a
+    }
+
+    static func endsWithQuestion(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\"'»”)")))
+        return t.hasSuffix("?")
+    }
+
+    static func accepts(draft: String, edited: String) -> Bool {
+        if edited.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
+        if endsWithQuestion(draft) && !endsWithQuestion(edited) { return false }
+        if let g = greetingKey(draft), greetingKey(edited) != g { return false }
+        return true
+    }
+}
+
 extension DefaultTranslationEngine {
     public func refine(source: String, translation: String, from: Language, to: Language, tone: Tone) -> AsyncThrowingStream<String, Error> {
         guard let ollama = primary as? OllamaProvider,
@@ -47,12 +86,14 @@ extension DefaultTranslationEngine {
                         }
                         c.onTermination = { _ in t.cancel() }
                     }
+                    // Buffered: the guard below may reject the whole edit, which cannot be done after chunks are shown.
+                    var edited = ""
                     for try await chunk in inner {
                         try Task.checkCancellation()
-                        produced = true
-                        continuation.yield(chunk)
+                        edited += chunk
                     }
-                    if !produced { continuation.yield(translation) }
+                    produced = true
+                    continuation.yield(RefineGuard.accepts(draft: translation, edited: edited) ? edited : translation)
                     continuation.finish()
                 } catch {
                     if error is CancellationError || Task.isCancelled { continuation.finish(throwing: error); return }

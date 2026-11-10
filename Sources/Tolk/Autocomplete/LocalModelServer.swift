@@ -2,6 +2,7 @@
 // Autocomplete must answer in ~100–300 ms, so it runs on this Mac (no network, unlike translation).
 // One small model (Gemma E4B), one slot, prompt cache on: typing a few letters reuses the KV cache.
 import Foundation
+import TolkCore
 
 @MainActor
 final class LocalModelServer {
@@ -10,16 +11,24 @@ final class LocalModelServer {
         case failed(String)
     }
 
-    static let port = 8178
-    let baseURL = URL(string: "http://127.0.0.1:\(LocalModelServer.port)")!
+    let port: Int
+    let baseURL: URL
     private(set) var state: State = .stopped { didSet { if state != oldValue { onStateChange?(state) } } }
     var onStateChange: ((State) -> Void)?
+    /// When the next automatic restart happens (nil = none scheduled); shown next to the error.
+    private(set) var nextRetryAt: Date?
 
     private(set) var modelPath: String
     private var process: Process?
     private var startTask: Task<Void, Never>?
+    private var retryTask: Task<Void, Never>?
+    private var failures = 0
 
-    init(modelPath: String) { self.modelPath = (modelPath as NSString).expandingTildeInPath }
+    init(modelPath: String, port: Int = 8178) {
+        self.modelPath = (modelPath as NSString).expandingTildeInPath
+        self.port = port
+        baseURL = URL(string: "http://127.0.0.1:\(port)")!
+    }
 
     static var binaryPath: String? {
         ["/opt/homebrew/bin/llama-server", "/usr/local/bin/llama-server"]
@@ -42,30 +51,90 @@ final class LocalModelServer {
 
     func start() {
         guard state == .stopped || isFailed else { return }
+        retryTask?.cancel(); nextRetryAt = nil
         state = .starting
         startTask = Task { [weak self] in await self?.boot() }
     }
 
+    /// Manual «Повторить»: forget the failure count and start again right now.
+    func retry() {
+        guard isFailed else { return }
+        failures = 0
+        start()
+    }
+
+    var isFailedState: Bool { isFailed }
     private var isFailed: Bool { if case .failed = state { return true }; return false }
 
     func stop() {
         startTask?.cancel()
-        if let p = process, p.isRunning { p.terminate() }
-        process = nil
+        retryTask?.cancel(); nextRetryAt = nil
+        failures = 0
+        let p = process
+        process = nil // the termination handler ignores a process we already let go
+        if let p, p.isRunning {
+            p.terminate() // SIGTERM → the wrapper's trap stops llama-server
+            // The pid file stays: a quick restart (model switch) may meet the dying server and must recognise it as ours.
+        } else {
+            ServerLifecycle.removeRecord()
+        }
         state = .stopped
     }
 
+    /// Records the reason (log + state). `retryable`: the process died or did not load — try again 2, 10, 60 s later.
+    private func fail(_ reason: String, retryable: Bool) {
+        Diagnostics.log("autocomplete: \(reason)")
+        process = nil
+        ServerLifecycle.removeRecord()
+        state = .failed(reason)
+        guard retryable else { return }
+        failures += 1
+        guard let delay = ServerLifecycle.retryDelay(afterFailures: failures) else {
+            Diagnostics.log("autocomplete: automatic restarts exhausted — waiting for «Повторить»")
+            return
+        }
+        nextRetryAt = Date().addingTimeInterval(delay)
+        Diagnostics.log("autocomplete: restart in \(Int(delay)) s (attempt \(failures))")
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.nextRetryAt = nil
+            self.start()
+        }
+    }
+
     private func boot() async {
-        // A server left over from a previous run (Tolk crashed or was killed) is reused.
-        if await healthy() { state = .ready; Diagnostics.log("autocomplete: reusing running llama-server"); return }
-        guard let bin = Self.binaryPath else { state = .failed("нет llama-server (brew install llama.cpp)"); return }
-        guard FileManager.default.fileExists(atPath: modelPath) else { state = .failed("нет файла модели"); return }
+        guard let bin = Self.binaryPath else { fail("нет llama-server (brew install llama.cpp)", retryable: false); return }
+        guard FileManager.default.fileExists(atPath: modelPath) else {
+            fail("нет файла модели: \((modelPath as NSString).lastPathComponent)", retryable: false); return
+        }
+
+        // Who is on the port? Ours from a previous run (pid file matches) → stop it; anyone else → leave alone.
+        let port = self.port
+        let decision: PortDecision = await Task.detached {
+            let l = ServerLifecycle.listener(onPort: port)
+            return ServerLifecycle.decide(listenerPid: l?.pid, listenerIsLlama: l?.isLlama ?? false,
+                                          record: ServerLifecycle.readRecord(), port: port)
+        }.value
+        guard !Task.isCancelled else { return }
+        switch decision {
+        case .portBusy:
+            fail("порт \(port) занят другой программой", retryable: false); return
+        case .killOrphanThenStart(let pid):
+            Diagnostics.log("autocomplete: stopping a llama-server left by a previous Tolk (pid \(pid))")
+            await Task.detached { ServerLifecycle.terminate(pid: pid) }.value
+            ServerLifecycle.removeRecord()
+        case .startOwn:
+            ServerLifecycle.removeRecord()
+        }
+        guard !Task.isCancelled else { return }
 
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: bin)
-        p.arguments = ["-m", modelPath, "--host", "127.0.0.1", "--port", "\(Self.port)",
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        let command = [bin, "-m", modelPath, "--host", "127.0.0.1", "--port", "\(port)",
                        "-c", "4096", "-ngl", "99", "-fa", "on", "-np", "1",
                        "--cache-reuse", "64", "--no-webui"]
+        p.arguments = ServerLifecycle.wrapperArguments(command: command) // dies with Tolk even on kill -9
         let logDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Tolk")
         try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
         let logURL = logDir.appendingPathComponent("llama-server.log")
@@ -75,29 +144,37 @@ final class LocalModelServer {
             let code = proc.terminationStatus
             Task { @MainActor in
                 guard let self, self.process === proc else { return }
-                self.process = nil
-                if self.state != .stopped {
-                    Diagnostics.log("autocomplete: llama-server exited (\(code))")
-                    self.state = .failed("модель остановилась (код \(code))")
-                }
+                self.fail("модель остановилась (код \(code), см. llama-server.log)", retryable: true)
             }
         }
-        do { try p.run() } catch { state = .failed("не запустился llama-server"); return }
+        do { try p.run() } catch { fail("не запустился llama-server: \(error.localizedDescription)", retryable: true); return }
         process = p
         Diagnostics.log("autocomplete: starting llama-server with \((modelPath as NSString).lastPathComponent)")
 
         let started = Date()
         while !Task.isCancelled, Date().timeIntervalSince(started) < 90 {
+            if process == nil { return } // exited: the termination handler reported it
             if await healthy() {
                 state = .ready
+                failures = 0
+                let model = modelPath
+                await Task.detached {
+                    if let l = ServerLifecycle.listener(onPort: port) {
+                        ServerLifecycle.writeRecord(ServerRecord(pid: l.pid, port: port, model: model))
+                    }
+                }.value
                 Diagnostics.log("autocomplete: model ready in \(String(format: "%.1f", Date().timeIntervalSince(started))) s")
                 await warmUp()
                 return
             }
-            if process == nil { return } // exited, terminationHandler set .failed
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
-        if !Task.isCancelled { state = .failed("модель не загрузилась за 90 с") }
+        if !Task.isCancelled, process != nil {
+            let proc = process
+            process = nil // timeout: not an exit report
+            proc?.terminate()
+            fail("модель не загрузилась за 90 с", retryable: true)
+        }
     }
 
     private func healthy() async -> Bool {

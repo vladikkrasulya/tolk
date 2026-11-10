@@ -1,15 +1,17 @@
 // Typo autocorrect for the autocomplete: when a word has just been finished (space or punctuation
 // typed after it) and NSSpellChecker is sure it is misspelled, offers the fix as an instant suggestion.
-// Tab / → replace "word + separator" with "fix + separator". Esc leaves the word alone (remembered until Tolk quits).
+// Tab / → replace "word + separator" with "fix + separator". Esc / typing on leaves the word alone; after 3 refusals in a row it is not offered again (until Tolk quits).
 import AppKit
+import TolkCore
 
 @MainActor
 final class Autocorrect: InstantSuggestionProvider {
     /// Words never corrected: adtech slang (always) + terms from the user's glossary file.
     private var ignored: Set<String> = Autocorrect.builtinSlang
-    /// Words the user rejected (Esc, or typed on past the suggestion). Kept until Tolk quits, never stored:
-    /// typing on is not a decision, so it must not silence a word for good.
-    private var rejected: Set<String> = []
+    /// Refusals per word (Esc, or typed on past the suggestion). A word is silenced only after 3 refusals in a row
+    /// (a fix that was taken resets the count); the silenced list is capped at 200 and lives until Tolk quits,
+    /// never stored: typing on once is not a decision, so one miss must not silence a word.
+    private var rejections = AutocompleteSafety.RejectionTracker(threshold: 3, capacity: 200)
     /// word(lowercased) → flagged by the English checker (for the translit guard).
     private var englishMisspelled: [String: Bool] = [:]
     /// word(lowercased) → fix, "" = nothing to fix.
@@ -29,12 +31,12 @@ final class Autocorrect: InstantSuggestionProvider {
         // Esc detection without a controller hook: after Esc the typo is still in the text and the
         // provider is asked again (the user typed on). After Tab it is gone (replaced by the fix).
         if let o = offered {
-            if field.textBefore.hasPrefix(o.textBefore) { rejected.insert(o.word.lowercased()) }
+            if field.textBefore.hasPrefix(o.textBefore) { rejections.reject(o.word) } else { rejections.accepted(o.word) }
             offered = nil
         }
         guard let (word, sep) = Autocorrect.lastFinishedWord(in: field.textBefore) else { return nil }
         let key = word.lowercased()
-        guard !rejected.contains(key), !ignored.contains(key) else { return nil }
+        guard !rejections.isSilenced(key), !ignored.contains(key) else { return nil }
         let head = String(field.textBefore.dropLast(word.count + sep.count))
         // A word already used earlier in this text is the user's own (name, slang), not a typo.
         if Autocorrect.occursEarlier(key, in: head) { return nil }

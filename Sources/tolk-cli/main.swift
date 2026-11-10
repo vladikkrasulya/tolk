@@ -22,6 +22,16 @@ var contextSource: String?, contextTranslation: String?
 var checkOnly: String?
 var cancelAfter: Double?, addTerm: String?
 var words: [String] = []
+// Dev: `tolk-cli --ac-spawn CMD ARGS…` launches CMD the way Tolk launches llama-server (dies with this process), then waits.
+if CommandLine.arguments.dropFirst().first == "--ac-spawn" {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/sh")
+    p.arguments = ServerLifecycle.wrapperArguments(command: Array(CommandLine.arguments.dropFirst(2)))
+    try? p.run()
+    print("wrapper pid \(p.processIdentifier)")
+    fflush(stdout)
+    while true { sleep(1000) }
+}
 var args = CommandLine.arguments.dropFirst().makeIterator()
 while let a = args.next() {
     func value() -> String {
