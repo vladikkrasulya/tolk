@@ -120,7 +120,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         guard let window else { return }
         if window.isMiniaturized { window.deminiaturize(nil) }
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate()
+        AppPresence.bringToFront(window)
     }
 
     private func select(_ section: Section) {

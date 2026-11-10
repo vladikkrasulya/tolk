@@ -94,6 +94,8 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     }
 
     var window: NSWindow? { panel }
+    /// The chat app could not be brought to the front, so nothing was pasted (argument: its name).
+    var onInsertFailed: ((String) -> Void)?
 
     // MARK: - Show / hide
 
@@ -456,8 +458,15 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         // Paste only once the chat app really is frontmost (activation can take longer than a fixed delay).
         let deadline = Date().addingTimeInterval(1.5)
         func pasteWhenFront() {
-            if NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier, Date() < deadline {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { MainActor.assumeIsolated { pasteWhenFront() } }; return
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier {
+                if Date() < deadline {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { MainActor.assumeIsolated { pasteWhenFront() } }; return
+                }
+                // The chat never came to the front (closed, another Space, the user switched): ⌘V now would land
+                // in whatever app is active. The reply stays on the clipboard.
+                Diagnostics.log("reply: \(app.localizedName ?? "?") did not become frontmost — left on the clipboard")
+                self.onInsertFailed?(app.localizedName ?? "чат")
+                return
             }
             let src = CGEventSource(stateID: .combinedSessionState)
             for down in [true, false] {

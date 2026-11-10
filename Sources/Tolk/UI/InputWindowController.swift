@@ -53,8 +53,7 @@ final class InputWindowController: NSObject, NSWindowDelegate {
         let firstTime = window == nil
         let w = buildIfNeeded()
         if firstTime, !w.setFrameUsingName("TolkInputWindow") { w.center() }
-        NSApp.activate()
-        w.makeKeyAndOrderFront(nil)
+        AppPresence.bringToFront(w)
         page.focusInput()
     }
 
@@ -63,7 +62,10 @@ final class InputWindowController: NSObject, NSWindowDelegate {
         Clipboard.copy(page.translation)
         window?.orderOut(nil)
         page.stop()
-        NSApp.hide(nil) // return focus to the app the user came from, ready to paste
+        // Return focus to the app the user came from, ready to paste. `NSApp.hide` would also take away every
+        // other Tolk window (the big one): only hide the app when this was its last window on screen.
+        let othersOpen = NSApp.windows.contains { $0 !== window && $0.isVisible && !($0 is NSPanel) && $0.styleMask.contains(.titled) }
+        if !othersOpen { NSApp.hide(nil) }
     }
 
     func windowWillClose(_ notification: Notification) { page.stop() }

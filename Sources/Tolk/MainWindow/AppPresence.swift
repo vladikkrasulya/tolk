@@ -10,6 +10,27 @@ final class AppPresence: NSObject {
     weak var mainWindow: MainWindowController?
 
     private var closeObserver: NSObjectProtocol?
+    /// Set by AppDelegate: the last regular app (not Tolk) the user had in front.
+    var previousApp: (() -> NSRunningApplication?)?
+
+    /// Makes Tolk the active app with `window` in front. The plain `NSApp.activate()` is only a request on
+    /// macOS 14+: opened from the status menu, a hotkey or the popup (Tolk is not the active app at that moment)
+    /// the window came up *behind* the app the user was in and keystrokes kept going there.
+    static func bringToFront(_ window: NSWindow) {
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        // The policy switch accessory → regular lands a moment later and can swallow the first request
+        // (seen on a Dock / `open` reopen): ask again until Tolk really is the frontmost app.
+        for delay in [0.12, 0.35, 0.7] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard window.isVisible, NSWorkspace.shared.frontmostApplication != NSRunningApplication.current else { return }
+                Diagnostics.log("window not in front after \(delay)s — activating again")
+                NSRunningApplication.current.activate(options: [.activateAllWindows])
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
+    }
 
     /// Call before showing a window that should give the app a Dock icon.
     func windowWillAppear() {
@@ -38,7 +59,14 @@ final class AppPresence: NSObject {
                         && w.level == .normal && w.className != "NSStatusBarWindow"
                 }
                 guard others.isEmpty else { return }
+                let wasActive = NSApp.isActive
                 NSApp.setActivationPolicy(.accessory)
+                // Without a window Tolk would stay the active app: an empty menu bar and keystrokes going
+                // nowhere until the user clicks something. Hand the focus back to the app they were in.
+                if wasActive, let app = self.previousApp?(), !app.isTerminated {
+                    app.activate()
+                    Diagnostics.log("last window closed — focus back to \(app.localizedName ?? "?")")
+                }
                 if let o = self.closeObserver { NotificationCenter.default.removeObserver(o); self.closeObserver = nil }
             }
         }

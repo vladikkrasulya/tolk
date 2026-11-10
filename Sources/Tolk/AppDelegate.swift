@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popup: TranslationPopupController!
     private var reply: ReplyPanelController!
     private var inputWindow: InputWindowController!
+    private let noticeHUD = QuickActionHUD()
     private var quickActions: QuickActionsController!
     private var screenCapture: ScreenCaptureController!
     private var mainWindow: MainWindowController!
@@ -122,6 +123,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popup.toneForApp = { [weak self] in self?.config.tone(forApp: $0) ?? .auto }
         reply = ReplyPanelController(engine: withHistory("reply"))
         reply.toneForApp = { [weak self] in self?.config.tone(forApp: $0) ?? .auto }
+        reply.onInsertFailed = { [weak self] name in
+            self?.noticeHUD.showMessage("\(name) не вышел на передний план — ответ в буфере, вставьте ⌘V", kind: .info)
+        }
         popup.onReply = { [weak self] ctx in self?.reply.show(ctx) }
 
         monitor = DoubleCopyMonitor(interval: config.doubleCopyInterval)
@@ -251,8 +255,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Click on the Dock / Launchpad icon while Tolk is already running.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { mainWindow.show() }
-        return true
+        // `flag` is also true for a visible panel (suggestion, HUD, popup): judge by the main window itself.
+        mainWindow.show()
+        return false
     }
 
     // MARK: - Settings changed -> rebuild the engine everywhere
@@ -313,6 +318,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PowerMonitor.shared.start()
         let me = Bundle.main.bundleIdentifier
         lastExternalApp = NSWorkspace.shared.frontmostApplication.flatMap { $0.bundleIdentifier == me ? nil : $0 }
+        AppPresence.shared.previousApp = { [weak self] in self?.lastExternalApp }
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(appActivated(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
