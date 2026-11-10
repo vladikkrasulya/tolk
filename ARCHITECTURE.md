@@ -274,3 +274,13 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - One source for server/fallback texts (`ServerText`) and Esc hints (`EscText`); hotkeys are editable in Settings →
   Общие (quick actions and «Перевод при наборе»); `TOLK_RENDER_POPUP` renders off-screen now (never shown).
 - vkbox: `gemma-translate` recreated with num_ctx 8192 (old one kept as `gemma-translate-32k`). Self-test: 690 checks.
+
+## v0.6.9 — reply chips, honest tones
+- «Ответить» window: «Подтвердить», «Смотрим», «Детали?», «Созвон?», «Отказать» (⌘1…⌘5, `Engine/ReplyChips.swift`):
+  `compose` with the partner's message, app tone and thread memory writes the reply in the user's language, then the
+  normal translation runs. Hidden while the partner message is empty or the user types. ~5.6 s per chip.
+- Tones (`ExtrasPrompt`): meta-instructions about tone steer style and never become phrases; no new entities,
+  greetings or stronger judgements (checked: new numbers, greeting without one in the source, 9 entity groups,
+  meta-phrase leaks). «Added something» 13/48 → 0/48 on 12 examples × 4 tones; tones still converge on short points.
+- Compose back-translation is a separate request (`composeBackTranslation`): the message shows in 2–6 s.
+- `TOLK_RENDER_REPLY` renders off-screen (`ReplyDemo`). Self-test: 717 checks.

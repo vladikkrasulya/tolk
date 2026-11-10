@@ -59,6 +59,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["TOLK_HINTS_SHOT"] != nil { TranslateHintsDemo.run(); return }
         // Invisible popup render (never shown): TOLK_RENDER_POPUP=dir
         if ProcessInfo.processInfo.environment["TOLK_RENDER_POPUP"] != nil { PopupDemo.run(); return }
+        // Invisible reply-window render (never shown): TOLK_RENDER_REPLY=dir
+        if ProcessInfo.processInfo.environment["TOLK_RENDER_REPLY"] != nil { ReplyDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_IDLE_TICKS"] != nil { IdleTicksDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_TYPE_TRANSLATE_SHOT"] != nil { TypeTranslateDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_MAIN_DEMO"] != nil { MainWindowDemo.runIfRequested(); return }
@@ -158,24 +160,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let missing: String? = nil
                 Diagnostics.log("test crash")
                 _ = missing!.count
-            }
-        }
-        // Dev: TOLK_RENDER_REPLY=dir renders the reply window (light + dark) to PNG and quits.
-        if let dir = ProcessInfo.processInfo.environment["TOLK_RENDER_REPLY"] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                let ctx = ReplyContext(
-                    partnerText: "Hey, how are you? At the start of the integration, we delivered a chunk of requests on your end to let your demand show. It's ECPM. Afterward, our system started optimizing and delivering requests to streams with a better CPA. Then we went into the weekend, and we capped things to stay moderated. As it's an owned and operated website, its visitor volume depends on different metrics and different parameters. So I can't predict whether you'll see similar volume on your end this week.",
-                    partnerTranslation: "Привет! Как дела? В начале интеграции мы отдали пачку запросов на вашей стороне, чтобы ваш demand показывался. Это было по eCPM. Потом наша система начала оптимизировать и отдавать запросы в потоки с лучшим CPA. Затем начались выходные, и мы поставили капу, чтобы всё было умеренно. Так как это собственный сайт, его объём посетителей зависит от разных метрик и параметров. Поэтому я не могу предсказать, увидите ли вы похожий объём на своей стороне на этой неделе.",
-                    partnerLanguage: .english, app: NSWorkspace.shared.frontmostApplication, anchor: NSPoint(x: 400, y: 800))
-                for (name, look) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
-                    NSApp.appearance = NSAppearance(named: look)
-                    let r = ReplyPanelController(engine: self.engine)
-                    r.renderForReview(ctx, reply: "Да, видим падение конверсии, похоже на плохие сабы — отключим их сегодня и пришлём новый список",
-                                      translated: "Yeah, we see the CR drop too — looks like bad subs. We'll disable them today and send over a new list.",
-                                      to: "\(dir)/reply-\(name).png")
-                    r.close()
-                }
-                exit(0)
             }
         }
         // Dev: TOLK_MENU_PROBE=file appends the status item position and every menu opening to `file`

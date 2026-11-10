@@ -143,6 +143,43 @@ extension SelfTest {
         check(ExtrasParsing.numberTokens("4,8 $ и 4.8 и 12:30").count == 2, "compose check: «4,8» and «4.8» are the same number")
         check(ExtrasParsing.composeWarnings(points: "Скажи, что нам это не нравится.", text: "We don't like this.", from: .russian, to: .english).isEmpty, "compose check: no numbers at all -> no warnings")
 
+        // MARK: compose: nothing of its own, style instructions do not leak
+        let boss = "пусть отключит весь фрод и ещё раз попробуем. Если опять будет фуфло — стопнем. Сильно аккуратно не нужно. Без агрессии, но сказать прямо, что такая история нам не нравится."
+        func inv(_ text: String, points: String = boss, partner: String = "") -> [String] {
+            ExtrasParsing.composeWarnings(points: points, text: text, from: .russian, to: .english, partnerMessage: partner)
+        }
+        check(inv("Please disable all fraud. We will try again, and if it is poor again we will stop. We don't like this situation.").isEmpty, "compose check: a clean boss message has no warnings", "\(inv("Please disable all fraud. We will try again, and if it is poor again we will stop. We don't like this situation."))")
+        check(inv("Disable all fraud. We will try again, and we will stop the integration if it is poor.").contains { $0.contains("integration") }, "compose check: «integration» from nowhere -> warning")
+        check(inv("Disable all fraud. If it is poor again, we will stop. Please send a refund.").contains { $0.contains("refund") }, "compose check: «refund» from nowhere -> warning")
+        check(inv("Hi! Disable all fraud. We will try again. We don't like this.").contains { $0.contains("приветствие") }, "compose check: a greeting nobody asked for -> warning")
+        check(!inv("Hi! Disable all fraud.", points: "поздоровайся и скажи, чтобы отключил фрод").contains { $0.contains("приветствие") }, "compose check: a greeting the points ask for is fine")
+        check(inv("This is unacceptable. Disable all fraud.").contains { $0.contains("unacceptable") }, "compose check: «не нравится» made «unacceptable» -> warning")
+        check(inv("Disable all fraud. We want to be direct about this and we don't need to be gentle.").contains { $0.contains("тон") }, "compose check: a style instruction written out as a sentence -> warning")
+        check(inv("Disable all fraud. We want to be direct about this.", points: "пусть отключит фрод").isEmpty, "compose check: «be direct» is fine when the points had no style instruction")
+        check(inv("Hi! We can't do that.", points: "откажи", partner: "Hi! Could we move the call?").contains { $0.contains("приветствие") }, "compose check: the partner's own greeting does not allow a greeting in the reply")
+        check(inv("Thanks for the details. The integration is live.", points: "поблагодари за детали", partner: "Our integration is live").contains { $0.contains("integration") } == false, "compose check: a term of the partner's message is allowed")
+        check(inv("The $4.8 CPM does not work.", points: "цена 4,8 $ не подходит").contains { $0.contains("CPM") }, "compose check: «CPM» from nowhere -> warning")
+        check(inv("The price of $4.8 per thousand does not work for us.", points: "цена 4,8 $ за тысячу не подходит").isEmpty, "compose check: a plain price message is clean")
+        check(ExtrasPrompt.compose(tone: .direct, pointsLanguage: .russian, to: .english, hasPartner: false, rules: "").contains("«integration»"), "compose prompt: names the entities not to invent")
+        check(Set(ComposeTone.allCases.map(\.promptHint)).count == 4 && Set(ComposeTone.allCases.map(\.promptExample)).count == 4, "compose: four distinct tone descriptions and examples")
+        let before = "Could you please send the report? We would appreciate it."
+        check(RewriteGuard.verdict(original: before, edited: "Could you please send the report? We would appreciate it.", source: "x", mode: .direct, from: .russian, to: .english) != .ok(pronounsChecked: false), "rewrite direct: softeners left -> rejected")
+        check(RewriteGuard.verdict(original: before, edited: "Send the report.", source: "x", mode: .direct, from: .russian, to: .english) == .ok(pronounsChecked: false), "rewrite direct: a plain demand is accepted")
+        check({ if case .rejected = RewriteGuard.verdict(original: "Disable the traffic.", edited: "Disable the traffic or we stop the integration.", source: "x", mode: .professional, from: .russian, to: .english) { true } else { false } }(), "rewrite professional: a new entity -> rejected")
+
+        check({ if case .rejected = RewriteGuard.verdict(original: "We do not like this situation.", edited: "State directly that this situation is not acceptable.", source: "x", mode: .professional, from: .russian, to: .english) { true } else { false } }(), "rewrite professional: «not acceptable» and «state directly» -> rejected")
+
+        // MARK: ready answers in the reply window
+        check(ReplyChips.all.count >= 3 && ReplyChips.all.count <= 6 && Set(ReplyChips.all.map(\.id)).count == ReplyChips.all.count, "reply chips: 3-6 distinct chips")
+        check(ReplyChips.all.allSatisfy { !$0.title.isEmpty && !$0.symbol.isEmpty && !$0.points.isEmpty && $0.title.count <= 12 }, "reply chips: filled in, short titles")
+        check(ReplyChips.index(forKey: "1") == 0 && ReplyChips.index(forKey: "5") == 4 && ReplyChips.index(forKey: "6") == nil && ReplyChips.index(forKey: "0") == nil && ReplyChips.index(forKey: "a") == nil, "reply chips: ⌘1…⌘5 map to chips")
+        check(!ReplyChips.visible(partnerText: "  ", input: "", lastChipText: nil), "reply chips: hidden without the partner's message")
+        check(ReplyChips.visible(partnerText: "Hi", input: "", lastChipText: nil), "reply chips: shown with an empty field")
+        check(!ReplyChips.visible(partnerText: "Hi", input: "Привет, я", lastChipText: nil), "reply chips: hidden while the user types their own text")
+        check(ReplyChips.visible(partnerText: "Hi", input: "Мы посмотрим. ", lastChipText: "Мы посмотрим."), "reply chips: still shown for an untouched chip text")
+        check(!ReplyChips.visible(partnerText: "Hi", input: "Мы посмотрим, ок", lastChipText: "Мы посмотрим."), "reply chips: hidden once the chip text is edited")
+        check(ReplyChips.composeTone(for: .auto) == .neutral && ReplyChips.composeTone(for: .chat) == .friendly && ReplyChips.composeTone(for: .formal) == .professional, "reply chips: the app's tone picks the compose tone")
+
         // MARK: reply flow request
         let engine = DefaultTranslationEngine(config: TolkConfig(), rules: RulesStore(path: "/nonexistent/rules.md"),
                                               primary: OllamaProvider(config: TolkConfig(), rules: RulesStore(path: "/nonexistent/rules.md")), fallback: nil)

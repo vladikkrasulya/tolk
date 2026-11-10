@@ -309,6 +309,12 @@ final class ComposePanel: NSView, NSTextViewDelegate {
             self.task = nil
             self.spinner.stopAnimation(nil)
             self.finish(r)
+            // The text is already on screen: the honest back-translation follows in the background.
+            if case let .success(c) = r, c.backTranslation == nil {
+                let back = await eng.composeBackTranslation(of: c, userLanguage: TolkConfig.load().primaryLanguage)
+                guard self.generation == gen, self.result?.text == c.text else { return }
+                self.showBack(back)
+            }
         }
     }
 

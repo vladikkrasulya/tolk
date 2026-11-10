@@ -194,7 +194,7 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
     static let composeSample = "Hello! We would like you to switch off all fraud traffic, all resale and all iframe traffic, and we will try once more tomorrow morning. If the traffic turns out to be low quality again, we will stop for good. If low-quality traffic keeps coming in, we will ask for a refund. We don't need to be overly careful with them, but without aggression: it is important to say plainly that we don't like this situation."
     static let composeBack = "Здравствуйте! Мы хотели бы, чтобы вы отключили весь фродовый трафик, весь ресейл и весь iframe-трафик, и завтра с утра мы попробуем ещё раз. Если трафик снова окажется низкого качества, мы остановимся насовсем. Если некачественный трафик продолжит поступать, мы потребуем возврат средств. Но без агрессии: важно прямо сказать, что нас такая ситуация не устраивает."
 
-    func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String?) async throws -> ComposeResult {
+    func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String?, threadContext: String?) async throws -> ComposeResult {
         try await Task.sleep(for: .milliseconds(900))
         let hasMsg = partnerMessage?.isEmpty == false
         return ComposeResult(text: Self.composeSample, language: hasMsg ? LanguageDetector.detect(partnerMessage ?? "") : to,

@@ -321,7 +321,7 @@ if let composeTone {
     timed("compose \(composeTone.rawValue)") {
         let r = try await engine.compose(points: text, tone: composeTone, to: ldst, partnerMessage: replyTo)
         print(r.text)
-        if let b = r.backTranslation { err("↩︎ \(b)") }
+        if ProcessInfo.processInfo.environment["TOLK_NO_BACK"] == nil, let b = await engine.composeBackTranslation(of: r, userLanguage: lsrc) { err("↩︎ \(b)") }
         for w in r.warnings { err("⚠️ \(w)") }
     }
 }

@@ -51,6 +51,13 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     private var copyButton: NSButton!
     private var insertButton: NSButton!
     private var tone: Tone = .auto
+    // Ready answers («Подтвердить», «Смотрим»…): one press composes a short reply into the input field.
+    private var chipsRow: NSStackView!
+    private var chipButtons: [NSButton] = []
+    private var chipTask: Task<Void, Never>?
+    private var chipGeneration = 0
+    private var lastChipText: String?
+    private var chipBusy = false
 
     // Live typing: sentence cache + the current request's plan.
     private let live = LiveTranslation()
@@ -92,6 +99,19 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
 
     func show(_ ctx: ReplyContext) {
         presentGeneration += 1 // a fade-out of the previous close must not hide this window
+        prepare(ctx)
+        place(near: ctx.anchor)
+        panel.alphaValue = 0
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { c in c.duration = 0.14; panel.animator().alphaValue = 1 }
+        panel.makeKey()
+        panel.makeFirstResponder(inputView)
+        installMonitors()
+        Diagnostics.log("reply opened (\(ctx.app?.localizedName ?? "чат"), \(ctx.partnerLanguage.rawValue))")
+    }
+
+    /// Everything of `show` except putting the window on screen (also used by the invisible render).
+    private func prepare(_ ctx: ReplyContext) {
         build()
         context = ctx
         // The partner's message itself is `replyTo`; `turns(for:)` leaves it out and gives the lines before it.
@@ -102,23 +122,18 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         tone = toneForApp?(ctx.app?.bundleIdentifier) ?? .auto
         toneControl.selectedSegment = Tone.allCases.firstIndex(of: tone) ?? 0
 
+        cancelChip()
+        lastChipText = nil
         inputView.string = drafts[ctx.partnerText] ?? ""
         translation = ""
         live.reset(); step = nil; resetRefine()
         setOutput("", placeholder: true)
+        updateChips()
         if !inputView.string.isEmpty { scheduleTranslation(delay: 0) }
-
-        place(near: ctx.anchor)
-        panel.alphaValue = 0
-        panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { c in c.duration = 0.14; panel.animator().alphaValue = 1 }
-        panel.makeKey()
-        panel.makeFirstResponder(inputView)
-        installMonitors()
-        Diagnostics.log("reply opened (\(appName), \(ctx.partnerLanguage.rawValue))")
     }
 
     func close() {
+        cancelChip()
         runner.cancel()
         refiner.cancel()
         debounce?.cancel()
@@ -145,6 +160,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         updateInputHeight()
+        updateChips()
         scheduleTranslation(delay: 0.45)
     }
 
@@ -262,6 +278,77 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         tone = Tone.allCases[max(0, sender.selectedSegment)]
         live.reset()
         scheduleTranslation(delay: 0)
+    }
+
+    // MARK: - Ready answers
+
+    private func updateChips() {
+        guard chipsRow != nil, let ctx = context else { return }
+        let show = ReplyChips.visible(partnerText: ctx.partnerText, input: inputView.string, lastChipText: lastChipText)
+        if chipsRow.isHidden == show {
+            chipsRow.isHidden = !show
+            if panel.isVisible { resize() }
+        }
+        chipButtons.forEach { $0.isEnabled = !chipBusy }
+    }
+
+    private func cancelChip() {
+        chipTask?.cancel(); chipTask = nil
+        chipGeneration += 1
+        if chipBusy { chipBusy = false; spinner?.stopAnimation(nil); inputView?.placeholder = Self.inputPlaceholder }
+    }
+
+    static let inputPlaceholder = "Ответ на своём языке или быстрый ответ ⌘1…⌘5"
+
+    @objc private func chipClicked(_ sender: NSButton) { runChip(sender.tag) }
+
+    /// The reply is composed in the USER's language and put into the input field: they read it, may edit it, and the usual
+    /// live translation (tone of the app, thread memory, glossary, checks) turns it into the partner's language.
+    /// The user's language, not the partner's: a text the user cannot read is not something to send.
+    private func runChip(_ index: Int) {
+        guard let ctx = context, ReplyChips.all.indices.contains(index), !chipBusy,
+              ReplyChips.visible(partnerText: ctx.partnerText, input: inputView.string, lastChipText: lastChipText) else { return }
+        let chip = ReplyChips.all[index]
+        let eng = engine
+        let userLang = TolkConfig.load().primaryLanguage
+        let composeTone = ReplyChips.composeTone(for: tone)
+        // The partner's message in the user's language: the reply is composed in that language, with its terms and form of address.
+        let partner = ctx.partnerLanguage == userLang ? ctx.partnerText : ctx.partnerTranslation
+        let thread = threadContext
+        chipGeneration += 1
+        let gen = chipGeneration
+        chipBusy = true
+        spinner.startAnimation(nil)
+        inputView.placeholder = "Формулирую ответ…"
+        inputView.string = ""
+        lastChipText = nil
+        runner.cancel(); debounce?.cancel(); resetRefine()
+        translation = ""; live.reset(); step = nil
+        setOutput("", placeholder: true)
+        updateChips()
+        chipTask = Task { @MainActor [weak self] in
+            let r: Result<ComposeResult, Error>
+            do { r = .success(try await eng.compose(points: chip.points, tone: composeTone, to: userLang, partnerMessage: partner, threadContext: thread)) }
+            catch { r = .failure(error) }
+            guard let self, self.chipGeneration == gen, !Task.isCancelled else { return }
+            self.chipTask = nil
+            self.chipBusy = false
+            self.spinner.stopAnimation(nil)
+            self.inputView.placeholder = Self.inputPlaceholder
+            switch r {
+            case let .failure(e):
+                self.statusLine?.failed(UIText.errorMessage(e))
+            case let .success(c):
+                self.inputView.string = c.text
+                self.lastChipText = c.text
+                self.updateInputHeight()
+                if !c.warnings.isEmpty { self.statusLine?.failed("⚠ проверьте текст: " + c.warnings.joined(separator: "; ")) }
+                self.scheduleTranslation(delay: 0)
+                self.panel.makeFirstResponder(self.inputView)
+                Diagnostics.log("reply chip \(chip.id) -> \(c.text.count) chars")
+            }
+            self.updateChips()
+        }
     }
 
     // MARK: - Editor pass
@@ -394,6 +481,8 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
             guard let self, e.window === self.panel else { return e }
             if e.keyCode == 53 { self.close(); return nil }
             if e.keyCode == 36, e.modifierFlags.contains(.command) { self.insertReply(); return nil }
+            if e.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command, let ch = e.charactersIgnoringModifiers?.first,
+               let i = ReplyChips.index(forKey: ch), !self.chipsRow.isHidden { self.runChip(i); return nil }
             return e
         }) { monitors.append(m) }
     }
@@ -527,13 +616,35 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         tv.drawsBackground = false
         tv.font = .systemFont(ofSize: 14)
         tv.textContainerInset = NSSize(width: 6, height: 8)
-        tv.placeholder = "Ответ на своём языке…"
+        tv.placeholder = Self.inputPlaceholder
         tv.delegate = self
         scroll.documentView = tv
         inputView = tv
         let inputBox = Self.roundedBox(scroll, fill: .textBackgroundColor, border: .separatorColor)
         inputHeight = inputBox.heightAnchor.constraint(equalToConstant: 56)
         inputHeight.isActive = true
+
+        // Ready answers: compact buttons above the input (they never take the keyboard focus)
+        chipButtons = ReplyChips.all.enumerated().map { i, c in
+            let b = NSButton(title: c.title, target: self, action: #selector(chipClicked(_:)))
+            b.tag = i
+            b.bezelStyle = .rounded
+            b.controlSize = .small
+            b.font = .systemFont(ofSize: 10.5)
+            b.image = NSImage(systemSymbolName: c.symbol, accessibilityDescription: c.title)?
+                .withSymbolConfiguration(.init(pointSize: 10, weight: .medium))
+            b.imagePosition = .imageLeading
+            b.imageHugsTitle = true
+            b.toolTip = "\(c.tooltip)  ⌘\(i + 1)"
+            b.refusesFirstResponder = true
+            b.setContentCompressionResistancePriority(.required, for: .horizontal)
+            return b
+        }
+        chipsRow = NSStackView(views: chipButtons)
+        chipsRow.orientation = .horizontal
+        chipsRow.spacing = 3
+        chipsRow.distribution = .fill
+        chipsRow.isHidden = true
 
         // Output
         outputLabel = UIFactory.wrappingLabel("", size: 14, color: .labelColor)
@@ -570,7 +681,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         footer.spacing = 6
 
         statusLine = StatusLineView()
-        let root = NSStackView(views: [header, partner, inputBox, outputRow, statusLine, footer])
+        let root = NSStackView(views: [header, partner, chipsRow, inputBox, outputRow, statusLine, footer])
         root.orientation = .vertical
         root.alignment = .leading
         root.spacing = 10
@@ -584,6 +695,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
             root.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
             effect.widthAnchor.constraint(equalToConstant: width),
         ])
+        chipsRow.widthAnchor.constraint(lessThanOrEqualTo: root.widthAnchor, constant: -inset * 2).isActive = true
         for v in [header, partner, inputBox, outputRow, footer] {
             v.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -inset * 2).isActive = true
         }
@@ -616,21 +728,48 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     }
 
     #if DEBUG
-    /// Dev: render the window to PNG (no screen-recording permission needed).
-    func renderForReview(_ ctx: ReplyContext, reply: String, translated: String, to path: String) {
-        show(ctx)
+    /// Dev: render the window to PNG. The window is never shown: the content view is drawn off-screen
+    /// (no screen-recording permission, no focus, nothing flashes on the user's screen).
+    func renderForReview(_ ctx: ReplyContext, dark: Bool, reply: String, translated: String, fromChip: Bool = false, to path: String) {
+        build()
+        panel.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+        panel.alphaValue = 0
+        prepare(ctx)
         inputView.string = reply
         updateInputHeight()
         runner.cancel(); debounce?.cancel()
         translation = translated
         pendingFirstChunk = false
-        setOutput(translated, placeholder: false)
+        setOutput(translated, placeholder: translated.isEmpty)
         updateButtons()
-        panel.contentView?.layoutSubtreeIfNeeded()
-        resize()
-        guard let view = panel.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
-        view.cacheDisplay(in: view.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        lastChipText = fromChip ? reply : nil
+        updateChips()
+        guard let view = panel.contentView else { return }
+        panel.setContentSize(NSSize(width: width, height: 200))
+        view.layoutSubtreeIfNeeded()
+        let size = NSSize(width: width, height: ceil(view.fittingSize.height))
+        panel.setContentSize(size)
+        view.layoutSubtreeIfNeeded()
+        view.displayIfNeeded()
+        let area = NSRect(x: 0, y: view.bounds.height - size.height, width: size.width, height: size.height)
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: area) else { return }
+        view.cacheDisplay(in: area, to: rep)
+        guard let out = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: rep.pixelsWide, pixelsHigh: rep.pixelsHigh,
+                                         bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                         colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let ctx = NSGraphicsContext(bitmapImageRep: out) else { return }
+        let px = NSSize(width: rep.pixelsWide, height: rep.pixelsHigh)
+        out.size = px
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = ctx
+        rep.draw(in: NSRect(origin: .zero, size: px))
+        ctx.cgContext.setBlendMode(.destinationOver)
+        ctx.cgContext.setFillColor(dark ? CGColor(srgbRed: 0.18, green: 0.18, blue: 0.19, alpha: 1)
+                                        : CGColor(srgbRed: 0.96, green: 0.96, blue: 0.96, alpha: 1))
+        ctx.cgContext.fill(CGRect(origin: .zero, size: px))
+        NSGraphicsContext.restoreGraphicsState()
+        try? out.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        Diagnostics.log("reply render: window visible = \(panel.isVisible)")
     }
     #endif
 }

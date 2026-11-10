@@ -52,13 +52,23 @@ public enum ComposeTone: String, CaseIterable, Sendable {
     var promptHint: String {
         switch self {
         case .neutral:
-            "NEUTRAL: plain, polite, everyday wording. No pressure, no flattery."
+            "NEUTRAL: plain, polite, everyday wording, the middle of the road. Neither cold nor warm. No pressure, no flattery."
         case .professional:
-            "BUSINESSLIKE: clear, short, polite-neutral. Standard business phrasing, no filler («please» only where a real request is made), no apologies, no slang, no rudeness."
+            "BUSINESSLIKE: the shortest correct wording in standard business phrasing. Compact sentences, polite-neutral, impersonal where possible («Please note», «We would appreciate», «The report was delivered two days late»). No contractions, no filler, no apologies, no slang, no emotions, no chatty words. «Please» only if the points make a real request."
         case .direct:
-            "DIRECT: state the position instead of asking («this doesn't work for us» rather than «please don't»); name the consequences exactly as the points name them, in plain words. No softening phrases, no aggression, no insults, no threats beyond what the points say."
+            "DIRECT: position and consequence, nothing cushioning them. State what is wrong and what follows as plain facts («This doesn't work for us. If it happens again, we will stop.»). Requests become demands without «please», «could you», «would you mind», «if possible», «kindly»; short, flat sentences; no thanks, no warm-up, no apologies. But no rudeness, insults or threats beyond what the points say, and never harsher words than the points use."
         case .friendly:
-            "FRIENDLY: warm, relaxed, natural chat wording; contractions are fine. Still say everything the points say, no more."
+            "FRIENDLY: warm and conversational, as to a colleague you like. Contractions («we'll», «it's», «doesn't»), casual connectors and light softeners («just», «really», «no worries», «could we», «it'd be great if»), a positive frame when the points allow it, a friendly lead-in is fine («Just a heads-up:», «Quick note:»). No greeting word at the start, no thanks, no emoji. Still exactly the points: no new facts, promises or compliments."
+        }
+    }
+
+    /// One example per tone for the same neutral case (different from anything users write about, so it cannot be copied).
+    var promptExample: String {
+        switch self {
+        case .neutral: "The shipment arrived two days late. This is the second time. We would like it to arrive on time next time."
+        case .professional: "The shipment was delivered two days late, for the second time. Please ensure timely delivery going forward."
+        case .direct: "The shipment is two days late again. That's the second time. It has to arrive on time from now on."
+        case .friendly: "The shipment came two days late again — that's the second time now. Could we please get it on time next time?"
         }
     }
 }
@@ -214,9 +224,9 @@ extension DefaultTranslationEngine {
 
     /// «Сформулировать»: the user's points (their language, any wording, may be an instruction like «пусть отключит…»)
     /// -> a ready message to the recipient. The language is that of `partnerMessage` if there is one, otherwise `to`.
-    /// The text must carry EVERY point and nothing else; numbers/times/dates are verified (warnings), then an honest
-    /// back-translation is made. Typical time 5-12 s.
-    public func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String? = nil) async throws -> ComposeResult {
+    /// The text must carry EVERY point and nothing else; numbers/times/dates are verified (warnings), the honest back-translation is a separate
+    /// call (`composeBackTranslation`) so that the text appears right after the first answer. Typical time 3-6 s.
+    public func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String? = nil, threadContext: String? = nil) async throws -> ComposeResult {
         let ollama = try await readyOllama()
         let userLang = config.primaryLanguage
         let partner = partnerMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -226,33 +236,20 @@ extension DefaultTranslationEngine {
                                           rules: rules.promptBlock(for: points + "\n" + (partner ?? ""), target: target))
         var user = "POINTS:\n\(points.prefix(3000))"
         if let partner, !partner.isEmpty { user += "\n\nPARTNER'S MESSAGE (the user answers it; keep the partner's terms and form of address):\n\(partner.prefix(2000))" }
+        if let t = threadContext?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
+            user += "\n\nEARLIER IN THIS CHAT (background only: do not repeat or answer it):\n\(t.suffix(1500))"
+        }
         var text = "", warnings: [String] = []
         for attempt in 0..<2 {
             guard let raw = try await ollama.chatContent(system: system, user: user, json: false, maxTokens: 1500, temperature: attempt == 0 ? 0.3 : 0.0, timeout: 90)
             else { throw TolkError.badResponse("Модель не ответила") }
             text = ExtrasParsing.cleanText(raw, original: points)
-            warnings = ExtrasParsing.composeWarnings(points: points, text: text, from: pointsLang, to: target)
+            warnings = ExtrasParsing.composeWarnings(points: points, text: text, from: pointsLang, to: target, partnerMessage: partner ?? "")
             if warnings.isEmpty || text.isEmpty { break }
             user += "\n\nYOUR PREVIOUS ATTEMPT WAS REJECTED: \(warnings.joined(separator: "; ")). Write it again and fix exactly this; add nothing that is not in the points."
         }
         if text.isEmpty { throw TolkError.badResponse("Модель вернула пустой ответ") }
-        var back: String?
-        if target != userLang {
-            let req = TranslationRequest(text: text, source: target, target: userLang, tone: .auto)
-            var acc = ""
-            do {
-                for try await e in translate(req) {
-                    switch e {
-                    case let .delta(d): acc += d
-                    case .started: acc = ""
-                    default: break
-                    }
-                }
-            } catch { acc = "" }
-            let t = acc.trimmingCharacters(in: .whitespacesAndNewlines)
-            back = t.isEmpty ? nil : t
-        }
-        return ComposeResult(text: text, language: target, backTranslation: back, warnings: warnings)
+        return ComposeResult(text: text, language: target, backTranslation: nil, warnings: warnings)
     }
 
     /// The model must be up: wait for a cold load like a normal translation does.
@@ -263,6 +260,25 @@ extension DefaultTranslationEngine {
             throw TolkError.unavailable("модель ещё загружается на vkbox (холодный старт), попробуйте через минуту")
         }
         return ollama
+    }
+}
+
+extension TranslationEngine {
+    /// Honest translation of a composed message back to the user's language (nil: same language or failed). Typical time 5-9 s.
+    public func composeBackTranslation(of result: ComposeResult, userLanguage userLang: Language) async -> String? {
+        guard result.language != userLang else { return nil }
+        var acc = ""
+        do {
+            for try await e in translate(TranslationRequest(text: result.text, source: result.language, target: userLang, tone: .auto)) {
+                switch e {
+                case let .delta(d): acc += d
+                case .started: acc = ""
+                default: break
+                }
+            }
+        } catch { return nil }
+        let t = acc.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
     }
 }
 
@@ -347,9 +363,9 @@ enum ExtrasPrompt {
         case .simpler:
             what = "Make it SIMPLER: plain everyday words, shorter sentences, no bureaucratic or bookish phrases, so that anyone understands it at once. Keep glossary terms and technical terms that have no plain equivalent. Keep all facts."
         case .professional:
-            what = "Make it BUSINESSLIKE: clear, short, polite-neutral. Standard business phrasing; cut filler, repeated «please» and apologies; replace slang, jargon and rude or emotional words with neutral professional ones. Keep every fact, request and condition, and the same strength of position: do not soften or sharpen it."
+            what = "Make it BUSINESSLIKE: the shortest correct standard business wording, impersonal where possible, compact sentences. Remove contractions, slang, chatty words, emotions, filler, apologies and repeated «please». Replace rude or emotional words with neutral professional ones. Keep every fact, request and condition, and the same strength of position: do not soften or sharpen it. Example: «Hey, the shipment came two days late again, could you please fix that?» -> «The shipment was delivered two days late again. Please address this.» Add nothing: no new subjects, greetings, promises, deadlines or terms."
         case .direct:
-            what = "Make it DIRECT: state the position instead of asking («this doesn't work for us» instead of «please don't»), name the consequences plainly as the text already names them, drop softeners and cushioning phrases («perhaps», «it would be great if», «sorry to»). No aggression, no insults, no threats, no new demands or deadlines that are not in the text."
+            what = "Make it DIRECT: position and consequence, no cushioning. Turn every request into a plain statement of what is needed or what is wrong, remove «please», «could you», «would you mind», «if possible», «perhaps», «kindly», «sorry», «unfortunately», «we would appreciate», thanks and warm-up phrases; short flat sentences. Example: «Could you please look into the late shipment? We would appreciate it if it arrived on time.» -> «The shipment is late. It has to arrive on time.» If the text is already direct, change little. Never harsher than the original: no rudeness, no insults, no stronger words («not good» must not become «unacceptable»), no new threats, demands, deadlines, subjects or terms."
         case .formal:
             what = "Switch the form of address to FORMAL and the register to polite and businesslike (\(formalHint(to))). Change pronouns and the verb forms that go with them everywhere, consistently. Do not make the text longer than needed."
         case .informal:
@@ -373,13 +389,19 @@ enum ExtrasPrompt {
         (for example «пусть отключит весь трафик и ещё раз попробуем» means: the user must ask the recipient to switch traffic off and say they will try again).
         Turn the points into ONE finished message FROM the user TO the recipient, in natural native \(to.englishName). Address the recipient directly («you»); the user speaks for themselves or their team («we»).
         Tone: \(tone.promptHint)
+        Example of this tone (other topic, only for the style): «\(tone.promptExample)»
+        Two kinds of points:
+        - FACTS and requests: every one goes into the message.
+        - STYLE INSTRUCTIONS to you about how to write («сильно аккуратно не нужно», «без агрессии», «скажи прямо», «помягче», «без официоза», «сильно не извиняйся»): they only steer the tone. NEVER write them out as sentences: no «we want to be direct», «we don't need to be gentle», «without aggression». A phrase that states a position or a condition is a FACT and must be in the message, once, in the chosen tone: «такая история нам не нравится», «это не обсуждается» (= this is not up for discussion), «мы настаиваем» (= we insist).
         Hard rules:
-        - Include EVERY point. Do not drop, merge away or weaken any of them.
-        - Add NOTHING of your own: no new promises, deadlines, amounts, reasons, names, offers, apologies or thanks that are not in the points.
+        - Include EVERY fact and request. Do not drop, merge away or weaken any of them.
+        - Add NOTHING of your own: no new promises, deadlines, amounts, reasons, names, offers, apologies, greetings or sign-offs, and no words for things the points do not mention (do not say «integration», «refund», «contract», «deadline», «penalty» unless the points do).
+        - Keep the strength of every opinion: «не нравится» = «we don't like it» / «it doesn't work for us», never «unacceptable»; «не устраивает» is not «outrageous»; do not make a mild opinion strong or a strong one mild.
         - Keep every number, date, time, currency and name exactly as in the points. Do not invent any.
         - Slang, swear words and rude words in the points are conveyed by their meaning in neutral wording, never copied as rude language and never made harsher.
-        - Do not turn a condition into a fact or a possibility into a threat: if the points say «if X happens, we do Y», keep the «if».
-        - A short message stays short. No subject line, no signature. A greeting only if the points or the partner's message have one.
+        - Do not turn a condition into a fact or a possibility into a threat: if the points say «if X happens, we do Y», keep the «if». If the points say «require a refund», it is a demand for a refund, not «we will consider».
+        - Plain vocabulary of the points stays: «traffic» stays «traffic», do not rename it.
+        - A short message stays short. No subject line, no signature, no greeting (only if the points ask for one).
         Output ONLY the message text in \(to.englishName): no comments, no quotes, no alternatives, no translation.
         """
         if hasPartner { s += "\nThe message answers the PARTNER'S MESSAGE: use the form of address (you/Вы/du/Sie) and the terms the partner uses." }
@@ -546,12 +568,50 @@ enum ExtrasParsing {
     }
 
     /// Check of a composed message: numbers/times/dates/links of the points must be in it, no number may appear from nowhere.
-    static func composeWarnings(points: String, text: String, from: Language, to: Language) -> [String] {
+    static func composeWarnings(points: String, text: String, from: Language, to: Language, partnerMessage: String = "") -> [String] {
         var out = TranslationCheck.warnings(source: points, translation: text, from: from, to: to)
             .filter { !$0.hasPrefix("текст") && !$0.lowercased().contains("язык") }
-        let added = numberTokens(text).subtracting(numberTokens(points))
+        let added = numberTokens(text).subtracting(numberTokens(points + " " + partnerMessage))
         if !added.isEmpty { out.append("в сообщении появилось то, чего нет в тезисах: \(added.sorted().joined(separator: ", "))") }
+        out += invented(points: points, text: text, partnerMessage: partnerMessage)
         return out
+    }
+
+    /// Things the model likes to add on its own: (what it looks like in the text, how it may look in the points).
+    /// A group fires only when the text has it and neither the points nor the partner's message do.
+    static let inventedGroups: [(name: String, text: String, source: String)] = [
+        ("integration", "integrat|інтеграц|интеграц", "integrat|інтеграц|интеграц"),
+        ("refund", "refund|money back|reimburs|рефанд|повернен|поверн.*грош|возврат|верн[а-я]+ дены", "refund|money back|рефанд|повернен|поверн|возврат|верн|деньг|грош|кошт"),
+        ("deadline", "deadline|дедлайн|крайн\\p{L}+ срок|кінцев\\p{L}+ термін", "deadline|дедлайн|срок|термін|до \\d|by \\d|сегодня|сьогодні|завтра|today|tomorrow"),
+        ("penalty/legal", "penalt|\\bfine\\b|lawsuit|legal action|court|штраф|судов|позов|суд\\b", "penalt|штраф|суд|позов|legal|court|юрист"),
+        ("discount", "discount|знижк|скидк", "discount|знижк|скидк|цен|ціна|ціну|price"),
+        ("contract", "contract|agreement|контракт|договір|договор", "contract|agreement|контракт|договор|договір"),
+        ("«unacceptable»", "unacceptable|not acceptable|outrageous|inacceptable|неприйнятн|недопустим|неприемлем|obscene|disgrac", "неприйнятн|недопустим|неприемлем|unacceptable|not acceptable|безобраз|свинств"),
+        ("CPM/CPA/CTR", "\\b(e?cpm|cpa|cpc|ctr|cpl|roi)\\b", "\\b(e?cpm|cpa|cpc|ctr|cpl|roi)\\b"),
+        ("urgency", "\\basap\\b|urgent|immediately|right away|терміново|негайно|срочно|немедленно", "срочно|терміново|asap|urgent|немедленно|негайно|сразу|одразу|прямо сейчас|зараз"),
+    ]
+
+    static func invented(points: String, text: String, partnerMessage: String = "", rewrite: Bool = false) -> [String] {
+        let src = (points + "\n" + partnerMessage).lowercased(), out = text.lowercased()
+        var res: [String] = []
+        func has(_ pattern: String, _ s: String) -> Bool { s.range(of: pattern, options: .regularExpression) != nil }
+        for g in inventedGroups where has(g.text, out) && !has(g.source, src) {
+            res.append("в сообщении появилось то, чего нет в тезисах: «\(g.name)»")
+        }
+        // A greeting the points did not ask for (the partner's own greeting does not count: a reply starting with «Привет!» is not wanted).
+        let greetWords = "привет|привіт|здравств|добрый|доброго|добрий|вітаю|поздоров|\\bhi\\b|hello|\\bhey\\b|dear|greeting|good (morning|day|afternoon)"
+        if opensWithGreeting(text), !has(greetWords, points.lowercased()) { res.append("в сообщении появилось приветствие, которого не просили") }
+        // A style instruction written out as a sentence («we want to be direct», «not overly gentle»).
+        let leak = "(want|like|need|have|going) to be (direct|honest|frank|blunt)|(be|being|are|is) (direct|frank|blunt) (with|about)|(overly|too|very) (gentle|careful|soft|nice)|(without|no) (being )?(aggress|rude)|not (be )?(aggressive|rude)|don't need to be|do not need to be|speak (plainly|directly|frankly)|(state|say|tell them|let them know|make it clear) (it )?(directly|clearly|plainly|frankly)"
+        if has(leak, out), rewrite ? !has(leak, src) : has("аккуратн|агресс|прямо|помягч|мягк|официоз|не грубо|без наезд|обережн|без агрес", src) {
+            res.append("указание о тоне попало в текст как фраза")
+        }
+        return res
+    }
+
+    /// The same checks for a rewritten translation: what the original text did not have must not appear.
+    static func inventedInRewrite(original: String, edited: String) -> String? {
+        invented(points: original, text: edited).first
     }
 
     /// Formal «Вы»/«Ви» forms are written with a capital letter (user rule): fix lower-case ones the model left.
@@ -637,6 +697,15 @@ enum RewriteGuard {
             // A sharper or businesslike version must not invent numbers, dates or deadlines.
             let added = ExtrasParsing.numberTokens(e).subtracting(ExtrasParsing.numberTokens(original))
             if !added.isEmpty { return .rejected("появилось число, которого не было: \(added.sorted().joined(separator: ", "))") }
+        }
+        if mode == .professional || mode == .direct || mode == .firmer || mode == .softer,
+           let why = ExtrasParsing.invented(points: original, text: e, rewrite: true).first {
+            return .rejected(why.replacingOccurrences(of: "в сообщении появилось", with: "появилось").replacingOccurrences(of: "то, чего нет в тезисах", with: "то, чего не было в тексте"))
+        }
+        if mode == .direct || mode == .firmer {
+            let soft = "\\b(please|could you|would you|kindly|if possible|perhaps|sorry|unfortunately|would appreciate|пожалуйста|будь ласка|могли бы|не могли бы|извините|вибачте|к сожалению|на жаль)\\b"
+            let before = original.lowercased().ranges(of: try! Regex(soft)).count, after = e.lowercased().ranges(of: try! Regex(soft)).count
+            if before > 0, after >= before { return .rejected("смягчающие слова остались: прямой тон — это позиция без «пожалуйста»/«не могли бы»") }
         }
         if mode == .shorter, e.count >= original.count, e != original.trimmingCharacters(in: .whitespacesAndNewlines) {
             return .rejected("текст не стал короче")
