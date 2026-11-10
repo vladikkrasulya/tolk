@@ -184,8 +184,12 @@ final class TypeTranslateController {
     }
 
     private func run(bundleID: String, generation g: Int) async {
-        guard !suppressed, !IsSecureEventInputEnabled(), !isOff(bundleID),
-              let field = await TypeTranslateField.read(), !Task.isCancelled, planner.generation == g,
+        guard !suppressed, !IsSecureEventInputEnabled(), !isOff(bundleID) else { return }
+        let read = await TypeTranslateField.read()
+        if read == nil, !Task.isCancelled, planner.generation == g {
+            Diagnostics.log("type-translate: field not readable app=\(bundleID)")
+        }
+        guard let field = read, !Task.isCancelled, planner.generation == g,
               field.pid != Self.ownPID, field.bundleID == bundleID, !IsSecureEventInputEnabled() else { return }
         let explicit = config.typeTranslateApps[bundleID]
         guard explicit != false else { return }

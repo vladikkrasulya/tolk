@@ -19,14 +19,16 @@ final class HotKeyCenter {
     private var handlerRef: EventHandlerRef?
     private var refs: [UInt32: EventHotKeyRef] = [:]
     private var handlers: [UInt32: () -> Void] = [:]
-    private var nextID: UInt32 = 1
+    /// Shared by every center: all of them use the same signature, so ids must be unique app-wide
+    /// (two centers both starting at 1 made ⌃⌥R arrive at the quick actions' handler for id 1).
+    private static var nextID: UInt32 = 1
 
     /// Registers a shortcut; returns a token for `unregister`, or nil if the combo is taken
     /// (by another app or by us) or Carbon refused it.
     func register(_ combo: HotKeyCombo, handler: @escaping () -> Void) -> UInt32? {
         guard installHandlerIfNeeded() else { return nil }
-        let id = nextID
-        nextID += 1
+        let id = Self.nextID
+        Self.nextID += 1
         var ref: EventHotKeyRef?
         let status = RegisterEventHotKey(combo.keyCode, combo.modifiers,
                                          EventHotKeyID(signature: Self.signature, id: id),
