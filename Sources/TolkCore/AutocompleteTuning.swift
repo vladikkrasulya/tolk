@@ -41,8 +41,12 @@ public enum AutocompleteTuning {
                       "search", "поиск", "найти", "e-mail", "email", "эл. почта", "логин", "login", "iban", "card number", "номер карты"]
             where s.contains(k) { return "label:" + k }
         }
-        if let h = height, h < 28 { return "short" }
+        // Size is judged only for one-line text fields. Chat composers (Telegram, Slack, Claude…) are text areas that
+        // start one line high (< 28 pt) and grow — skipping them by height silenced autocomplete in exactly the
+        // fields it is for. A wide one-line field (some apps' composers) is not "short" either.
+        guard role == "AXTextField" || role == "AXComboBox" else { return nil }
         if let w = width, w < 150 { return "narrow" }
+        if let h = height, h < 28, let w = width, w < 320 { return "short" }
         return nil
     }
 
@@ -104,6 +108,9 @@ extension SelfTest {
         check(T.fieldSkipReason(role: "AXTextField", subrole: "", parentRole: "AXCell", width: 400, height: 40) == "table-cell", "tune: table cell")
         check(T.fieldSkipReason(role: "AXTextField", subrole: "", width: 600, height: 30, labels: ["Address and search bar"]) != nil, "tune: browser address bar")
         check(T.fieldSkipReason(role: "AXTextField", subrole: "", width: 300, height: 22) == "short", "tune: one-line field")
+        check(T.fieldSkipReason(role: "AXTextArea", subrole: "", width: 700, height: 20) == nil, "tune: one-line chat composer (text area) is fine")
+        check(T.fieldSkipReason(role: "AXTextArea", subrole: "", width: 120, height: 18) == nil, "tune: text areas are never judged by size")
+        check(T.fieldSkipReason(role: "AXTextField", subrole: "", width: 640, height: 22) == nil, "tune: wide one-line field is fine")
         check(T.fieldSkipReason(role: "AXTextField", subrole: "", width: 90, height: 60) == "narrow", "tune: narrow field")
         check(T.fieldSkipReason(role: "AXTextField", subrole: "", width: 300, height: 40, labels: ["Email"]) != nil, "tune: email field")
         check(T.fieldSkipReason(role: "AXTextArea", subrole: "", width: 640, height: 48, labels: ["Message"]) == nil, "tune: chat composer is fine")
