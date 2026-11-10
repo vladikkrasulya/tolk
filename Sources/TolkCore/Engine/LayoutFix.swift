@@ -4,7 +4,16 @@
 //
 // Раскладки сопоставляются по ПОЗИЦИИ клавиши: US QWERTY ↔ русская ЙЦУКЕН ↔ украинская. Украинские і/ї/є/ґ стоят
 // на клавишах русских ы/ъ/э/ё, поэтому в сторону кириллицы такие буквы неоднозначны (RU или UA?) — решает словарь,
-// затем «голосование» по всему тексту. Знаки с цифрового ряда (!, @, # …) не трогаем: у разных раскладок они разные.
+// затем «голосование» по всему тексту.
+//
+// Знаки: на русской/украинской раскладке «,» и «.» стоят на клавише «/» (с Shift и без), «?» — на Shift+7, «:» — Shift+6,
+// «;» — Shift+4, «"» — Shift+2. Поэтому текст, набранный по-русски на английской раскладке, содержит: «?» там, где
+// хотели «,»; «&» там, где хотели «?»; «/» там, где хотели «.»; «^» → «:», «$» → «;», «@» → «"». «.» и «,» на самой
+// клавише букв — это «ю» и «б» (решает словарь). Краевые знаки слова преобразуются, только если слово исправлено.
+// «?» неоднозначен (в тесте «Ghbdtn, rfr ltkf? Ctujlyz» человек имел в виду вопрос): «?» перед словом с заглавной,
+// в конце строки/текста остаётся вопросительным знаком, перед словом со строчной — запятая.
+// Короткие слова, которые есть в обоих языках («vs» = «мы», «nj» = «то»), решаются по соседям: если рядом исправленное
+// слово и в тексте исправлено большинство слов, они тоже исправляются.
 import Foundation
 
 public enum LayoutLanguage: String, Sendable { case en, ru, uk }
@@ -101,9 +110,15 @@ public enum LayoutFix {
     private static func fixImpl(tokens: [(text: String, isSpace: Bool)], oracle: LayoutOracle?, preferUkrainian: Bool) -> LayoutFixResult {
         var strong: [Int: Candidate2] = [:], weak: [Int: Candidate2] = [:]
         var keptAlpha = 0
+        var parts: [Int: Peeled] = [:]
+        var ctx: [Int: Candidate2] = [:]
         for (i, t) in tokens.enumerated() where !t.isSpace {
-            switch analyze(t.text, oracle: oracle) {
-            case .keep: if hasLetters(t.text) { keptAlpha += 1 }
+            let pe = peel(t.text)
+            parts[i] = pe
+            switch analyze(pe.body, oracle: oracle) {
+            case .keep:
+                if hasLetters(t.text) { keptAlpha += 1 }
+                if let c = contextCandidate(pe.body, oracle: oracle) { ctx[i] = c }
             case let .strong(c): strong[i] = c
             case let .weak(c): weak[i] = c
             }
@@ -112,6 +127,25 @@ public enum LayoutFix {
         var chosen = strong
         if !strong.isEmpty, strong.count >= keptAlpha { for (i, c) in weak { chosen[i] = c } }
         else if !strong.isEmpty, strong.count * 2 >= keptAlpha + weak.count { for (i, c) in weak { chosen[i] = c } }
+
+        // Короткие слова «в обеих раскладках» — по соседям: рядом исправленное слово, и исправлено большинство.
+        let wordIdx = tokens.indices.filter { !tokens[$0].isSpace && hasLetters(tokens[$0].text) }
+        if !chosen.isEmpty, !ctx.isEmpty {
+            var progress = true
+            while progress {
+                progress = false
+                for (pos, i) in wordIdx.enumerated() where chosen[i] == nil {
+                    guard let c = ctx[i], chosen.count * 2 >= wordIdx.count else { continue }
+                    let toCyr = parts[i].map { $0.body.contains(where: isLatinLetter) } ?? true
+                    let near = [pos - 1, pos + 1].filter { wordIdx.indices.contains($0) }.map { wordIdx[$0] }
+                    let ok = near.contains { n in
+                        guard chosen[n] != nil, let pb = parts[n]?.body else { return false }
+                        return pb.contains(where: isLatinLetter) == toCyr
+                    }
+                    if ok { chosen[i] = c; progress = true }
+                }
+            }
+        }
 
         // Голосуем за украинский: слова, где украинский вариант известен словарю, а русский нет (или есть укр. буквы).
         var ukVotes = 0, ruVotes = 0
@@ -132,9 +166,78 @@ public enum LayoutFix {
             else if c.ukKnown && !c.ruKnown { pick = c.alt }
             else { pick = useUk ? c.alt : c.primary }
             if pick.contains(where: { ukOnly.contains($0) }) { anyUk = true }
-            out += pick
+            if let pe = parts[i], pe.body.contains(where: isLatinLetter) {
+                let next = tokens[(i + 1)...]
+                out += convertMarks(pe.lead, atEnd: false, next: next) + pick + convertMarks(pe.trail, atEnd: true, next: next)
+            } else {
+                out += pick
+            }
         }
         return LayoutFixResult(text: out, changedWords: changed, ukrainian: anyUk)
+    }
+
+
+    // MARK: Краевые знаки
+
+    private struct Peeled { var lead: String; var body: String; var trail: String }
+    private static let trailMarks = Set("?&/^$@")
+
+    /// Отделяет краевые знаки цифрового ряда/слэша от латинского слова. Ссылки, пути, почта и числа не трогаем.
+    private static func peel(_ token: String) -> Peeled {
+        var chars = Array(token)
+        var lead = "", trail = ""
+        if chars.first == "@" { lead = "@"; chars.removeFirst() }
+        while let l = chars.last, trailMarks.contains(l) { trail = String(l) + trail; chars.removeLast() }
+        let body = String(chars)
+        let isWord = body.contains(where: isLatinLetter) && !body.contains(where: isCyrillicLetter)
+            && !body.contains(where: { "@#$_\\/".contains($0) || $0.isNumber }) && !body.lowercased().contains("://")
+        guard isWord, !(lead.isEmpty && trail.isEmpty) else { return Peeled(lead: "", body: token, trail: "") }
+        return Peeled(lead: lead, body: body, trail: trail)
+    }
+
+    /// Знаки в русской раскладке: & → ?, / → ., ^ → :, $ → ;, @ → ", ? → «,» (или «?» в конце предложения).
+    private static func convertMarks(_ marks: String, atEnd: Bool, next: ArraySlice<(text: String, isSpace: Bool)>) -> String {
+        var out = ""
+        let chars = Array(marks)
+        for (k, m) in chars.enumerated() {
+            switch m {
+            case "&": out.append("?")
+            case "/": out.append(".")
+            case "^": out.append(":")
+            case "$": out.append(";")
+            case "@": out.append("\"")
+            case "?":
+                out.append(atEnd && k == chars.count - 1 && !sentenceContinues(next) ? "?" : ",")
+            default: out.append(m)
+            }
+        }
+        return out
+    }
+
+    /// После «?» идёт слово со строчной буквы (в другой раскладке — запятая внутри предложения).
+    private static func sentenceContinues(_ next: ArraySlice<(text: String, isSpace: Bool)>) -> Bool {
+        guard let sp = next.first, sp.isSpace, !sp.text.contains("\n") else { return false }
+        guard let w = next.dropFirst().first, !w.isSpace, let f = w.text.first(where: { $0.isLetter }) else { return false }
+        return f.isLowercase
+    }
+
+    /// Короткое слово, верное в своей раскладке, но тоже слово в другой («vs» = «мы»): кандидат для решения по соседям.
+    private static func contextCandidate(_ body: String, oracle: LayoutOracle?) -> Candidate2? {
+        guard let oracle else { return nil }
+        let lettersOnly = letters(body)
+        guard (1...3).contains(lettersOnly.count) else { return nil }
+        if body.contains(where: isLatinLetter), !body.contains(where: isCyrillicLetter) {
+            let ru = mapLatinToCyr(body, uk: false), uk = mapLatinToCyr(body, uk: true)
+            let ruK = oracle.isKnown(letters(ru), .ru) == true, ukK = oracle.isKnown(letters(uk), .uk) == true
+            guard ruK || ukK else { return nil }
+            return Candidate2(primary: ru, alt: uk, ruKnown: ruK, ukKnown: ukK)
+        }
+        if body.contains(where: isCyrillicLetter), !body.contains(where: isLatinLetter) {
+            let lat = String(body.map { toLatin[$0] ?? $0 })
+            guard oracle.isKnown(letters(lat), .en) == true else { return nil }
+            return Candidate2(primary: lat, alt: lat, ruKnown: false, ukKnown: false)
+        }
+        return nil
     }
 
     private static func hasLetters(_ s: String) -> Bool { s.contains { $0.isLetter } }

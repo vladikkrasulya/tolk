@@ -43,6 +43,21 @@ extension SelfTest {
         check(rows.count == 3 && rows[0].day == day(-20) && rows[2].models == ["B.gguf", "A.gguf"], "acstats: day rows, oldest first")
         check(d.modelChanges(rows) == [day(0): "B.gguf"], "acstats: model change marked on the first day of the new model")
 
+        // Median per period (not one value for all columns): different days with different latencies.
+        var m = ACStatsData()
+        m.update(day: day(0), model: "A", app: "x") { for ms in [100, 110, 120] { $0.addLatency(ms) } }          // today: ~115
+        m.update(day: day(-3), model: "A", app: "x") { for ms in [400, 410, 420, 430, 440] { $0.addLatency(ms) } }
+        m.update(day: day(-20), model: "A", app: "x") { for ms in [800, 810, 820, 830, 840, 850, 860, 870] { $0.addLatency(ms) } }
+        let med = [1, 7, 30, nil].map { m.summary(last: $0, now: now, calendar: cal).total.medianLatency }
+        check(med[0] == 115 && med[1] == 405 && med[2] == 445 && med[3] == 445 && Set(med.compactMap { $0 }).count == 3,
+              "acstats: median latency is computed per period (today/7/30/all differ when the data differ)", "\(med)")
+        // …and the same value in every column is only possible when the data really agree (two days, same bucket).
+        var same = ACStatsData()
+        same.update(day: day(0), model: "A", app: "x") { for ms in [220, 225, 229] { $0.addLatency(ms) } }
+        same.update(day: day(-1), model: "A", app: "x") { for ms in [221, 226, 228] { $0.addLatency(ms) } }
+        let ms2 = [1, 7, 30, nil].map { same.summary(last: $0, now: now, calendar: cal).total.medianLatency }
+        check(ms2 == [225, 225, 225, 225], "acstats: equal medians when every day has the same 10-ms bucket (the live 225 ms)", "\(ms2)")
+
         // Retention.
         var old = ACStatsData()
         old.update(day: day(-400), model: "A", app: "x") { $0.shown = 1 }

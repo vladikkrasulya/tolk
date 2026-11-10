@@ -284,3 +284,17 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   meta-phrase leaks). «Added something» 13/48 → 0/48 on 12 examples × 4 tones; tones still converge on short points.
 - Compose back-translation is a separate request (`composeBackTranslation`): the message shows in 2–6 s.
 - `TOLK_RENDER_REPLY` renders off-screen (`ReplyDemo`). Self-test: 717 checks.
+
+## v0.7.0 — trap corpus, live-run fixes
+- Trap corpus (321 business/adtech texts: 81 hand-written + 240 synthetic, case U0 = the user's real Slack message;
+  file in side-session notes `trap-corpus/full.json`): `tolk-cli --trap-corpus FILE [--model M] [--rules P]
+  [--trap-out J] [--trap-only ids|types]`. Auto-check 299/321 → 313/321 on gemma-translate; qwen-translate 290/321
+  with the same prompt (weaker on jargon), so Gemma stays.
+- Prompt rules RU→EN (direction «убрать от нас / подливать нам» → «stop sending us / from the traffic you send us»,
+  лить/лив/сабы/чисто, «до выяснения», «вынуждены уведомить», net-30, «в дальнейшем») and EN→RU (please advise,
+  please note, moving forward, per our call, circle back, on your end, «we» stays «мы»); +12 calques; «14-day» and
+  «net-N» are not IDs in `TranslationCheck`.
+- Live-run fixes: popup → big window keeps tone, languages and context (translation comes from the cache);
+  ⌃⌥L maps punctuation of the other layout and fixes short words by sentence context; truncated buttons fixed;
+  «Перевод при наборе» reads NSTextView-based fields (TextEdit) and logs every early exit; sidebar click; per-period
+  median latency in the statistics. Self-test: 777 checks.

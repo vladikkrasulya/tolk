@@ -180,11 +180,21 @@ final class TypeTranslateController {
         return owned ? .skipAutocomplete : .proceed
     }
 
+    /// ANSI/ISO character keys and Space (not Return, Tab, Delete, Esc, arrows, function keys).
+    private static let typingKeyCodes: Set<Int> = Set(0...50).subtracting([36, 48, 51]).union([49, 10, 93, 94, 95])
+
     private static func isPrintable(_ event: CGEvent) -> Bool {
         var length = 0
         var buf = [UniChar](repeating: 0, count: 8)
         event.keyboardGetUnicodeString(maxStringLength: 8, actualStringLength: &length, unicodeString: &buf)
-        guard length > 0 else { return false }
+        guard length > 0 else {
+            // Synthetic key events (CGEvent from a virtual key code, System Events) can carry no string: a plain letter,
+            // digit or punctuation key still changes the text. A false positive only makes one harmless read.
+            let code = Int(event.getIntegerValueField(.keyboardEventKeycode))
+            let f = event.flags
+            return !f.contains(.maskCommand) && !f.contains(.maskControl) && !f.contains(.maskAlternate)
+                && Self.typingKeyCodes.contains(code)
+        }
         for u in String(utf16CodeUnits: buf, count: min(length, 8)).unicodeScalars {
             if u.value < 0x20 || u.value == 0x7F || (0xF700...0xF8FF).contains(u.value) { return false }
         }
@@ -204,15 +214,21 @@ final class TypeTranslateController {
     }
 
     private func run(bundleID: String, generation g: Int) async {
-        guard !suppressed, !IsSecureEventInputEnabled(), !isOff(bundleID) else { return }
+        // Every early exit says why (no text: only lengths, roles and the bundle id).
+        func skip(_ why: String) { if !Task.isCancelled, planner.generation == g { Diagnostics.log("type-translate: skip (\(why)) app=\(bundleID)") } }
+        guard !suppressed else { skip("after-esc-or-paste"); return }
+        guard !IsSecureEventInputEnabled() else { skip("secure-input"); return }
+        guard !isOff(bundleID) else { skip("app-off-list"); return }
         let read = await TypeTranslateField.read()
         if read == nil, !Task.isCancelled, planner.generation == g {
-            Diagnostics.log("type-translate: field not readable app=\(bundleID)")
+            Diagnostics.log("type-translate: field not readable app=\(bundleID) (reason: see «autocomplete: read refused» just above)")
         }
-        guard let field = read, !Task.isCancelled, planner.generation == g,
-              field.pid != Self.ownPID, !AutocompleteController.focusIsInOwnWindow(), field.bundleID == bundleID, !IsSecureEventInputEnabled() else { return }
+        guard let field = read, !Task.isCancelled, planner.generation == g else { return }
+        guard field.pid != Self.ownPID, !AutocompleteController.focusIsInOwnWindow() else { skip("own-window"); return }
+        guard field.bundleID == bundleID else { skip("focus-moved to=\(field.bundleID ?? "?")"); return }
+        guard !IsSecureEventInputEnabled() else { skip("secure-input"); return }
         let explicit = config.typeTranslateApps[bundleID]
-        guard explicit != false else { return }
+        guard explicit != false else { skip("switched-off"); return }
 
         let ctx = await screen.context(forPID: field.pid, waitingUpTo: .milliseconds(80)) ?? ""
         guard !Task.isCancelled, planner.generation == g else { return }
@@ -222,7 +238,11 @@ final class TypeTranslateController {
             text: field.text, partner: partner, screenKnown: known, primary: config.primaryLanguage, secondary: config.secondaryLanguage,
             explicitlyOn: explicit == true, auto: config.typeTranslateAuto)
         guard case let .translate(source, target) = verdict else {
-            if case .silent(let why) = verdict { Diagnostics.log("type-translate: silent (\(why.rawValue)) len=\(field.text.count) app=\(bundleID)") }
+            if case .silent(let why) = verdict {
+                // «empty» with a field that has text would be a read problem: show what the field reported.
+                let extra = why == .empty ? " \(TypeTranslateField.diagnose(field.element))" : ""
+                Diagnostics.log("type-translate: silent (\(why.rawValue)) len=\(field.text.count) app=\(bundleID)\(extra)")
+            }
             panel.hide(); return
         }
 
@@ -240,15 +260,20 @@ final class TypeTranslateController {
             }
             return
         }
-        guard !Task.isCancelled, planner.generation == g, !UIText.isFallbackProvider(result.provider), !result.fellBack else { return }
+        guard !Task.isCancelled, planner.generation == g else { return }
+        guard !UIText.isFallbackProvider(result.provider), !result.fellBack else { skip("fallback-provider len=\(text.count)"); return }
         let translation = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !translation.isEmpty, translation != text else { return }
+        guard !translation.isEmpty, translation != text else { skip(translation.isEmpty ? "empty-translation" : "translation-equals-text"); return }
 
         // The text may have changed while the model worked: show only for exactly the same field and text.
         guard let now = await TypeTranslateField.read(), !Task.isCancelled, planner.generation == g, !suppressed else { return }
         var same = true
         if let a = field.element, let b = now.element { same = CFEqual(a, b) }
-        guard TypeTranslate.decideReplace(shown: field.snapshot, now: now.snapshot, sameElement: same) == .replace else { return }
+        let replaceDecision = TypeTranslate.decideReplace(shown: field.snapshot, now: now.snapshot, sameElement: same)
+        guard replaceDecision == .replace else {
+            if case .skip(let why) = replaceDecision { skip("text-changed-meanwhile \(why)") }
+            return
+        }
 
         let lost = TypeTranslate.blockingWarnings(
             TranslationCheck.warnings(source: text, translation: translation, from: source, to: target))

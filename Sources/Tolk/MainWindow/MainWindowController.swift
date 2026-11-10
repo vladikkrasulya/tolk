@@ -204,11 +204,17 @@ final class PageContainerViewController: NSViewController {
 
 // MARK: - Sidebar
 
+/// The first click on a row of an inactive window selects it at once (like Finder's sidebar), instead of only
+/// bringing the window forward — a click from another app (or a synthetic one) must switch the page too.
+final class SidebarTable: NSTableView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     typealias Section = MainWindowController.Section
     let sections: [Section]
     var onSelect: ((Section) -> Void)?
-    private let table = NSTableView()
+    private let table = SidebarTable()
     private var suppress = false
 
     init(sections: [Section]) {
@@ -248,6 +254,29 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         table.selectRowIndexes([row], byExtendingSelection: false)
         suppress = false
     }
+
+    #if DEBUG
+    /// Real mouse events (down + up) sent to the row's cell, as AppKit gets them; returns the sections `onSelect` reported.
+    @MainActor func debugClick(row: Int, in window: NSWindow) -> [Section] {
+        var seen: [Section] = []
+        let old = onSelect
+        onSelect = { seen.append($0); old?($0) }
+        defer { onSelect = old }
+        let r = table.rect(ofRow: row)
+        let pointInTable = NSPoint(x: r.midX, y: r.midY)
+        let inWindow = table.convert(pointInTable, to: nil)
+        func ev(_ t: NSEvent.EventType) -> NSEvent? {
+            NSEvent.mouseEvent(with: t, location: inWindow, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                               windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1)
+        }
+        if let up = ev(.leftMouseUp), let down = ev(.leftMouseDown) {
+            NSApp.postEvent(up, atStart: false)
+            table.mouseDown(with: down)
+        }
+        return seen
+    }
+    var debugSelectedRow: Int { table.selectedRow }
+    #endif
 
     func numberOfRows(in tableView: NSTableView) -> Int { sections.count }
 

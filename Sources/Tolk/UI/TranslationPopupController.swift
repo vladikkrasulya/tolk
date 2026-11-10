@@ -57,9 +57,9 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
     private var resizeScheduled = false
 
     /// Called with the source text when the user expands the popup into the input window.
-    var onExpand: ((String) -> Void)?
+    var onExpand: ((PopupHandoff) -> Void)?
     /// «Варианты»: the big window opens with this text, the tone and chat context of this popup, and starts the variants.
-    var onVariants: ((_ text: String, _ tone: Tone, _ threadContext: String?) -> Void)?
+    var onVariants: ((PopupHandoff) -> Void)?
     private var variantsButton: NSButton!
     private var lastThreadContext: String?
     /// Tone for the app the user copied from (bundle id); used when the tone switch is "Авто".
@@ -426,11 +426,9 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         showMessage("Перевожу…", color: .tertiaryLabelColor)
         showsPlaceholder = true
         statusLine.waiting(provider: "…")
-        var request = TranslationRequest(text: sourceText, source: requestedSource,
-                                         target: requestedTarget, tone: effectiveTone)
         // Short replies from the same chat get the previous lines as context (pronouns), never translated.
-        request.threadContext = ThreadMemory.shared.context(for: sourceText, app: frontApp)
-        lastThreadContext = request.threadContext
+        lastThreadContext = ThreadMemory.shared.context(for: sourceText, app: frontApp)
+        var request = handoff().request()
         request.bypassCache = bypassNext
         bypassNext = false
         runner.start(request)
@@ -637,16 +635,22 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         onReply?(ctx)
     }
 
+    /// The popup's current request as one value: the window opened from here repeats exactly this request.
+    private func handoff() -> PopupHandoff {
+        PopupHandoff(text: sourceText, source: requestedSource, target: requestedTarget,
+                     requestTone: effectiveTone, displayTone: tone, threadContext: lastThreadContext)
+    }
+
     @objc private func variantsClicked() {
-        let text = sourceText, tone = effectiveTone, thread = lastThreadContext
+        let h = handoff()
         dismiss()
-        onVariants?(text, tone, thread)
+        onVariants?(h)
     }
 
     @objc private func expandClicked() {
-        let text = sourceText
+        let h = handoff()
         dismiss()
-        onExpand?(text)
+        onExpand?(h)
     }
 
     // MARK: - Alternatives (select a word/phrase in the translation)

@@ -79,12 +79,19 @@ enum Prompt {
     static func antiCalque(for target: Language) -> String {
         switch target {
         case .russian, .ukrainian:
-            "Avoid English-shaped constructions in \(target.englishName) (no «имеет смысл», «дайте мне знать», «в конце дня», «взять душ»-type calques; no English word order, no literal idioms): say it the way a native \(target.englishName) speaker would."
+            "Avoid English-shaped constructions in \(target.englishName) (no «имеет смысл», «дайте мне знать», «в конце дня», «взять душ»-type calques; no English word order, no literal idioms): say it the way a native \(target.englishName) speaker would. " +
+            "Business idioms: «please advise» → «подскажите, как действовать дальше», «please note» → «обратите внимание» (never «примите к сведению»), «moving forward» → «в дальнейшем», «per our call» → «как договорились на созвоне», «circle back» → «вернёмся к этому», «on your end» → «у вас». " +
+            "Keep the person: «we» stays «мы», never «я». «Net-30 / net-45» → «оплата через 30 / 45 дней после выставления счёта» (not «после оплаты»)."
         case .english:
             "Avoid Slavic word order and literal idioms in English (no «Did you forget to take?» for «ты не забыл забрать?», no «I have a question to you»): say it the way a native English speaker would. " +
             "«Попрошу вас / прошу вас сделать X» is a request: write «Please do X», never «I'll ask you to». " +
             "«С нашей стороны / с вашей стороны» about traffic, feeds or data means where it goes or comes from (to our feeds, in your traffic), not «from our side»; keep who does what unambiguous. " +
-            "«Значит / раз так, вы видите…» is a conclusion: write «so you can see / you clearly see», not «you must see» (it reads as an order)."
+            "«Значит / раз так, вы видите…» is a conclusion: write «so you can see / you clearly see», not «you must see» (it reads as an order). " +
+            "«Убрать X с вашей / нашей стороны», «убрать X от нас», «подливать / лить нам X» = remove X from the traffic you send us / stop sending us X: name whose traffic it is, never «from our side». " +
+            "«Лить / заливать / льёте» about traffic = send / drive traffic (not «campaign»); «чистый / всё чисто» = clean (not «clear»). " +
+            "«Сабайди / сабы» = sub IDs (never transliterate: not «Sabaydi»), but keep «SubID» exactly as written. «Лив» (landing, traffic) = bounce / drop-off rate. «Вынуждены уведомить» = «we must inform you» (not «please be advised»). «Net-30» = 30 days from the INVOICE date. " +
+            "«Не делайте так / этого в дальнейшем» = «please don't do this again» (not «moving forward»). " +
+            "Keep conditions and closing phrases exact: «до выяснения» = «until this is clarified» (not «until further notice»), «закрываем вопрос» = «let's close the issue»."
         default:
             "Avoid literal idioms and the word order of the source language: say it the way a native \(target.englishName) speaker would."
         }

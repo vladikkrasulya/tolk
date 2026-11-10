@@ -139,10 +139,15 @@ enum NoteRow {
         var buttons: [NSView] = []
         let keep = ClosureButton(title: "Так и оставить", symbol: "checkmark") { onSave(n.used, false) }
         keep.toolTip = "Сохранить «\(n.term) → \(n.used)» в глоссарий"
+        // Shrink priority: «Так и оставить» is never cut; the long replacement (««минимальная цена»») gives way first
+        // (cut with «…», the full text stays in the tooltip).
+        keep.setContentCompressionResistancePriority(.required, for: .horizontal)
         buttons.append(keep)
         if let sug = n.suggestion {
             let use = ClosureButton(title: "«\(sug)»", symbol: "arrow.triangle.2.circlepath") { onSave(sug, true) }
             use.toolTip = "Сохранить «\(n.term) → \(sug)» в глоссарий и перевести заново"
+            use.lineBreakMode = .byTruncatingTail
+            use.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             buttons.append(use)
         }
         let row = NSStackView(views: buttons + [UIFactory.spacer()])

@@ -40,8 +40,11 @@ struct TypeTranslateField {
 
     private static func make(_ f: FocusedField, value: String?) -> TypeTranslateField? {
         var text = value
-        if text == nil, f.textBefore.count < FocusedField.contextLimit, f.restOfLine.count < 200 {
-            text = f.textBefore + f.restOfLine // single-line fallback when the app has no AXValue
+        // Single-line fallback when the app has no AXValue — or reports an empty one while the caret read (by range)
+        // sees text before the caret (contradiction: the whole-text read is the one that is wrong).
+        let noValue = text == nil || (text?.isEmpty == true && !f.textBefore.isEmpty)
+        if noValue, f.textBefore.count < FocusedField.contextLimit, f.restOfLine.count < 200 {
+            text = f.textBefore + f.restOfLine
         }
         guard let text, text.count <= valueLimit else { return nil }
         var frame: NSRect?
@@ -52,12 +55,44 @@ struct TypeTranslateField {
         return TypeTranslateField(pid: f.pid, bundleID: f.bundleID, text: text, element: f.element, frame: frame, caret: f.caret)
     }
 
-    private static func wholeText(_ el: AXUIElement?, budget: TimeInterval) -> String? {
+    /// Whole text of the element: AXValue (String or attributed string), then — when the app gives none or an empty
+    /// one — the same text through `AXStringForRange(0, AXNumberOfCharacters)` (NSTextView in a scroll view, rich text).
+    static func wholeText(_ el: AXUIElement?, budget: TimeInterval) -> String? {
         guard let el else { return nil }
         AXUIElementSetMessagingTimeout(el, Float(max(0.01, min(0.15, budget))))
         var v: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &v) == .success else { return nil }
-        return v as? String
+        var first: String?
+        if AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &v) == .success, let v {
+            if let s = v as? String { first = s } else if let a = v as? NSAttributedString { first = a.string }
+        }
+        if let first, !first.isEmpty { return first }
+        // Empty or missing: ask for the characters directly.
+        var n: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXNumberOfCharactersAttribute as CFString, &n) == .success,
+              let count = (n as? NSNumber)?.intValue, count > 0, count <= valueLimit else { return first }
+        var range = CFRange(location: 0, length: count)
+        guard let rv = AXValueCreate(.cfRange, &range) else { return first }
+        var out: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(el, kAXStringForRangeParameterizedAttribute as CFString, rv, &out) == .success,
+              let str = out as? String, !str.isEmpty else { return first }
+        return str
+    }
+
+    /// For the log (no text, only shapes): role, what AXValue returned and how long, number of characters.
+    static func diagnose(_ el: AXUIElement?) -> String {
+        guard let el else { return "element=nil" }
+        AXUIElementSetMessagingTimeout(el, 0.1)
+        func str(_ k: String) -> String? { var v: CFTypeRef?; return AXUIElementCopyAttributeValue(el, k as CFString, &v) == .success ? v as? String : nil }
+        var v: CFTypeRef?
+        let r = AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &v)
+        var value = "err\(r.rawValue)"
+        if r == .success, let v {
+            if let s = v as? String { value = "string(\(s.count))" } else if let a = v as? NSAttributedString { value = "attributed(\(a.length))" }
+            else { value = "other" }
+        }
+        var n: CFTypeRef?
+        let chars = AXUIElementCopyAttributeValue(el, kAXNumberOfCharactersAttribute as CFString, &n) == .success ? ((n as? NSNumber)?.intValue ?? -1) : -1
+        return "role=\(str(kAXRoleAttribute) ?? "?") sub=\(str(kAXSubroleAttribute) ?? "-") value=\(value) chars=\(chars)"
     }
 
     private static func cocoaFrame(_ el: AXUIElement) -> NSRect? {

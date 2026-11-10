@@ -38,6 +38,7 @@ if CommandLine.arguments.dropFirst().first == "--ac-spawn" {
     while true { sleep(1000) }
 }
 var twice = false
+var trapCorpusPath: String?, trapOut: String?, trapOnly: String?
 // `tolk-cli --ac-stats [JSON_PATH [LOG_PATH]]` prints the autocomplete statistics (JSON, else the log). Read-only.
 if CommandLine.arguments.dropFirst().first == "--ac-stats" {
     let a = Array(CommandLine.arguments.dropFirst(2))
@@ -74,6 +75,9 @@ while let a = args.next() {
     case "--context-source": contextSource = value()         // already translated beginning (source side)
     case "--context-translation": contextTranslation = value()
     case "--check": checkOnly = value()                      // run only the automatic check: text = source, value = translation
+    case "--trap-corpus": trapCorpusPath = value()           // JSON corpus of basic traps: translate each, check the rules, print a summary (model!)
+    case "--trap-out": trapOut = value()                     // with --trap-corpus: also write the results as JSON
+    case "--trap-only": trapOnly = value()                   // with --trap-corpus: only ids/traps from this comma list
     case "--twice": twice = true                             // translate the text twice in one process: shows the result cache
     case "--self-test": selfTest = true                      // engine checks without model or network
     case "--warm": warmOnly = true                          // load the model on vkbox and report the time
@@ -168,10 +172,10 @@ if warmOnly {
     r.wait(); exit(0)
 }
 var text = words.joined(separator: " ")
-if text.isEmpty, isatty(0) == 0 {
+if text.isEmpty, trapCorpusPath == nil, isatty(0) == 0 {
     text = String(decoding: FileHandle.standardInput.readDataToEndOfFile(), as: UTF8.self)
 }
-if text.isEmpty { fail("no text; see --help") }
+if text.isEmpty, trapCorpusPath == nil { fail("no text; see --help") }
 
 var config = TolkConfig.load()
 if let modelOverride { config.model = modelOverride }
@@ -290,6 +294,39 @@ if let maskEval {
         print("\n=== итого по \(n) текстам с сущностями ===")
         for (k, v) in tot.sorted(by: { $0.key < $1.key }) {
             print("\(k.padding(toLength: 16, withPad: " ", startingAt: 0)) предупреждений проверки: \(v.warn)  сбоев заглушек: \(v.fail)  символов промпта (всего): \(v.chars)  дословно потеряно сущностей: \(lostTot[k] ?? 0)  время: \(String(format: "%.0f", v.secs)) с")
+        }
+    }
+}
+if let trapCorpusPath {
+    guard let items = TrapCorpus.load(path: trapCorpusPath) else { fail("--trap-corpus: cannot read \(trapCorpusPath)") }
+    let only = trapOnly.map { Set($0.split(separator: ",").map { String($0) }) }
+    let run = items.filter { only == nil || only!.contains($0.id) || only!.contains($0.trap) }
+    let cfg = config   // includes --model
+    let store = RulesStore(path: rulesPath ?? cfg.effectiveRulesPath)
+    let eng = DefaultTranslationEngine(config: cfg, rules: store, primary: OllamaProvider(config: cfg, rules: store), fallback: nil)
+    timed("trap-corpus") {
+        var results: [(item: TrapItem, passed: Bool)] = []
+        var json: [[String: Any]] = []
+        var totalSecs = 0.0
+        for it in run {   // strictly sequential
+            var out = ""
+            let t0 = Date()
+            for try await e in eng.translate(TranslationRequest(text: it.text, source: it.from, target: it.to, tone: it.tone)) {
+                if case let .delta(d) = e { out += d }
+            }
+            out = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            let secs = Date().timeIntervalSince(t0); totalSecs += secs
+            let f = TrapCorpus.failures(it, translation: out)
+            results.append((it, f.isEmpty))
+            print("[\(it.id) \(it.trap)] \(f.isEmpty ? "ок" : "ПРОВАЛ")\n  \(it.text)\n  → \(out.replacingOccurrences(of: "\n", with: " "))")
+            for x in f { print("  ✗ \(x)") }
+            json.append(["id": it.id, "trap": it.trap, "text": it.text, "translation": out, "passed": f.isEmpty, "failures": f, "secs": secs])
+        }
+        print("\n=== сводка (верно по автопроверке) ===")
+        for s in TrapCorpus.summary(results) { print("\(s.trap.padding(toLength: 10, withPad: " ", startingAt: 0)) \(s.passed)/\(s.total)") }
+        print("всего \(results.filter(\.passed).count)/\(results.count), в среднем \(String(format: "%.1f", totalSecs / Double(max(1, results.count)))) с на текст")
+        if let trapOut, let d = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .withoutEscapingSlashes]) {
+            try? d.write(to: URL(fileURLWithPath: (trapOut as NSString).expandingTildeInPath))
         }
     }
 }

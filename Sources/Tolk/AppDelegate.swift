@@ -61,6 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["TOLK_RENDER_POPUP"] != nil { PopupDemo.run(); return }
         // Invisible reply-window render (never shown): TOLK_RENDER_REPLY=dir
         if ProcessInfo.processInfo.environment["TOLK_RENDER_REPLY"] != nil { ReplyDemo.run(); return }
+        if ProcessInfo.processInfo.environment["TOLK_SIDEBAR_PROBE"] != nil { SidebarProbe.run(); return }
+        if let m = ProcessInfo.processInfo.environment["TOLK_AX_PROBE"] { AXReadProbe.run(m); return }
         if ProcessInfo.processInfo.environment["TOLK_IDLE_TICKS"] != nil { IdleTicksDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_TYPE_TRANSLATE_SHOT"] != nil { TypeTranslateDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_MAIN_DEMO"] != nil { MainWindowDemo.runIfRequested(); return }
@@ -98,13 +100,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         inputWindow.page.history = history
         inputWindow.page.onOpenDocument = openDocument
 
-        popup.onExpand = { [weak self] text in
+        popup.onExpand = { [weak self] h in
             self?.mainWindow.show(.translate)
-            self?.translatePage.load(text: text)
+            self?.translatePage.load(h, suggestVariants: false)
         }
-        popup.onVariants = { [weak self] text, tone, thread in
+        popup.onVariants = { [weak self] h in
             self?.mainWindow.show(.translate)
-            self?.translatePage.load(text: text, tone: tone, threadContext: thread, suggestVariants: true)
+            self?.translatePage.load(h, suggestVariants: true)
         }
         popup.toneForApp = { [weak self] in self?.config.tone(forApp: $0) ?? .auto }
         reply = ReplyPanelController(engine: withHistory("reply"))

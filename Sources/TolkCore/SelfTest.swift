@@ -30,6 +30,7 @@ public enum SelfTest {
         screenContextRefresh(check)
         refineGuard(check)
         bigWindow(check)
+        popupHandoff(check)
         uxRules(check)
         resultCache(check)
         engineReview(check)
@@ -38,6 +39,7 @@ public enum SelfTest {
         hotKeyRules(check)
         tails(check)
         modelUsage(check)
+        trapCorpus(check)
         return (check.total, check.failures)
     }
 
@@ -179,6 +181,9 @@ public enum SelfTest {
         check(has(w("Погода сегодня прекрасная, поэтому мы решили долго гулять вдоль реки, а потом пообедать в старом городе рядом с рынком.", long, .russian, .german), "вместо"),
               "check: English instead of German (NaturalLanguage)")
 
+        check(!has(w("Холд 14 дней, выплата раз в две недели", "14-day hold, bi-weekly payouts", .russian, .english), "14"), "check: «14-day» is not lost")
+        check(!has(w("Payout is paid net-30 from invoice date", "Выплата через 30 дней после даты счёта", .english, .russian), "net-30"), "check: «net-30» as «30 дней» is not an identifier loss")
+        check(has(w("Payout is paid net-30 from invoice date", "Выплата после даты счёта", .english, .russian), "30"), "check: «net-30» lost entirely is still reported")
         // No false alarms.
         let clean: [(String, String, Language, Language)] = [
             ("Hi, how are you?", "Привет, как дела?", .english, .russian),

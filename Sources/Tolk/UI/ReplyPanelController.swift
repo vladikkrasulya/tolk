@@ -356,7 +356,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     private func resetRefine() {
         refiner.cancel()
         beforeRefine = nil
-        refineButton?.title = "Отредактировать"
+        refineButton?.title = "Править"
     }
 
     @objc private func refineClicked() {
@@ -364,7 +364,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
             beforeRefine = nil
             translation = old
             setOutput(old, placeholder: false)
-            refineButton.title = "Отредактировать"
+            refineButton.title = "Править"
             live.reset()
             updateButtons()
             return
@@ -667,15 +667,19 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         insertButton.keyEquivalent = "\r"
         insertButton.keyEquivalentModifierMask = .command
         insertButton.toolTip = "Вернуться в чат и вставить ответ (отправите сами)"
-        refineButton = NSButton(title: "Отредактировать", target: self, action: #selector(refineClicked))
-        refineButton.toolTip = "Второй проход: убрать кальки, сохранить смысл"
+        refineButton = NSButton(title: "Править", target: self, action: #selector(refineClicked))
+        refineButton.toolTip = "Отредактировать: второй проход, убрать кальки, сохранить смысл"
         for b in [copyButton!, insertButton!, refineButton!] {
             b.bezelStyle = .push
             b.controlSize = .small
             b.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         }
         refineButton.isEnabled = false
-        refineButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // Labels are never cut: «Править» is short enough for the footer; the buttons keep their full width.
+        for b in [copyButton!, insertButton!, refineButton!] {
+            b.setContentCompressionResistancePriority(.required, for: .horizontal)
+            b.setContentHuggingPriority(.required, for: .horizontal)
+        }
         let footer = NSStackView(views: [toneControl, UIFactory.spacer(), refineButton, copyButton, insertButton])
         footer.orientation = .horizontal
         footer.spacing = 6

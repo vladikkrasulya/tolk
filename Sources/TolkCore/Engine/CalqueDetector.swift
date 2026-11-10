@@ -58,6 +58,13 @@ public enum CalqueDetector {
         (.russian, "ru-delat-dengi", "делать\\s+деньги|делает\\s+деньги", "зарабатывать"),
         (.russian, "ru-obnovit-vas", "обновлю\\s+вас|обновить\\s+вас|обновит\\s+вас", "сообщу / держать в курсе"),
         (.russian, "ru-bud-proinf", "будьте\\s+проинформированы|пожалуйста,\\s+будьте\\s+проинформированы", "обратите внимание"),
+        (.russian, "ru-primite-k-svedeniyu", "(?:пожалуйста,\\s+)?примите\\s+к\\s+сведению", "обратите внимание"),
+        (.russian, "ru-posovetuyte", "пожалуйста,?\\s+посоветуйте|посоветуйте\\s+(?:нам\\s+)?(?:следующие|дальнейшие)", "подскажите, как действовать"),
+        (.russian, "ru-dvigayas-vpered", "двигаясь\\s+вперёд|двигаясь\\s+вперед|движение\\s+вперёд|движение\\s+вперед", "в дальнейшем"),
+        (.russian, "ru-po-krugu", "(?:вернёмся|вернемся|вернуться)\\s+по\\s+кругу|ходить\\s+по\\s+кругу", "вернёмся к этому"),
+        (.russian, "ru-na-vashem-kontse", "на\\s+вашем\\s+конце|с\\s+вашего\\s+конца|в\\s+вашем\\s+конце", "у вас / с вашей стороны"),
+        (.russian, "ru-pervuyu-vesch", "(?:в\\s+)?первую\\s+вещь", "первым делом"),
+        (.russian, "ru-sootv-zvonku", "(?:в\\s+соответствии\\s+с|согласно|по)\\s+нашему\\s+(?:звонку|созвону)", "как договорились на созвоне"),
         (.russian, "ru-prinyat-resheniye", "сдела(?:ть|л|ла|ли)\\s+решение", "принять решение"),
         // — English —
         (.english, "en-kindly-ask", "I\\s+kindly\\s+ask\\s+you", "Could you please"),
@@ -80,6 +87,10 @@ public enum CalqueDetector {
         (.english, "en-in-attachment", "(?:please\\s+)?find\\s+in\\s+(?:the\\s+)?attachment", "please find attached"),
         (.english, "en-please-comma", "(?<![\\p{L}])please,\\s", "please (no comma)"),
         (.english, "en-ill-ask-you", "I(?:'ll|\\s+will|\\s+would\\s+like\\s+to)\\s+ask\\s+you\\s+to", "Please …"),
+        (.english, "en-be-kind", "be\\s+so\\s+kind|be\\s+(?:kind|good)\\s+(?:and|enough)", "please / could you"),
+        (.english, "en-in-touch-all-day", "I(?:\\s+am|'m)\\s+in\\s+touch\\s+(?:all|the\\s+whole)\\s+day", "I'm around all day"),
+        (.english, "en-you-must-see", "you\\s+must\\s+see\\b", "you can see / you clearly see (a conclusion, not an order)"),
+        (.english, "en-i-request-you", "I\\s+request\\s+you\\s+to", "please"),
         (.english, "en-from-our-side", "from\\s+(?:our|your)\\s+side", "on our end / to our feeds / in your traffic (who does what?)"),
     ]
 

@@ -103,6 +103,9 @@ public enum TranslationCheck {
             take(#"(?<![\p{L}\p{N}_\-])[A-Za-z0-9][A-Za-z0-9_\-]{3,}(?![\p{L}\p{N}_])"#, options: []) { s in
                 guard s.contains(where: \.isNumber), s.contains(where: \.isLetter) else { return false }
                 guard s.first!.isLetter || s.contains("-") || s.contains("_") else { return false }
+                // «14-day hold», «30-day», «net-30»: a number with a unit/term, checked as a number, not as an identifier.
+                if s.range(of: #"^\d+-[A-Za-z]+$"#, options: .regularExpression) != nil
+                    || s.range(of: #"^net-?\d+$"#, options: [.regularExpression, .caseInsensitive]) != nil { return false }
                 ids.append(s); return true
             }
             if isSource {

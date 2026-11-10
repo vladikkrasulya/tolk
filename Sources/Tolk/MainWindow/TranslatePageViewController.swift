@@ -270,14 +270,18 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         open(text)
     }
 
-    /// The popup's «Варианты»: the same request as the popup made (its tone and chat context), so the translation
-    /// comes from the cache, and «Подобрать варианты» starts by itself when the translation is on screen.
-    func load(text: String, tone popupTone: Tone, threadContext: String?, suggestVariants: Bool) {
+    /// The popup's «Открыть в окне» / «Варианты»: the same request as the popup made (languages, tone, chat context),
+    /// so the translation comes from the cache; the tone switch shows what the popup showed (e.g. «Авто»).
+    /// «Подобрать варианты» starts by itself when the translation is on screen.
+    func load(_ h: PopupHandoff, suggestVariants: Bool) {
         loadViewIfNeeded()
-        loadedTone = popupTone
-        loadedThread = threadContext
+        loadedTone = h.requestTone
+        loadedThread = h.threadContext
         pendingVariants = suggestVariants
-        open(text)
+        sourcePopup.selectItem(at: index(of: h.source))
+        targetPopup.selectItem(at: index(of: h.target))
+        open(h.text)
+        toneControl.selectedSegment = Tone.allCases.firstIndex(of: h.displayTone) ?? 0
     }
 
     private func open(_ text: String) {
