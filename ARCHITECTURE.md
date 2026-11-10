@@ -298,3 +298,8 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   ⌃⌥L maps punctuation of the other layout and fixes short words by sentence context; truncated buttons fixed;
   «Перевод при наборе» reads NSTextView-based fields (TextEdit) and logs every early exit; sidebar click; per-period
   median latency in the statistics. Self-test: 777 checks.
+
+- Style memory key moved from the Keychain to `~/Library/Application Support/Tolk/style.key` (0600): with a self-made
+  certificate the Keychain tied «Always Allow» to the exact build, so every rebuild asked for the password. An old
+  Keychain key is read once, moved to the file and deleted; a denied read keeps it and pauses style memory instead of
+  replacing the key (which used to make style.db unreadable).

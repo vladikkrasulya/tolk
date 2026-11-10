@@ -2,8 +2,8 @@
 // offers a few similar earlier messages as style examples for the autocomplete prompt.
 //
 // Storage: ~/Library/Application Support/Tolk/style.db — one line per record, each line is
-// base64(AES-GCM combined box) of a JSON record {t,a,d}. The 256-bit key lives in the Keychain
-// (generic password, service "local.vk.tolk.style"). Last ~3000 records are kept.
+// base64(AES-GCM combined box) of a JSON record {t,a,d}. The 256-bit key lives in style.key (0600) next to it;
+// an older key in the Keychain (service "local.vk.tolk.style") is moved there once. Last ~3000 records are kept.
 // Logs contain counts and lengths only, never text.
 import Foundation
 import CryptoKit
@@ -49,6 +49,67 @@ final class KeychainKeyStore: StyleKeyStore, @unchecked Sendable {
     }
 
     func delete() { SecItemDelete(query as CFDictionary) }
+
+    /// Reads an existing key without creating one (nil = no item, or the user denied access).
+    func loadExisting() -> SymmetricKey? {
+        var q = query
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var out: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data, d.count == 32 else { return nil }
+        return SymmetricKey(data: d)
+    }
+
+    /// Is there an item at all (no data read → no access prompt)?
+    var hasItem: Bool {
+        var q = query
+        q[kSecReturnAttributes as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        return SecItemCopyMatching(q as CFDictionary, nil) == errSecSuccess
+    }
+}
+
+/// The key in a 0600 file next to style.db (`style.key`). Why not the Keychain: Tolk is signed with a self-made
+/// certificate, and the Keychain ties «Always Allow» to the exact build, so every rebuild asked for the password
+/// again. The file has the same protection as the rest of Tolk's data (history.jsonl is 0600 too).
+/// Migration: an existing Keychain key is read once (one last prompt), written to the file and removed from the
+/// Keychain. If that read is denied, the old key is kept untouched and nothing new is created — style.db stays
+/// readable once access is allowed (before, a denied prompt silently replaced the key and lost the data).
+final class FileKeyStore: StyleKeyStore, @unchecked Sendable {
+    private let url: URL
+    private let legacy = KeychainKeyStore()
+
+    init(directory: URL) { url = directory.appendingPathComponent("style.key") }
+
+    func loadOrCreate() -> SymmetricKey? {
+        if let d = try? Data(contentsOf: url), d.count == 32 { return SymmetricKey(data: d) }
+        if legacy.hasItem {
+            guard let old = legacy.loadExisting() else {
+                Diagnostics.log("style: keychain key not readable (access denied?) — kept, style memory paused")
+                return nil
+            }
+            guard write(old) else { return nil }
+            legacy.delete()
+            Diagnostics.log("style: key moved from keychain to style.key")
+            return old
+        }
+        let key = SymmetricKey(size: .bits256)
+        return write(key) ? key : nil
+    }
+
+    func delete() {
+        try? FileManager.default.removeItem(at: url)
+        legacy.delete()
+    }
+
+    private func write(_ key: SymmetricKey) -> Bool {
+        let data = key.withUnsafeBytes { Data($0) }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard fm.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600]) else { return false }
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        return true
+    }
 }
 
 @MainActor
@@ -81,10 +142,11 @@ final class StyleMemory {
     var generation = 0
     private var observer: NSObjectProtocol?
 
-    init(url: URL? = nil, keys: StyleKeyStore = KeychainKeyStore()) {
-        self.url = url ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    init(url: URL? = nil, keys: StyleKeyStore? = nil) {
+        let dbURL = url ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Tolk/style.db")
-        self.keys = keys
+        self.url = dbURL
+        self.keys = keys ?? FileKeyStore(directory: dbURL.deletingLastPathComponent())
     }
 
     var count: Int { entries.count }
