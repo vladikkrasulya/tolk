@@ -237,3 +237,17 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   style learning is on) before the screen conversation.
 - Wording unified (Копировать, Письмо, Отмена, one fallback notice, no raw errors); reply window no longer animates per
   token. Self-test: 555 checks.
+
+## v0.6.7 — autocomplete like Cotypist
+- A suggestion is requested on every keystroke: 20 ms pause (60 ms when keys come < 110 ms apart, so the single
+  llama-server slot does not queue), stale requests are cancelled. Measured on the 54-case set by replaying typing
+  letter by letter: cases where a right suggestion appeared 14 → 23 (+64 %) at the same first-word precision (61–63 %).
+- Thresholds (`TolkCore/AutocompleteTuning.swift`): rare 0.6/0.35, normal 0.5/0.35, often 0.3/0.3 — below 0.5 only
+  wrong suggestions are added.
+- Word choice (off / medium / strong): `logit_bias` towards the first tokens of the user's frequent words (accepted
+  suggestions + sent messages, only with style learning). No measurable gain on the case set; kept as an option.
+- Style memory records only messages with an accepted suggestion by default (option: record everything).
+- ⌥Tab is a plain Tab; Esc pauses suggestions in this field until the field or app changes. No suggestions in search
+  fields, address bars, table cells and small or login/email/IBAN fields.
+- Studied: KeyType and TabType (MIT): both use raw prompts + token healing and request per keystroke; notes in the
+  side-session report. Self-test: 575 checks.

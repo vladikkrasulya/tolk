@@ -22,13 +22,11 @@ enum AutocompleteFeatures {
         config.autocompleteFrequency = power.frequency
         config.autocompleteLength = power.length
 
-        // Frequency → confidence thresholds (measured in autocomplete-eval.md, round 3):
-        // rare 0.6 ≈ 67 % right / 17 % shown; normal 0.4 ≈ 45 % / 30 %; often 0.25 ≈ 35 % / 45 %.
-        switch config.autocompleteFrequency {
-        case "rare":  AutocompletePrompt.firstTokenProb = 0.6;  AutocompletePrompt.minTokenProb = 0.35
-        case "often": AutocompletePrompt.firstTokenProb = 0.25; AutocompletePrompt.minTokenProb = 0.25
-        default:      AutocompletePrompt.firstTokenProb = 0.4;  AutocompletePrompt.minTokenProb = 0.3
-        }
+        // Frequency → confidence thresholds (curve on 54 cases with a request on every key, see AutocompleteTuning.thresholds):
+        // rare 0.6 ≈ 63 % right; normal 0.5 ≈ 60 %; often 0.3 ≈ 53 %. Below 0.5 only wrong suggestions are added.
+        let th = AutocompleteTuning.thresholds(frequency: config.autocompleteFrequency)
+        AutocompletePrompt.firstTokenProb = th.first
+        AutocompletePrompt.minTokenProb = th.next
 
         // MARK: [autocorrect] — typo fixes (section owned by the autocorrect feature)
         if config.autocorrect {
@@ -68,10 +66,13 @@ enum AutocompleteFeatures {
             c.onAccepted = { [weak c] a in
                 prevAccepted?(a)
                 guard StyleMemory.shared.generation == gen else { return }
-                StyleMemory.shared.handle(a, disabledApps: c?.offApps ?? AutocompleteSafety.builtinOffApps)
+                StyleMemory.shared.handle(a, disabledApps: c?.offApps ?? AutocompleteSafety.builtinOffApps, recordAll: config.autocompleteRecordAll)
             }
+            c.wordBiasMode = config.autocompleteWordPreference
+            c.wordBiasTexts = { StyleMemory.shared.allTexts() }
         }
 
+        if !(config.autocomplete && config.autocompleteLearnStyle) { c.wordBiasMode = "off" }
         c.instantProviders = providers
         _ = config
     }

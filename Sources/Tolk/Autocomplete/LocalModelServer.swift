@@ -228,6 +228,9 @@ struct CompletionClient {
             "cache_prompt": true,
             "n_probs": 1,   // per-token probabilities → AutocompletePrompt.confidentPrefix
         ]
+        if !AutocompletePrompt.logitBias.isEmpty {
+            body["logit_bias"] = AutocompletePrompt.logitBias.map { [$0.token, $0.bias] as [Any] }   // «Выбор слов» (WordBias)
+        }
         if let lit = healLiteral, !lit.isEmpty {
             body["grammar"] = AutocompleteHealing.grammar(forLiteral: lit)
             body["n_probs"] = 20   // alternatives for the first free token (renormalised in AutocompleteHealing.strip)

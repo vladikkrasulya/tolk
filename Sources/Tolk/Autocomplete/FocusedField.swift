@@ -22,6 +22,18 @@ struct FocusedField {
     var rightLimit: CGFloat? = nil
     /// The focused AX element, to tell "same field" from "another field with the same text" (nil in tests).
     var element: AXUIElement? = nil
+    /// AX role / subrole / parent role / labels / size of the field (empty or nil when the read was the quick one).
+    var role = ""
+    var subrole = ""
+    var parentRole = ""
+    var labels: [String] = []
+    var size: CGSize? = nil
+
+    /// nil = suggestions are fine here; otherwise why not (search, address bar, table cell, tiny field).
+    var skipReason: String? {
+        AutocompleteTuning.fieldSkipReason(role: role, subrole: subrole, parentRole: parentRole,
+                                           width: size.map { Double($0.width) }, height: size.map { Double($0.height) }, labels: labels)
+    }
 
     static let contextLimit = 1500
 
@@ -141,13 +153,26 @@ struct FocusedField {
                 }
             }
         }
+        // Role, labels and size of the field (full read only: size and parent cost two more AX calls) for `AutocompleteTuning.fieldSkipReason`.
+        func finish(_ r: Raw) -> FocusedField {
+            var f = make(app, r, el, budget)
+            f.role = role; f.subrole = sub; f.labels = labels
+            if !budget.light, !budget.expired {
+                f.parentRole = (attr(el, kAXParentAttribute) as AXUIElement?).flatMap { attr($0, kAXRoleAttribute) as String? } ?? ""
+                if let sv: AXValue = attr(el, kAXSizeAttribute) {
+                    var sz = CGSize.zero
+                    if AXValueGetValue(sv, .cgSize, &sz), sz.width > 0, sz.height > 0 { f.size = sz }
+                }
+            }
+            return f
+        }
         let info = "role=\(role) sub=\(sub) via=\(via) settable=\(settable.boolValue) range=\(hasRange) markers=\(hasMarkers) editable=\(editable)"
         guard editable else { return .failure(Refusal(reason: "step=not-editable \(info)")) }
 
         // 1) Classic CFRange attributes.
         if hasRange {
             switch readByRange(el, budget) {
-            case .success(let r): return .success(make(app, r, el, budget))
+            case .success(let r): return .success(finish(r))
             case .failure(let why):
                 if !hasMarkers { return .failure(Refusal(reason: "step=\(why.reason) \(info)")) }
             }
@@ -155,7 +180,7 @@ struct FocusedField {
         // 2) Text markers (Chromium/WebKit when CFRange is not supported).
         if hasMarkers {
             switch readByMarkers(el, budget) {
-            case .success(let r): return .success(make(app, r, el, budget))
+            case .success(let r): return .success(finish(r))
             case .failure(let why): return .failure(Refusal(reason: "step=markers:\(why.reason) \(info)"))
             }
         }

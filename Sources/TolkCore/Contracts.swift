@@ -350,6 +350,10 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public var autocorrect: Bool = true
     /// Remember accepted/sent phrases locally and use them as style examples.
     public var autocompleteLearnStyle: Bool = false
+    /// Remember every sent message (true) or only messages where a suggestion was accepted (false, the default).
+    public var autocompleteRecordAll: Bool = false
+    /// Preference for the user's own words in suggestions: "off", "medium" (default) or "strong". Works with style learning on.
+    public var autocompleteWordPreference: String = "medium"
     /// How often suggestions appear: "rare" (only confident), "normal", "often".
     public var autocompleteFrequency: String = "normal"
     /// Context from a screen snapshot (OCR) when the window text via Accessibility is too short.
@@ -376,7 +380,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         case remoteURL, remoteHeaders, toneByApp
         case autocomplete, autocompleteModel, autocompleteOffApps
         case autocompleteLength, autocompleteInstructions, autocompleteAppInstructions, autocompleteUseGlossary
-        case autocompleteClipboard, autocompleteEmoji, autocorrect, autocompleteLearnStyle, autocompleteFrequency
+        case autocompleteClipboard, autocompleteEmoji, autocorrect, autocompleteLearnStyle, autocompleteFrequency, autocompleteRecordAll, autocompleteWordPreference
         case autocompleteScreenContext, autocompleteBatteryRare, autocompleteBatteryNoScreen, autocompleteBatteryShort, typeTranslateApps, typeTranslateAuto
     }
 
@@ -416,6 +420,8 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         autocorrect = try c.decodeIfPresent(Bool.self, forKey: .autocorrect) ?? d.autocorrect
         autocompleteLearnStyle = try c.decodeIfPresent(Bool.self, forKey: .autocompleteLearnStyle) ?? d.autocompleteLearnStyle
         autocompleteFrequency = try c.decodeIfPresent(String.self, forKey: .autocompleteFrequency) ?? d.autocompleteFrequency
+        autocompleteRecordAll = try c.decodeIfPresent(Bool.self, forKey: .autocompleteRecordAll) ?? d.autocompleteRecordAll
+        autocompleteWordPreference = try c.decodeIfPresent(String.self, forKey: .autocompleteWordPreference) ?? d.autocompleteWordPreference
         autocompleteScreenContext = try c.decodeIfPresent(Bool.self, forKey: .autocompleteScreenContext) ?? d.autocompleteScreenContext
         autocompleteBatteryRare = try c.decodeIfPresent(Bool.self, forKey: .autocompleteBatteryRare) ?? d.autocompleteBatteryRare
         autocompleteBatteryNoScreen = try c.decodeIfPresent(Bool.self, forKey: .autocompleteBatteryNoScreen) ?? d.autocompleteBatteryNoScreen
@@ -450,6 +456,8 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         try c.encode(autocorrect, forKey: .autocorrect)
         try c.encode(autocompleteLearnStyle, forKey: .autocompleteLearnStyle)
         try c.encode(autocompleteFrequency, forKey: .autocompleteFrequency)
+        try c.encode(autocompleteRecordAll, forKey: .autocompleteRecordAll)
+        try c.encode(autocompleteWordPreference, forKey: .autocompleteWordPreference)
         try c.encode(autocompleteScreenContext, forKey: .autocompleteScreenContext)
         try c.encode(autocompleteBatteryRare, forKey: .autocompleteBatteryRare)
         try c.encode(autocompleteBatteryNoScreen, forKey: .autocompleteBatteryNoScreen)

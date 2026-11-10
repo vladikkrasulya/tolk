@@ -27,6 +27,8 @@ enum AutocompletePrompt {
     nonisolated(unsafe) static var useChatPrefill = true
     /// Set by `CompletionClient.probeFormat()` once the server is up.
     nonisolated(unsafe) static var chatTemplateAvailable = false
+    /// Token → bias for the user's own words (`WordBias`); empty = off.
+    nonisolated(unsafe) static var logitBias: [(token: Int, bias: Double)] = []
     /// Letters the reply must start with (healing); `CompletionClient` reads it right after `prompt(...)`.
     nonisolated(unsafe) static var lastHealLiteral: String?
 

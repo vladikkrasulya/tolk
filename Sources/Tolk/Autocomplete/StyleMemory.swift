@@ -108,11 +108,16 @@ final class StyleMemory {
         }
     }
 
-    func handle(_ a: AcceptedText, disabledApps: Set<String>) {
+    /// Texts of all records (for the word list of «Выбор слов»; kept in memory only).
+    func allTexts() -> [String] { entries.map(\.rec.t) }
+
+    func handle(_ a: AcceptedText, disabledApps: Set<String>, recordAll: Bool = true) {
         if let id = a.bundleID, disabledApps.contains(id) { return }
         let text: String
         switch a.kind {
-        case .sent: text = a.textBefore
+        case .sent:
+            guard AutocompleteTuning.recordSent(recordAll: recordAll, hadAccepted: a.hadAccepted) else { return }
+            text = a.textBefore
         case .all: text = Self.lastSentence(of: a.textBefore + a.accepted)
         case .word: return
         }

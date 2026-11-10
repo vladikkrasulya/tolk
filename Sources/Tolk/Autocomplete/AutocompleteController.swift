@@ -58,12 +58,25 @@ final class AutocompleteController {
     /// Text before the caret when the current suggestion was shown (for `onAccepted`).
     private var shownTextBefore = ""
     private var shownBundleID: String?
-    /// After Esc nothing is requested until the user types a character.
+    /// After Esc nothing is requested in this field: until a click, an app switch, Tab, Return or a ⌘/⌃ key
+    /// (`AutocompleteTuning.endsPause`) — the user has probably moved on.
     private var suppressed = false
+    /// When the previous printing key arrived (to pick the pause before the request).
+    private var lastKeyAt: Date?
+    /// A suggestion was accepted while the current message was being written (for «remember only such messages»).
+    private var acceptedInMessage = false
+    /// «Выбор слов»: off / medium / strong, and where the user's texts come from. Only used with style learning on.
+    var wordBiasMode = "off"
+    var wordBiasTexts: (() -> [String])?
+    private let wordBias = WordBias()
+    private var lastSkipLog = ""
     private var generation = 0
     private var pending: Task<Void, Never>?
 
-    private static let debounce: Duration = .milliseconds(150)
+    /// Pause before a request: 20 ms, 60 ms while the user types fast (measurements in `AutocompleteTuning`).
+    private func debounce() -> Duration {
+        .milliseconds(AutocompleteTuning.debounceMs(sinceLastKey: lastKeyAt.map { Date().timeIntervalSince($0) }))
+    }
     private static let repositionDelay: Duration = .milliseconds(50)
     private static let ownPID = ProcessInfo.processInfo.processIdentifier
     private static let modifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
@@ -187,6 +200,7 @@ final class AutocompleteController {
         case .leftMouseDown, .rightMouseDown:
             if event.getIntegerValueField(.eventSourceUserData) == DoubleCopyMonitor.syntheticMarker { return false }
             typeTranslate?.noteClick()
+            suppressed = false
             cancelPending()
             hide(reason: "click")
             recentTyped = ""
@@ -232,13 +246,25 @@ final class AutocompleteController {
         // Screenshot shortcuts (⌘⇧3/4/5) must not disturb a visible suggestion or a running request.
         if mods == [.maskCommand, .maskShift], [20, 21, 23].contains(code) { return false }
         let typed = Self.typedText(event)
+        if suppressed, AutocompleteTuning.endsPause(keyCode: code, command: mods.contains(.maskCommand), control: mods.contains(.maskControl)) {
+            suppressed = false
+        }
+
+        // ⌥Tab = an ordinary Tab: the suggestion is not accepted, the app gets a plain Tab.
+        if code == Key.tab, mods == [.maskAlternate], suggestion != nil || instant != nil {
+            cancelPending()
+            hide(reason: "plain-tab", dismissed: false)
+            event.flags.remove(.maskAlternate)
+            return false
+        }
 
         // Return sends the message in chats: report it for style learning (before the app clears the field).
         if modelEnabled, (code == 36 || code == 76), mods.isEmpty, let onAccepted, let f = FocusedField.readQuick(), f.pid != Self.ownPID,
            !isOff(f.bundleID) {
             let msg = (f.textBefore + f.restOfLine).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !msg.isEmpty { onAccepted(AcceptedText(kind: .sent, bundleID: f.bundleID, textBefore: msg, accepted: "")) }
+            if !msg.isEmpty { onAccepted(AcceptedText(kind: .sent, bundleID: f.bundleID, textBefore: msg, accepted: "", hadAccepted: acceptedInMessage)) }
         }
+        if code == 36 || code == 76, mods.isEmpty { acceptedInMessage = false }
 
         if instant != nil {
             // A stale suggestion (focus or text changed under it) is dropped and the key goes to the app.
@@ -262,7 +288,6 @@ final class AutocompleteController {
             }
             // The user types what the suggestion already says: keep it, just shorten it.
             if mods.isDisjoint(with: [.maskCommand, .maskControl]), let typed, let s = suggestion, s.hasPrefix(typed) {
-                suppressed = false
                 consumed(typed)
                 return false
             }
@@ -273,9 +298,8 @@ final class AutocompleteController {
         let printing = typed != nil && mods.isDisjoint(with: [.maskCommand, .maskControl])
         if !modelEnabled {
             if printing, let typed {
-                suppressed = false
                 recentTyped = String((recentTyped + typed).suffix(40))
-                if Self.instantWorthChecking(recentTyped) { scheduleRequest(after: Self.debounce) }
+                if Self.instantWorthChecking(recentTyped) { scheduleRequest(after: debounce()) }
             } else if code == 51, mods.isEmpty, !recentTyped.isEmpty {
                 recentTyped.removeLast()
             } else {
@@ -284,11 +308,11 @@ final class AutocompleteController {
             return false
         }
         if printing {
-            suppressed = false
+            lastKeyAt = Date()
             if let pid = front?.processIdentifier, pid != Self.ownPID {
                 screenContext.prepare(pid: pid)   // first keystroke in a field: gather context ahead of the request
             }
-            scheduleRequest(after: Self.debounce)
+            scheduleRequest(after: debounce())
         }
         return false
     }
@@ -363,7 +387,7 @@ final class AutocompleteController {
         cancelPending()
         if rest.isEmpty {
             hide(reason: "consumed", dismissed: false)
-            scheduleRequest(after: Self.debounce)
+            scheduleRequest(after: debounce())
         } else {
             suggestion = rest
             scheduleReposition()
@@ -417,6 +441,8 @@ final class AutocompleteController {
         let beforeInsert = insertVerified(word, kind: "word", field: verified)
         Diagnostics.log("autocomplete: accepted word len=\(word.count)")
         stats.acceptedWord(model: statsModel, app: shownBundleID, word: word); onStatsChanged?()
+        acceptedInMessage = true
+        wordBias.noteAccepted(word)
         onAccepted?(AcceptedText(kind: .word, bundleID: shownBundleID, textBefore: shownTextBefore, accepted: word))
         shownTextBefore += word
         anchor?.snap.textBefore += word
@@ -437,10 +463,11 @@ final class AutocompleteController {
         insertVerified(s, kind: "all", field: verified)
         Diagnostics.log("autocomplete: accepted all len=\(s.count)")
         stats.acceptedAll(model: statsModel, app: shownBundleID, text: s); onStatsChanged?()
+        acceptedInMessage = true
+        wordBias.noteAccepted(s)
         onAccepted?(AcceptedText(kind: .all, bundleID: shownBundleID, textBefore: shownTextBefore, accepted: s))
         cancelPending()
         hide(reason: "accepted-all", dismissed: false)
-        suppressed = false
         return true
     }
 
@@ -605,6 +632,12 @@ final class AutocompleteController {
         }
         if instant != nil { return }
         guard modelEnabled, server.state == .ready else { return }
+        if let why = field.skipReason {
+            let key = "\(field.bundleID ?? "?"):\(why)"
+            if key != lastSkipLog { lastSkipLog = key; Diagnostics.log("autocomplete: small/search field skipped (\(why)) app=\(field.bundleID ?? "?") role=\(field.role) sub=\(field.subrole)") }
+            return
+        }
+        wordBias.refreshIfNeeded(baseURL: server.baseURL, model: server.modelPath, mode: wordBiasMode, texts: wordBiasTexts)
 
         let trimmed = field.textBefore.filter { !$0.isWhitespace }
         guard trimmed.count >= 4, let last = field.textBefore.last, !last.isNewline else { return }
@@ -657,6 +690,8 @@ final class AutocompleteController {
     private func activeAppChanged(_ app: NSRunningApplication?) {
         screenContext.reset()
         typeTranslate?.appChanged()
+        suppressed = false
+        acceptedInMessage = false
         cancelPending()
         hide(reason: "appSwitch")
         recentTyped = ""

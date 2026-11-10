@@ -36,6 +36,8 @@ struct AcceptedText {
     /// For .word/.all: text before the caret when the suggestion was shown. For .sent: the whole message.
     var textBefore: String
     var accepted: String
+    /// For .sent: a suggestion was accepted while this message was written.
+    var hadAccepted = false
 }
 
 /// Synchronous providers called before the model. First non-nil wins.

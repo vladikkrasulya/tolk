@@ -26,6 +26,7 @@ public enum SelfTest {
         autocompleteServer(check)
         acStats(check)
         autocompleteHealing(check)
+        autocompleteTuning(check)
         screenContextRefresh(check)
         refineGuard(check)
         bigWindow(check)

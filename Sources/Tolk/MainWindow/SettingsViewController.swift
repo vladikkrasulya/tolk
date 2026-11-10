@@ -718,7 +718,15 @@ struct SettingsView: View {
     private var acStyleSection: some View {
         Section {
             Toggle("Учиться на моих сообщениях", isOn: $model.config.autocompleteLearnStyle)
-            hint("Принятые подсказки и отправленные сообщения запоминаются только на этом Mac и подсказывают модели ваш стиль.")
+            hint("Запоминаются только на этом Mac: сообщения, в которых вы приняли подсказку, и сами принятые фразы. Они подсказывают модели ваш стиль и слова.")
+            Toggle("Запоминать все отправленные сообщения", isOn: $model.config.autocompleteRecordAll)
+            hint("По умолчанию выключено: в память попадают только сообщения с принятой подсказкой.")
+            Picker("Выбор слов", selection: $model.config.autocompleteWordPreference) {
+                Text("Выключен").tag("off")
+                Text("Средний").tag("medium")
+                Text("Сильный").tag("strong")
+            }
+            hint("Модель охотнее предлагает слова, которые вы часто пишете сами. Работает, только пока включено «Учиться на моих сообщениях».")
             Button("Удалить выученное…", role: .destructive) { model.confirmDeleteLearned() }
         } header: {
             Text("Ваш стиль")
