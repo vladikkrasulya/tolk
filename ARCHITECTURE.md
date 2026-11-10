@@ -159,3 +159,17 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Editor pass guard (`RefineGuard` in `Refine.swift`): the edit is dropped if it removes a final «?», changes or drops
   the greeting, or is empty. The edited text is buffered and shown at once (no streaming).
 - Self-test: 197 checks.
+
+## v0.6.4 (in progress) — big translate window
+- Translate page hints panel (`UI/TranslationHintsPanel.swift`): 3rd column ≥1000 pt wide, below the translation when
+  narrower. Cards: check warnings, footnotes, back-translation, word alternatives, add to glossary, editor diff.
+  Shared with the popup via `UI/HintsKit.swift` (`HintsSettings`, `HintTask`, `BackTranslationJob`, `NoteRow`,
+  `GlossaryFormView`); same `UserDefaults` switches (`tolk.popup.notes`, `tolk.popup.back`). Requests start 1.5 s after
+  a finished translation, any typing cancels them, at most two at once (Ollama has two slots).
+- Offscreen render for review: `TOLK_HINTS_SHOT=<dir> .build/debug/Tolk --background` (`TranslateHintsDemo.swift`,
+  never ordered on screen).
+- Engine for the big window (`Engine/BigWindowTools.swift`, `Engine/SentencePairs.swift`), not yet in the UI:
+  `SentencePairing.pairs` (no model), `sentenceVariants`, `rewrite` (shorter/softer/firmer/simpler/formal/informal,
+  guarded by `TranslationCheck`, question/greeting and pronoun checks), `translateReply` (detects the partner's
+  language), `explain` (meaning, tone, ≤5 terms). CLI: `--pairs`, `--variants`, `--rewrite`, `--reply-to`, `--explain`.
+- Self-test: 233 checks.

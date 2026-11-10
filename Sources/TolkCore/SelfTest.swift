@@ -24,6 +24,7 @@ public enum SelfTest {
         autocompleteSafety(check)
         autocompleteServer(check)
         refineGuard(check)
+        bigWindow(check)
         return (check.total, check.failures)
     }
 

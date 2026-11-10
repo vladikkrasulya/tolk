@@ -15,7 +15,7 @@ final class PopupPanel: NSPanel {
 
 /// DeepL-style floating popup near the cursor that renders a streaming translation.
 @MainActor
-final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextViewDelegate {
+final class TranslationPopupController: NSObject, NSTextViewDelegate {
     private(set) var engine: TranslationEngine
 
     // Layout
@@ -35,9 +35,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     private var scrollView: NSScrollView!
     private var textView: NSTextView!
     private var textHeight: NSLayoutConstraint!
-    private var glossaryForm: NSStackView!
-    private var termField: NSTextField!
-    private var termTranslationField: NSTextField!
+    private var glossaryForm: GlossaryFormView!
     private var toneControl: NSSegmentedControl!
     private var glossaryButton: NSButton!
     private var copyButton: NSButton!
@@ -49,7 +47,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     private var notesBox: NSStackView!
     private var statusLine: StatusLineView!
     private var notesButton: NSButton!
-    private var notesTask: Task<Void, Never>?
+    private let notesJob = HintTask()
     private var lastProvider = ""
     private var presentGeneration = 0
     private var notesAfterBack = false
@@ -69,7 +67,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     private let refiner = RefineRunner()
     private var beforeRefine: String?
     private var altBox: NSStackView!
-    private var altTask: Task<Void, Never>?
+    private let altJob = HintTask()
     private var altWork: DispatchWorkItem?
 
     // State
@@ -82,17 +80,15 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     private var fellBackFrom: String?
     private var showsPlaceholder = false
     private var mainFinished = false
-    private var backRunner: TranslationRunner
-    private var backTranslation = ""
-    /// Back-translation toggle (remembered): after each translation, translate it back to check meaning.
+    private let backJob = BackTranslationJob()
+    /// The two toggles are shared with the «Перевод» page (HintsSettings).
     private var backEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "tolk.popup.back") }
-        set { UserDefaults.standard.set(newValue, forKey: "tolk.popup.back") }
+        get { HintsSettings.backEnabled }
+        set { HintsSettings.backEnabled = newValue }
     }
-    /// Footnotes toggle (remembered, on by default): notes on debatable industry terms.
     private var notesEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "tolk.popup.notes") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "tolk.popup.notes") }
+        get { HintsSettings.notesEnabled }
+        set { HintsSettings.notesEnabled = newValue }
     }
     /// Recently chosen target languages, newest first.
     private var recentTargets: [Language] {
@@ -116,11 +112,10 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     init(engine: TranslationEngine) {
         self.engine = engine
         self.runner = TranslationRunner(engine: engine)
-        self.backRunner = TranslationRunner(engine: engine)
         super.init()
         runner.onUpdate = { [weak self] in self?.handle($0) }
         runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
-        backRunner.onUpdate = { [weak self] in self?.handleBack($0) }
+        backJob.onUpdate = { [weak self] in self?.handleBack($0) }
     }
 
     // MARK: - Public API
@@ -148,17 +143,15 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         dismiss()
         engine = new
         runner = TranslationRunner(engine: new)
-        backRunner = TranslationRunner(engine: new)
         runner.onUpdate = { [weak self] in self?.handle($0) }
         runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
-        backRunner.onUpdate = { [weak self] in self?.handleBack($0) }
     }
 
     /// Hide at once, no fade: a quick action is about to send ⌘C/⌘V to the app underneath.
     func hideNow() {
         guard let panel, panel.isVisible else { return }
         presentGeneration += 1
-        runner.cancel(); refiner.cancel(); backRunner.cancel(); notesTask?.cancel(); altTask?.cancel(); altWork?.cancel()
+        runner.cancel(); refiner.cancel(); backJob.cancel(); notesJob.cancel(); altJob.cancel(); altWork?.cancel()
         removeMonitors()
         stopWaiting()
         panel.orderOut(nil)
@@ -179,7 +172,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         presentGeneration += 1
         buildIfNeeded()
         runner.cancel(); refiner.cancel()
-        backRunner.cancel()
+        backJob.cancel()
         removeMonitors()
 
         sourceText = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -240,9 +233,9 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
 
     private func dismiss() {
         runner.cancel(); refiner.cancel()
-        backRunner.cancel()
-        notesTask?.cancel()
-        altTask?.cancel()
+        backJob.cancel()
+        notesJob.cancel()
+        altJob.cancel()
         altWork?.cancel()
         removeMonitors()
         copyResetWork?.cancel()
@@ -581,13 +574,11 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
 
     private func loadAlternatives(fragment: String, range: NSRange) {
         guard let src = detectedSource, let dst = detectedTarget else { return }
-        altTask?.cancel()
+        altJob.cancel()
         showAlternatives(fragment: fragment, range: range, options: nil)
         let engine = self.engine, source = sourceText, translated = translation
-        altTask = Task { @MainActor [weak self] in
-            let options = await engine.alternatives(for: fragment, in: translated, source: source, from: src, to: dst)
-            guard let self, !Task.isCancelled, self.translation == translated,
-                  self.textView.selectedRange() == range else { return }
+        altJob.run({ await engine.alternatives(for: fragment, in: translated, source: source, from: src, to: dst) }) { [weak self] options in
+            guard let self, self.translation == translated, self.textView.selectedRange() == range else { return }
             self.showAlternatives(fragment: fragment, range: range, options: options)
         }
     }
@@ -616,7 +607,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     }
 
     private func hideAlternatives() {
-        altTask?.cancel()
+        altJob.cancel()
         guard altBox != nil, !altBox.isHidden else { return }
         altBox.isHidden = true
         updateSize()
@@ -640,8 +631,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     }
 
     private func resetNotes() {
-        notesTask?.cancel()
-        notesTask = nil
+        notesJob.cancel()
         notesButton.state = notesEnabled ? .on : .off
         notesBox.arrangedSubviews.forEach { $0.removeFromSuperview() }
         notesBox.isHidden = true
@@ -652,11 +642,9 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         // Notes come from Qwen; with the Google fallback there is no model to ask.
         guard !UIText.isFallbackProvider(lastProvider), let src = detectedSource, let dst = detectedTarget else { return }
         let source = sourceText, translated = translation, engine = self.engine
-        notesTask?.cancel()
         showNotesLoading()
-        notesTask = Task { @MainActor [weak self] in
-            let notes = await engine.notes(source: source, translation: translated, from: src, to: dst)
-            guard let self, !Task.isCancelled, self.translation == translated else { return }
+        notesJob.run({ await engine.notes(source: source, translation: translated, from: src, to: dst) }) { [weak self] notes in
+            guard let self, self.translation == translated else { return }
             self.showNotes(notes)
         }
     }
@@ -682,39 +670,9 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     }
 
     private func noteRow(_ n: TranslationNote, index: Int) -> NSView {
-        let text = NSMutableAttributedString()
-        let small = NSFont.systemFont(ofSize: 12.5)
-        text.append(NSAttributedString(string: "\(index). ", attributes: [.font: small, .foregroundColor: NSColor.tertiaryLabelColor]))
-        text.append(NSAttributedString(string: n.term, attributes: [.font: NSFont.systemFont(ofSize: 12.5, weight: .semibold), .foregroundColor: NSColor.labelColor]))
-        text.append(NSAttributedString(string: " → «\(n.used)»", attributes: [.font: small, .foregroundColor: NSColor.labelColor]))
-        text.append(NSAttributedString(string: "\n" + n.note, attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
-        let label = NSTextField(labelWithAttributedString: text)
-        label.lineBreakMode = .byWordWrapping
-        label.maximumNumberOfLines = 0
-        label.preferredMaxLayoutWidth = width - inset * 2 - 20
-        label.isSelectable = true
-
-        var buttons: [NSView] = []
-        let keep = ClosureButton(title: "Так и оставить", symbol: "checkmark") { [weak self] in
-            self?.saveNote(term: n.term, value: n.used, retranslate: false)
+        NoteRow.make(n, index: index, width: width - inset * 2 - 20) { [weak self] value, retranslate in
+            self?.saveNote(term: n.term, value: value, retranslate: retranslate)
         }
-        keep.toolTip = "Сохранить «\(n.term) → \(n.used)» в глоссарий"
-        buttons.append(keep)
-        if let sug = n.suggestion {
-            let use = ClosureButton(title: "«\(sug)»", symbol: "arrow.triangle.2.circlepath") { [weak self] in
-                self?.saveNote(term: n.term, value: sug, retranslate: true)
-            }
-            use.toolTip = "Сохранить «\(n.term) → \(sug)» в глоссарий и перевести заново"
-            buttons.append(use)
-        }
-        let row = NSStackView(views: buttons + [UIFactory.spacer()])
-        row.orientation = .horizontal
-        row.spacing = 6
-        let box = NSStackView(views: [label, row])
-        box.orientation = .vertical
-        box.alignment = .leading
-        box.spacing = 4
-        return box
     }
 
     private func saveNote(term: String, value: String, retranslate: Bool) {
@@ -739,15 +697,14 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
             backBox.isHidden = false
             if mainFinished, !translation.isEmpty { startBack() } else { setBack(title: "Обратный перевод", text: "Появится после перевода…", color: .tertiaryLabelColor) }
         } else {
-            backRunner.cancel()
+            backJob.cancel()
             backBox.isHidden = true
         }
         updateSize()
     }
 
     private func resetBack() {
-        backRunner.cancel()
-        backTranslation = ""
+        backJob.cancel()
         backButton.state = backEnabled ? .on : .off
         backBox.isHidden = !backEnabled
         if backEnabled { setBack(title: "Обратный перевод", text: "Появится после перевода…", color: .tertiaryLabelColor) }
@@ -755,22 +712,18 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
 
     private func startBack() {
         guard let src = detectedTarget, let dst = detectedSource else { return }
-        backTranslation = ""
         backBox.isHidden = false
         setBack(title: "Обратно: \(src.flag) → \(dst.flag) \(UIText.capitalized(dst))", text: "Перевожу обратно…", color: .tertiaryLabelColor)
         updateSize()
-        backRunner.start(TranslationRequest(text: translation, source: src, target: dst, tone: .auto))
+        backJob.start(engine: engine, translation: translation, from: src, to: dst)
     }
 
-    private func handleBack(_ update: TranslationRunner.Update) {
+    private func handleBack(_ update: BackTranslationJob.Update) {
         switch update {
-        case .started, .fellBack:
-            backTranslation = ""
-        case let .delta(chunk):
-            backTranslation += chunk
-            setBack(title: nil, text: backTranslation, color: .secondaryLabelColor)
-        case .finished:
-            if backTranslation.isEmpty { setBack(title: nil, text: "—", color: .tertiaryLabelColor) }
+        case let .running(text):
+            if !text.isEmpty { setBack(title: nil, text: text, color: .secondaryLabelColor) }
+        case let .finished(text):
+            if text.isEmpty { setBack(title: nil, text: "—", color: .tertiaryLabelColor) }
             startPendingNotes()
         case let .failed(message):
             setBack(title: nil, text: message, color: .systemRed)
@@ -796,12 +749,11 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     @objc private func toggleGlossaryForm() {
         let show = glossaryForm.isHidden
         if show {
-            termField.stringValue = sourceText.count <= 60 ? sourceText : ""
-            termTranslationField.stringValue = translation.count <= 60
-                ? translation.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            glossaryForm.fill(term: sourceText.count <= 60 ? sourceText : "",
+                              value: translation.count <= 60 ? translation.trimmingCharacters(in: .whitespacesAndNewlines) : "")
         }
         setGlossaryFormVisible(show)
-        if show { panel.makeFirstResponder(termField) }
+        if show { glossaryForm.focusTerm() }
     }
 
     private func setGlossaryFormVisible(_ visible: Bool) {
@@ -810,14 +762,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         updateSize()
     }
 
-    @objc private func saveGlossaryTerm() {
-        let term = termField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = termTranslationField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty, !value.isEmpty else {
-            NSSound.beep()
-            panel.makeFirstResponder(term.isEmpty ? termField : termTranslationField)
-            return
-        }
+    private func saveGlossaryTerm(term: String, value: String) {
         do {
             try engine.addGlossaryTerm(source: term, translation: value)
             setGlossaryFormVisible(false)
@@ -828,22 +773,9 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         }
     }
 
-    @objc private func cancelGlossary() {
+    private func cancelGlossary() {
         setGlossaryFormVisible(false)
         panel.makeFirstResponder(textView)
-    }
-
-    // Enter in the second field saves.
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        if selector == #selector(NSResponder.insertNewline(_:)) {
-            if control === termField { panel.makeFirstResponder(termTranslationField) } else { saveGlossaryTerm() }
-            return true
-        }
-        if selector == #selector(NSResponder.cancelOperation(_:)) {
-            cancelGlossary()
-            return true
-        }
-        return false
     }
 
     // MARK: - Monitors (Esc, click outside)
@@ -1062,35 +994,10 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         textHeight.isActive = true
 
         // Glossary form
-        termField = NSTextField()
-        termField.placeholderString = "Термин"
-        termField.delegate = self
-        termTranslationField = NSTextField()
-        termTranslationField.placeholderString = "Как переводить"
-        termTranslationField.delegate = self
-        [termField, termTranslationField].forEach { $0?.controlSize = .small; $0?.font = .systemFont(ofSize: 12) }
-        let arrow = UIFactory.label("→", size: 12)
-        let save = NSButton(title: "Сохранить", target: self, action: #selector(saveGlossaryTerm))
-        save.controlSize = .small
-        save.bezelStyle = .push
-        save.keyEquivalent = "\r"
-        let cancel = NSButton(title: "Отмена", target: self, action: #selector(cancelGlossary))
-        cancel.controlSize = .small
-        cancel.bezelStyle = .push
-        let fields = NSStackView(views: [termField, arrow, termTranslationField])
-        fields.orientation = .horizontal
-        fields.spacing = 6
-        termField.widthAnchor.constraint(equalTo: termTranslationField.widthAnchor).isActive = true
-        let formButtons = NSStackView(views: [UIFactory.label("Добавить в глоссарий", size: 11, weight: .medium),
-                                              UIFactory.spacer(), cancel, save])
-        formButtons.orientation = .horizontal
-        glossaryForm = NSStackView(views: [fields, formButtons])
-        glossaryForm.orientation = .vertical
-        glossaryForm.alignment = .leading
-        glossaryForm.spacing = 6
+        glossaryForm = GlossaryFormView(defaultButton: true)
         glossaryForm.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 2, right: 0)
-        fields.widthAnchor.constraint(equalTo: glossaryForm.widthAnchor).isActive = true
-        formButtons.widthAnchor.constraint(equalTo: glossaryForm.widthAnchor).isActive = true
+        glossaryForm.onSave = { [weak self] term, value in self?.saveGlossaryTerm(term: term, value: value) }
+        glossaryForm.onCancel = { [weak self] in self?.cancelGlossary() }
         glossaryForm.isHidden = true
 
         // Back-translation: the translation translated back, to check the meaning survived.

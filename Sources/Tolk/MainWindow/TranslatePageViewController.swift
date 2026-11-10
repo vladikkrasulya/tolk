@@ -44,9 +44,12 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             runner.cancel()
             runner = TranslationRunner(engine: engine)
             runner.onUpdate = { [weak self] in self?.handle($0) }
-            runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
+            runner.onStats = { [weak self] in self?.gotStats($0) }
             lastTranslatedRequest = nil
             live.reset()
+            hints?.engine = engine
+            hints?.invalidate()
+            updateHintsVisibility()
             if isViewLoaded {
                 spinner.stopAnimation(nil)
                 DispatchQueue.main.async { [weak self] in self?.translateNow(force: true) }
@@ -101,6 +104,21 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
     private var refineButton: NSButton!
     private var beforeRefine: String?
     private var configObserver: NSObjectProtocol?
+    // Hints panel («Подсказки»)
+    private var hints: TranslationHintsPanel!
+    private var lastProvider = ""
+    private var lastStatsWarnings: [String] = []
+    private var hintsShown = false
+    private var suppressSelection = false
+    private var wideLayout: Bool?
+    private var wideConstraints: [NSLayoutConstraint] = []
+    private var narrowConstraints: [NSLayoutConstraint] = []
+    private var hintsWidth: NSLayoutConstraint!
+    private var hintsGap: NSLayoutConstraint!
+    private var hintsNarrowHeight: NSLayoutConstraint!
+    private var hintsNarrowGap: NSLayoutConstraint!
+    /// Content width from which the panel becomes a third column.
+    static let wideThreshold: CGFloat = 1000
 
     static let inputFontSize: CGFloat = 18
 
@@ -114,7 +132,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         self.runner = TranslationRunner(engine: engine)
         super.init(nibName: nil, bundle: nil)
         runner.onUpdate = { [weak self] in self?.handle($0) }
-        runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
+        runner.onStats = { [weak self] in self?.gotStats($0) }
         configObserver = NotificationCenter.default.addObserver(forName: TolkConfig.didChange, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.live.reset() }
         }
@@ -145,6 +163,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         debounceTask?.cancel()
         runner.cancel()
         refiner.cancel()
+        hints?.invalidate()
         spinner.stopAnimation(nil)
         lastTranslatedRequest = nil
     }
@@ -169,6 +188,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
 
     func textDidChange(_ notification: Notification) {
         updateCounter()
+        hints?.suspend()
         debounceTask?.cancel()
         debounceTask = Task { @MainActor [weak self, debounce] in
             try? await Task.sleep(for: debounce)
@@ -194,13 +214,15 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         debounceTask?.cancel()
         let text = inputView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         let request = TranslationRequest(text: text, source: selectedSource, target: selectedTarget, tone: tone)
-        if !force, request == lastTranslatedRequest { return }
+        if !force, request == lastTranslatedRequest { hints?.resume(); return }
         lastTranslatedRequest = request
         if force { live.reset() } // ⌘↩, engine/profile change, loaded text: one full request
 
         let wasRunning = runner.isRunning
         runner.cancel()
         resetRefine()
+        hints.invalidate()
+        lastStatsWarnings = []
         fellBackFrom = nil
         noticeLabel.isHidden = true
         guard !text.isEmpty else {
@@ -214,6 +236,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             detectedSource = nil
             detectedTarget = nil
             updateStatus()
+            updateHintsVisibility(forceHide: true)
             return
         }
         let key = LiveTranslation.key(source: selectedSource, target: selectedTarget, tone: tone, mode: .translate,
@@ -232,6 +255,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             setOutput(st.kept, color: .labelColor)
             copyButton.isEnabled = !st.kept.isEmpty
             refineButton.isEnabled = !st.kept.isEmpty
+            pushHints(useStats: false)
             return
         }
         copyButton.isEnabled = false
@@ -265,6 +289,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             live.started(source: source, target: target)
             detectedSource = source
             detectedTarget = target
+            lastProvider = provider
             providerBadge.text = UIText.providerName(provider)
             providerBadge.tint = UIText.isFallbackProvider(provider) ? .systemOrange : .secondaryLabelColor
             updateStatus()
@@ -299,6 +324,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             awaitingFirstDelta = false
             if let st = step, !tail.isEmpty { live.commit(st, tail: tail) }
             refineButton.isEnabled = !translation.isEmpty
+            pushHints(useStats: true)
         case let .failed(message):
             statusLine?.failed(message)
             spinner.stopAnimation(nil)
@@ -370,6 +396,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         refiner.cancel()
         beforeRefine = nil
         refineButton?.title = "Отредактировать"
+        hints?.setEditorChange(before: nil, after: nil)
     }
 
     @objc private func refineClicked() {
@@ -379,6 +406,8 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             setOutput(old, color: .labelColor)
             refineButton.title = "Отредактировать"
             live.reset()
+            hints.setEditorChange(before: nil, after: nil)
+            pushHints(useStats: false)
             return
         }
         let source = inputView.string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -390,6 +419,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         refineButton.isEnabled = false
         copyButton.isEnabled = false
         live.reset()
+        hints.invalidate()
         awaitingFirstDelta = false
         refiner.start(engine: engine, source: source, translation: old, from: from, to: to, tone: tone,
                       onDelta: { [weak self] chunk in
@@ -410,6 +440,8 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             }
             self.refineButton.isEnabled = true
             self.copyButton.isEnabled = true
+            self.pushHints(useStats: false)
+            if self.beforeRefine != nil { self.hints.setEditorChange(before: old, after: self.translation) }
         }, onFail: { [weak self] message in
             guard let self else { return }
             self.spinner.stopAnimation(nil)
@@ -417,6 +449,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             self.refineButton.isEnabled = true
             self.copyButton.isEnabled = true
             self.showNotice(message, color: .systemRed)
+            self.pushHints(useStats: false)
         })
     }
 
@@ -445,6 +478,94 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             return true
         }
         return false
+    }
+
+    #if DEBUG
+    // Hooks for the off-screen render (TranslateHintsDemo): no real clicks needed.
+    func debugSelectOutput(_ fragment: String) {
+        let r = (outputView.string as NSString).range(of: fragment)
+        if r.location != NSNotFound { outputView.setSelectedRange(r) }
+    }
+    func debugRefine() { refineClicked() }
+    var debugHintsReady: Bool { hints.hasContext }
+    #endif
+
+    // MARK: - Hints panel
+
+    private func gotStats(_ st: TranslationStats) {
+        statusLine?.finished(st)
+        lastStatsWarnings = st.warnings
+    }
+
+    /// The translation on screen is final: show the checks, and ask for the rest after a pause.
+    private func pushHints(useStats: Bool) {
+        let source = inputView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !translation.isEmpty, !runner.isRunning, !source.isEmpty,
+              let from = selectedSource ?? detectedSource, let to = selectedTarget ?? detectedTarget else { return }
+        hints.ready(source: source, translation: translation, from: from, to: to, provider: lastProvider,
+                    statsWarnings: useStats ? lastStatsWarnings : nil)
+        updateHintsVisibility()
+    }
+
+    /// The panel shows up with the first finished translation and goes away when the input is empty.
+    private func updateHintsVisibility(forceHide: Bool = false) {
+        if forceHide { hintsShown = false } else if hints.hasContext { hintsShown = true }
+        hints.isHidden = !hintsShown
+        hintsWidth?.constant = hintsShown ? 300 : 0
+        hintsGap?.constant = hintsShown ? -12 : 0
+        hintsNarrowHeight?.constant = hintsShown ? 240 : 0
+        hintsNarrowGap?.constant = hintsShown ? 10 : 0
+    }
+
+    /// Wide window: the panel is a third column; narrow: it sits under the two panes.
+    override func viewWillLayout() {
+        super.viewWillLayout()
+        let wide = view.bounds.width >= Self.wideThreshold
+        guard wide != wideLayout, !wideConstraints.isEmpty else { return }
+        wideLayout = wide
+        if wide {
+            NSLayoutConstraint.deactivate(narrowConstraints)
+            NSLayoutConstraint.activate(wideConstraints)
+        } else {
+            NSLayoutConstraint.deactivate(wideConstraints)
+            NSLayoutConstraint.activate(narrowConstraints)
+        }
+    }
+
+    // A word selected (or clicked) in the translation → its alternatives; text selected in the input → glossary term.
+    func textViewDidChangeSelection(_ notification: Notification) {
+        guard !suppressSelection, let tv = notification.object as? NSTextView else { return }
+        let ns = tv.string as NSString
+        let range = tv.selectedRange()
+        guard NSMaxRange(range) <= ns.length else { return }
+        if tv === inputView {
+            let t = range.length > 0 ? ns.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            if !t.isEmpty, t.count <= 60 { hints.suggestTerm(t) }
+            return
+        }
+        guard tv === outputView, hints.hasContext, !runner.isRunning, !translation.isEmpty else { return }
+        if range.length == 0 {
+            // A click on a word selects it.
+            guard NSApp.currentEvent?.type == .leftMouseUp, ns.length > 0 else { return }
+            let word = tv.selectionRange(forProposedRange: NSRange(location: min(range.location, ns.length - 1), length: 0),
+                                         granularity: .selectByWord)
+            if word.length > 0 { tv.setSelectedRange(word) }
+            return
+        }
+        let fragment = ns.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard fragment.count >= 2, range.length <= 60 else { return }
+        hints.fragmentSelected(fragment, range: range)
+    }
+
+    private func replaceInOutput(_ range: NSRange, with text: String) {
+        guard let storage = outputView.textStorage, NSMaxRange(range) <= storage.length else { return }
+        suppressSelection = true
+        storage.replaceCharacters(in: range, with: NSAttributedString(string: text, attributes: textAttributes()))
+        outputView.setSelectedRange(NSRange(location: range.location, length: (text as NSString).length))
+        suppressSelection = false
+        translation = outputView.string
+        live.reset()
+        hints.translationEdited(translation)
     }
 
     // MARK: - Building
@@ -580,6 +701,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         // Output pane
         let (outScroll, outTV) = makeTextPane(editable: false)
         outputView = outTV
+        outputView.delegate = self
         outputView.setAccessibilityLabel("Перевод")
         outputPlaceholderView.placeholder = "Перевод"
         outputPlaceholderView.placeholderFont = .systemFont(ofSize: Self.inputFontSize)
@@ -613,7 +735,13 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         footer.orientation = .horizontal
         footer.spacing = 8
 
-        for v in [leftBar, rightBar, swap, leftCard, rightCard, footer] {
+        hints = TranslationHintsPanel(engine: engine)
+        hints.isHidden = true
+        hints.onRetranslate = { [weak self] in self?.translateNow(force: true) }
+        hints.onReplace = { [weak self] range, text in self?.replaceInOutput(range, with: text) }
+        hints.onRevertEdit = { [weak self] in if self?.beforeRefine != nil { self?.refineClicked() } }
+
+        for v in [leftBar, rightBar, swap, leftCard, rightCard, footer, hints!] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
         }
@@ -625,23 +753,21 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             leftBar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: m + 4),
             leftBar.trailingAnchor.constraint(equalTo: leftCard.trailingAnchor),
             rightBar.topAnchor.constraint(equalTo: leftBar.topAnchor),
+            rightBar.trailingAnchor.constraint(equalTo: rightCard.trailingAnchor, constant: -4),
             rightBar.leadingAnchor.constraint(equalTo: rightCard.leadingAnchor, constant: 26),
-            rightBar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -m - 4),
             leftBar.heightAnchor.constraint(equalToConstant: 28),
             rightBar.heightAnchor.constraint(equalTo: leftBar.heightAnchor),
 
-            swap.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            swap.centerXAnchor.constraint(equalTo: leftCard.trailingAnchor, constant: 6),
             swap.centerYAnchor.constraint(equalTo: leftBar.centerYAnchor),
 
             leftCard.topAnchor.constraint(equalTo: leftBar.bottomAnchor, constant: 10),
             leftCard.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: m),
             rightCard.topAnchor.constraint(equalTo: leftCard.topAnchor),
-            rightCard.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -m),
             rightCard.leadingAnchor.constraint(equalTo: leftCard.trailingAnchor, constant: 12),
             rightCard.widthAnchor.constraint(equalTo: leftCard.widthAnchor),
             rightCard.bottomAnchor.constraint(equalTo: leftCard.bottomAnchor),
 
-            footer.topAnchor.constraint(equalTo: leftCard.bottomAnchor, constant: 10),
             footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: m + 2),
             footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -m),
             footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -14),
@@ -649,6 +775,30 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             root.widthAnchor.constraint(greaterThanOrEqualToConstant: 520),
             root.heightAnchor.constraint(greaterThanOrEqualToConstant: 280),
         ])
+        // Wide: [input][translation][hints]. Narrow: hints under the panes. The set is chosen in viewWillLayout.
+        hintsWidth = hints.widthAnchor.constraint(equalToConstant: 0)
+        hintsNarrowHeight = hints.heightAnchor.constraint(equalToConstant: 0)
+        hintsNarrowHeight.priority = .init(750)
+        hintsNarrowGap = hints.topAnchor.constraint(equalTo: leftCard.bottomAnchor, constant: 0)
+        // rightCard.trailing = hints.leading - gap  (the constant is negative)
+        hintsGap = rightCard.trailingAnchor.constraint(equalTo: hints.leadingAnchor, constant: 0)
+        wideConstraints = [
+            hintsGap,
+            hints.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -m),
+            hintsWidth,
+            hints.topAnchor.constraint(equalTo: leftBar.topAnchor),
+            hints.bottomAnchor.constraint(equalTo: leftCard.bottomAnchor),
+            footer.topAnchor.constraint(equalTo: leftCard.bottomAnchor, constant: 10),
+        ]
+        narrowConstraints = [
+            rightCard.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -m),
+            hints.leadingAnchor.constraint(equalTo: leftCard.leadingAnchor),
+            hints.trailingAnchor.constraint(equalTo: rightCard.trailingAnchor),
+            hintsNarrowGap,
+            hintsNarrowHeight,
+            footer.topAnchor.constraint(equalTo: hints.bottomAnchor, constant: 10),
+            leftCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 140),
+        ]
         // The source popup must not run under the swap button.
         sourcePopup.trailingAnchor.constraint(lessThanOrEqualTo: swap.leadingAnchor, constant: -8).isActive = true
         for p in [sourcePopup!, targetPopup!] {

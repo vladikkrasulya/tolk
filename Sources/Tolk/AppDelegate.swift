@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
+        if ProcessInfo.processInfo.environment["TOLK_HINTS_SHOT"] != nil { TranslateHintsDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_MAIN_DEMO"] != nil { MainWindowDemo.runIfRequested(); return }
         // Dev: TOLK_TEST_OLLAMA=http://127.0.0.1:11999 points this run at a fake server (cold-model / down tests); not saved.
         if let url = ProcessInfo.processInfo.environment["TOLK_TEST_OLLAMA"] { config.ollamaURL = url; config.autocomplete = false }

@@ -21,6 +21,7 @@ var wantRefine = false, selfTest = false
 var contextSource: String?, contextTranslation: String?
 var checkOnly: String?
 var cancelAfter: Double?, addTerm: String?
+var pairsTranslation: String?, variantsCurrent: String?, rewriteMode: RewriteMode?, rewriteTranslation: String?, wantExplain = false
 var words: [String] = []
 // Dev: `tolk-cli --ac-spawn CMD ARGS…` launches CMD the way Tolk launches llama-server (dies with this process), then waits.
 if CommandLine.arguments.dropFirst().first == "--ac-spawn" {
@@ -63,6 +64,12 @@ while let a = args.next() {
     case "--check": checkOnly = value()                      // run only the automatic check: text = source, value = translation
     case "--self-test": selfTest = true                      // engine checks without model or network
     case "--warm": warmOnly = true                          // load the model on vkbox and report the time
+    case "--pairs": pairsTranslation = value()               // text = source; value = translation: sentence pairs (no model)
+    case "--variants": variantsCurrent = value()             // text = source sentence; value = its translation; full texts via --context-*
+    case "--rewrite":                                        // --rewrite MODE TRANSLATION, text = source
+        guard let m = RewriteMode(rawValue: value()) else { fail("--rewrite: " + RewriteMode.allCases.map(\.rawValue).joined(separator: "|") + " TRANSLATION") }
+        rewriteMode = m; rewriteTranslation = value()
+    case "--explain": wantExplain = true                     // text = incoming message: what did they mean
     case "--add-term": addTerm = value()                    // "source => translation"
     case "-h", "--help":
         err("usage: tolk-cli [--from L] [--to L] [--tone auto|chat|formal] [--provider auto|ollama|google] [--show-rules] [--cancel-after SEC] text\n       tolk-cli --add-term 'source => translation'")
@@ -111,6 +118,14 @@ if let checkOnly {
     for w in TranslationCheck.warnings(source: text, translation: checkOnly, from: s, to: t) { print("⚠️ \(w)") }
     exit(0)
 }
+if let pairsTranslation {
+    for p in SentencePairing.pairs(source: text, translation: pairsTranslation) {
+        let a = p.sourceRange(in: text).map { String(text[$0]) } ?? "?"
+        let b = p.translationRange(in: pairsTranslation).map { String(pairsTranslation[$0]) } ?? "?"
+        print("\(p.isConfident ? "✓" : "?") [\(p.source.location),\(p.source.length)] «\(a)»  ⇄  [\(p.translation.location),\(p.translation.length)] «\(b)»")
+    }
+    exit(0)
+}
 let engine: DefaultTranslationEngine
 if let rulesPath {
     // Same engine, but the rules come from this file (e.g. to measure another profile).
@@ -120,10 +135,52 @@ if let rulesPath {
 } else {
     engine = DefaultTranslationEngine(config: config)
 }
+func timed(_ label: String, _ body: @escaping @Sendable () async throws -> Void) -> Never {
+    let t0 = Date(), sem = DispatchSemaphore(value: 0)
+    nonisolated(unsafe) var code: Int32 = 0
+    Task {
+        do { try await body() } catch { err("error: \((error as? LocalizedError)?.errorDescription ?? "\(error)")"); code = 1 }
+        err("[\(label) \(String(format: "%.2fs", Date().timeIntervalSince(t0)))]")
+        sem.signal()
+    }
+    sem.wait(); exit(code)
+}
+let lsrc = source ?? LanguageDetector.detect(text)
+let ldst = target ?? LanguageDetector.defaultTarget(for: lsrc, config: config)
+if let variantsCurrent {
+    timed("variants") {
+        let vs = try await engine.sentenceVariants(sentence: text, current: variantsCurrent, fullSource: contextSource ?? text,
+                                                   fullTranslation: contextTranslation ?? variantsCurrent, from: lsrc, to: ldst, tone: tone)
+        for v in vs { print("• [\(v.label)] \(v.text)") }
+        if vs.isEmpty { print("(нет вариантов)") }
+    }
+}
+if let rewriteMode, let rewriteTranslation {
+    timed("rewrite \(rewriteMode.rawValue)") {
+        let r = try await engine.rewrite(translation: rewriteTranslation, source: text, from: lsrc, to: ldst, mode: rewriteMode)
+        print(r.text)
+        if !r.accepted { err("⚠️ отклонено: \(r.rejection ?? "?") — оставлен исходный текст") }
+        else if !r.changed { err("(без изменений)") }
+        if r.pronounsChecked { err("(местоимения проверены)") }
+    }
+}
+if wantExplain {
+    timed("explain") {
+        let e = try await engine.explain(message: text)
+        print("Смысл: \(e.meaning)\nТон: \(e.tone)")
+        for t in e.terms { print("  • \(t.term) — \(t.meaning)") }
+    }
+}
 var context: TranslationContext?
 if let contextSource, let contextTranslation { context = TranslationContext(source: contextSource, translation: contextTranslation) }
 else if contextSource != nil || contextTranslation != nil { fail("--context-source and --context-translation go together") }
-let request = TranslationRequest(text: text, source: source, target: target, tone: tone, mode: mode, replyTo: replyTo, context: context)
+var request = TranslationRequest(text: text, source: source, target: target, tone: tone, mode: mode, replyTo: replyTo, context: context)
+// A reply answers the partner: the target is the language of THEIR message unless --to is given.
+if let replyTo, target == nil, mode == .translate {
+    let r = engine.replyRequest(message: replyTo, reply: text, tone: tone)
+    request.target = r.target
+    if source == nil { request.source = r.source }
+}
 if showPrompt { print(engine.debugSystemPrompt(for: request)); exit(0) }
 if showRules {
     let selector = [text, replyTo, contextSource].compactMap { $0 }.joined(separator: "\n")

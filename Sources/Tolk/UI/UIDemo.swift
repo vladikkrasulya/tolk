@@ -22,6 +22,20 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
     Спасибо, ждём обратной связи!
     """
 
+    /// What the back-translation of `longRussian` looks like (a bit off on purpose: shows the highlighting).
+    static let backEnglish = """
+    Hi! We reviewed the campaign statistics for last week: CTR grew by 12%, but eCPM \
+    in tiers 2–3 sank, and the SSP fill rate fell to roughly 64%. It seems the problem is the floor price \
+    we raised on Friday. I suggest rolling the floor back to its previous value on the mobile \
+    web segment and at the same time launching an A/B test with dynamic floors on desktop.
+
+    One more question: could you send a fresh ads.txt and confirm that the new seller IDs have been added? \
+    Without it, some DSPs cut the traffic as unauthorized. If everything is fine, by Wednesday we can roll out \
+    the changes to 100% of traffic and bring back the volume.
+
+    Thanks, waiting for your feedback!
+    """
+
     func translate(_ request: TranslationRequest) -> AsyncThrowingStream<TranslationEvent, Error> {
         let mode = self.mode
         return AsyncThrowingStream { c in
@@ -43,7 +57,8 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
                     } else {
                         c.yield(.started(provider: "qwen", source: src, target: dst))
                     }
-                    let text = request.text.count > 80 ? Self.longRussian
+                    let text = request.target == .english && request.source == .russian ? Self.backEnglish
+                        : request.text.count > 80 ? Self.longRussian
                         : "[\(request.tone.rawValue)] " + Self.longRussian.prefix(140) + "…"
                     var chunk = ""
                     for ch in text {
@@ -54,6 +69,10 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
                         }
                     }
                     if !chunk.isEmpty { c.yield(.delta(chunk)) }
+                    var stats = TranslationStats(provider: "gemma-translate", route: .home, firstChunk: 1.7, total: 6.8,
+                                                 outputTokens: 110, tokensExact: true, fallbackReason: nil)
+                    stats.warnings = ["в переводе нет времени 15:30", "потеряна ссылка example.com/ads.txt"]
+                    c.yield(.stats(stats))
                     c.yield(.finished)
                     c.finish()
                 } catch {
@@ -66,6 +85,29 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
 
     func addGlossaryTerm(source: String, translation: String) throws {
         print("[demo] glossary: \(source) -> \(translation)")
+    }
+
+    func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote] {
+        try? await Task.sleep(for: .milliseconds(500))
+        return [
+            TranslationNote(term: "floor price", used: "floor price", suggestion: "минимальная цена",
+                            note: "В RTB/AdTech «floor» — минимальная ставка аукциона; в русской практике чаще «флор» или «минимальная цена»."),
+            TranslationNote(term: "fill rate", used: "fill rate", suggestion: nil,
+                            note: "Доля запросов, на которые пришла хотя бы одна ставка. Обычно не переводят."),
+        ]
+    }
+
+    func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String] {
+        try? await Task.sleep(for: .milliseconds(300))
+        return ["минимальная цена", "порог цены", "флор", "нижняя граница ставки"]
+    }
+
+    func refine(source: String, translation: String, from: Language, to: Language, tone: Tone) -> AsyncThrowingStream<String, Error> {
+        let edited = translation
+            .replacingOccurrences(of: "Мы посмотрели статистику", with: "Мы просмотрели статистику")
+            .replacingOccurrences(of: "Предлагаю откатить", with: "Предлагаю вернуть")
+            .replacingOccurrences(of: "раскатить изменения", with: "выкатить изменения")
+        return AsyncThrowingStream { c in c.yield(edited); c.finish() }
     }
 }
 
