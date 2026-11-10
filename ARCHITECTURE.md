@@ -412,3 +412,21 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   view load, exits 0; touches no user files, no autocomplete, no alerts.
 - Default suggestion model is `gemma-4-E2B-abl-Q4_K.gguf`; model descriptions and provider labels match the measurements.
 - Docs: README.md, SETUP.md (0.7), docs/USER-GUIDE.md, PROJECT-OVERVIEW.md, in-app help. Self-test: 802 checks.
+
+## v0.7.2 — windows and focus, translation quality review
+- Windows: the main window really comes to front (status menu, hotkey, popup, Dock / Finder reopen); closing the last
+  window returns focus to the previous app; reply insert pastes only when the chat app became frontmost; area capture
+  no longer hides the main window (`AppPresence.bringToFront`, non-activating overlay panel).
+- Prompt: phrase rules found on the trap corpus are no longer always in the system prompt. `PhraseRules` sends a rule
+  only when its trigger is in the source text (they bled into unrelated sentences: «до завершения проверки» came out
+  as «until this is clarified»). The plain prompt is half as long (5.1k → 2.5k characters).
+- Glossary: a pair written «русское → English» is one-way (`RulesStore.oriented`): turned around it put chat slang
+  into formal Russian letters. Slang renderings only for a casual source; chat tone no longer adds slang that is not
+  in the original («let me know» → «дай знать», not «маякни»).
+- `ChatHeaderKeeper`: Telegram headers «Name, [date, time]:» are restored verbatim after translation.
+- Context: the home model runs with 8192 tokens; `chunkLimit` 6000 → 5000 and the continuation tails 3000 → 2000
+  characters so the worst case fits (it could push the rules out of the context).
+- Compose tones (neutral / professional / direct / friendly) give different texts; «Перевод при наборе» ignores
+  interface captions when it looks for the partner's language.
+- Measured on gemma-translate: trap corpus 318/321 (was 315), fresh sets 53/60 and 8/9; test sets in
+  `~/Translate/test-corpus/`. Self-test: 837 checks.

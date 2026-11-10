@@ -74,6 +74,8 @@ public struct EntityMasker: Sendable {
 
     private static let fieldWords = "seatbid|bidfloor|bidfloorcur|bidid|impid|adomain|nurl|burl|lurl|crid|tmax|bcat|badv|ifa|cattax|ortb|openrtb|vast|vpaid|vmap"
     private static let patterns: [(Kind, String)] = [
+        // Telegram copy header «Name Surname, [9 лист. 2026 р., 15:03:57]:» at the start of a line: kept verbatim, never translated or transliterated.
+        (.id, "(?m)^[^\\n\\[\\]]{2,80},\\s\\[[^\\]\\n]{0,40}\\d{1,2}:\\d{2}(?::\\d{2})?(?:\\s?[AaPp][Mm])?\\]:"),
         (.code, "```[\\s\\S]*?```"),
         (.code, "`[^`\\n]+`"),
         (.mention, "<[@#!][^>\\s]+>"),

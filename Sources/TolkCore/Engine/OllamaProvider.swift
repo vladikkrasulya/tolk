@@ -205,9 +205,11 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
         return req
     }
 
-    /// Texts longer than this are translated paragraph by paragraph: the model context is 32k tokens and
-    /// the answer is capped (num_predict 8192), so one huge request would be cut silently.
-    static let chunkLimit = 6000
+    /// Texts longer than this are translated paragraph by paragraph. The model context is 8192 tokens (prompt and
+    /// answer together): system prompt ≈1300 + full glossary ≈1600 + continuation ≈1150 + chunk ≈1450 + answer ≈1700
+    /// stays under it with room to spare (measured: 6000 Russian characters = 1711 tokens). At 6000 + 2×3000 of
+    /// continuation the worst case went over and Ollama would silently drop the start of the prompt (the rules).
+    static let chunkLimit = 5000
 
     public func translate(_ request: ResolvedRequest) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in

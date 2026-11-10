@@ -16,6 +16,7 @@ public enum SelfTest {
     public static func run() -> (total: Int, failures: [String]) {
         let check = Check()
         glossary(check)
+        chatHeaders(check)
         prompts(check)
         detection(check)
         translationChecks(check)

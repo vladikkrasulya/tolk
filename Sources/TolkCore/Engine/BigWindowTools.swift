@@ -58,7 +58,7 @@ public enum ComposeTone: String, CaseIterable, Sendable {
         case .direct:
             "DIRECT: position and consequence, nothing cushioning them. State what is wrong and what follows as plain facts («This doesn't work for us. If it happens again, we will stop.»). Requests become demands without «please», «could you», «would you mind», «if possible», «kindly»; short, flat sentences; no thanks, no warm-up, no apologies. But no rudeness, insults or threats beyond what the points say, and never harsher words than the points use."
         case .friendly:
-            "FRIENDLY: warm and conversational, as to a colleague you like. Contractions («we'll», «it's», «doesn't»), casual connectors and light softeners («just», «really», «no worries», «could we», «it'd be great if»), a positive frame when the points allow it, a friendly lead-in is fine («Just a heads-up:», «Quick note:»). No greeting word at the start, no thanks, no emoji. Still exactly the points: no new facts, promises or compliments."
+            "FRIENDLY: warm and conversational, as to a colleague you like. Contractions («we'll», «it's», «doesn't»), casual connectors and light softeners («just», «really», «no worries», «could we», «it'd be great if»), a positive frame when the points allow it, No greeting word at the start, no thanks, no emoji. Still exactly the points: no new facts, promises or compliments."
         }
     }
 
@@ -81,8 +81,15 @@ public struct ComposeResult: Sendable, Equatable {
     public var backTranslation: String?
     /// Automatic check warnings: a number/time/date of the points is missing, or a number was added.
     public var warnings: [String]
-    public init(text: String, language: Language, backTranslation: String?, warnings: [String]) {
+    /// false = the tone could not make this (short) text different from the neutral one: the UI should say
+    /// «тон не меняет этот текст» instead of showing four identical variants.
+    public var toneChangesText: Bool
+    /// The neutral text the style pass started from (nil for the neutral tone itself).
+    public var neutralText: String?
+    public init(text: String, language: Language, backTranslation: String?, warnings: [String],
+                toneChangesText: Bool = true, neutralText: String? = nil) {
         self.text = text; self.language = language; self.backTranslation = backTranslation; self.warnings = warnings
+        self.toneChangesText = toneChangesText; self.neutralText = neutralText
     }
 }
 
@@ -214,7 +221,7 @@ extension DefaultTranslationEngine {
         for try await e in translate(request) {
             switch e {
             case let .delta(d): text += d
-            case let .started(_, _, _): text = ""
+            case .started: text = ""
             case let .stats(st): warnings = st.warnings
             default: break
             }
@@ -226,9 +233,46 @@ extension DefaultTranslationEngine {
     /// -> a ready message to the recipient. The language is that of `partnerMessage` if there is one, otherwise `to`.
     /// The text must carry EVERY point and nothing else; numbers/times/dates are verified (warnings), the honest back-translation is a separate
     /// call (`composeBackTranslation`) so that the text appears right after the first answer. Typical time 3-6 s.
-    public func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String? = nil, threadContext: String? = nil) async throws -> ComposeResult {
+    public func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String? = nil, threadContext: String? = nil,
+                        neutral: ComposeResult? = nil) async throws -> ComposeResult {
+        // Two passes: the neutral text carries the facts (checked); a non-neutral tone is a style transfer of it.
+        // `neutral` = an already composed neutral result of the same points (the window keeps it between tones).
+        let base: ComposeResult
+        if let neutral { base = neutral } else { base = try await composeFacts(points: points, tone: .neutral, to: to, partnerMessage: partnerMessage, threadContext: threadContext) }
+        if tone == .neutral { return base }
         let ollama = try await readyOllama()
-        let userLang = config.primaryLanguage
+        let lang = base.language
+        let system = ExtrasPrompt.toneTransfer(tone: tone, language: lang, rules: rules.promptBlock(for: points + "\n" + (partnerMessage ?? ""), target: lang))
+        var user = "NEUTRAL TEXT:\n\(base.text)"
+        var best: (text: String, bad: [String], sim: Double)? = nil
+        for attempt in 0..<3 {
+            guard let raw = try await ollama.chatContent(system: system, user: user, json: false, maxTokens: 1000, temperature: attempt == 0 ? 0.3 : 0.5, timeout: 90),
+                  case let t = ExtrasParsing.cleanText(raw, original: base.text), !t.isEmpty else { continue }
+            var bad = ExtrasParsing.composeWarnings(points: base.text, text: t, from: lang, to: lang, partnerMessage: partnerMessage ?? "")
+            bad += ExtrasParsing.invented(points: points + "\n" + base.text, text: t, partnerMessage: partnerMessage ?? "")
+            bad += ToneLexicon.violations(t, tone: tone, language: lang)
+            if LanguageDetector.detect(t) != lang { bad.append("FRIENDLY/DIRECT/BUSINESSLIKE output must be in \(lang.englishName) only, not another language") }
+            let sim = ToneLexicon.similarity(t, base.text)
+            if sim >= 0.8 { bad.append("the text is almost the same as the neutral one: rephrase every sentence in the register of the tone") }
+            if best == nil || (bad.count, -sim) < (best!.bad.count, -best!.sim) { best = (t, bad, sim) }
+            if bad.isEmpty { break }
+            user = "NEUTRAL TEXT:\n\(base.text)\n\nYOUR PREVIOUS ATTEMPT WAS REJECTED:\n«\(t)»\nProblems: \(bad.joined(separator: "; ")). Write it again, fix exactly this, keep every fact."
+        }
+        guard let best else { return ComposeResult(text: base.text, language: lang, backTranslation: nil, warnings: base.warnings, toneChangesText: false, neutralText: base.text) }
+        // Facts lost / invented in the style pass: fall back to the checked neutral text, flagged as «tone does not change it».
+        let factProblems = best.bad.filter { !$0.hasPrefix("the text is almost") && !$0.hasPrefix("tone") }
+        let leaked = best.bad.contains { $0.hasPrefix("тон") || $0.hasPrefix("в сообщении") || $0.hasPrefix("потер") || $0.hasPrefix("⚠") }
+        if leaked || !factProblems.filter({ ExtrasParsing.isFactProblem($0) }).isEmpty {
+            return ComposeResult(text: base.text, language: lang, backTranslation: nil, warnings: base.warnings, toneChangesText: false, neutralText: base.text)
+        }
+        let differs = best.sim < 0.8
+        return ComposeResult(text: differs ? best.text : base.text, language: lang, backTranslation: nil,
+                             warnings: differs ? [] : base.warnings, toneChangesText: differs, neutralText: base.text)
+    }
+
+    /// First pass of `compose`: points → message in the given tone (checked for numbers/invented words), as before.
+    func composeFacts(points: String, tone: ComposeTone, to: Language, partnerMessage: String?, threadContext: String?) async throws -> ComposeResult {
+        let ollama = try await readyOllama()
         let partner = partnerMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
         let target = (partner?.isEmpty == false) ? LanguageDetector.detect(partner!) : to
         let pointsLang = LanguageDetector.detect(points)
@@ -409,6 +453,62 @@ enum ExtrasPrompt {
         return s
     }
 
+    /// Second pass: restyle a finished neutral text into one tone. Facts stay, register changes.
+    static func toneTransfer(tone: ComposeTone, language l: Language, rules: String) -> String {
+        let en = l == .english
+        let reg: String, ex: String
+        switch tone {
+        case .neutral:
+            reg = tone.promptHint; ex = ""
+        case .professional:
+            reg = """
+            BUSINESSLIKE register: complete forms, no contractions, no chatty words, no slang; formal vocabulary (provide, confirm, resolve, inform, require; \
+            in Russian/Ukrainian: «просимо», «прошу», «необхідно», «у зв'язку з», «забезпечити»). Keep WHO does what: keep «we» and «you» as subjects, \
+            do NOT turn sentences into passive or impersonal ones that hide the actor («we will stop» stays «we will stop», never «it will be stopped»). \
+            Keep every sentence a direct statement or request; no new politeness formulas and no apologies the text does not have.
+            """
+            ex = en ? """
+            Example (other topic). NEUTRAL: «The files still haven't come and we're waiting. Can you send them today?» → BUSINESSLIKE: «We have not yet received the files. Please send them today.»
+            Example. NEUTRAL: «We don't like how this went, so we'll stop if it happens again.» → BUSINESSLIKE: «We are dissatisfied with how this was handled. If it recurs, we will discontinue the cooperation.»
+            """ : ""
+        case .direct:
+            reg = """
+            DIRECT register: no cushioning at all. Requests become imperatives (a short command) or a plain «we will…» / «we need…»; \
+            NO «please», «could you», «would you», «would like», «kindly», «if possible», «we hope», «perhaps», «appreciate» (in Russian/Ukrainian also no «будь ласка», «пожалуйста», «не могли б»). \
+            Short flat sentences, one fact each; consequences stated as facts. No thanks, no warm-up, no apologies. \
+            An offer or suggestion («let's have a call») stays an offer, only requests and demands become commands. Not rude, nothing harsher than the neutral text.
+            """
+            ex = en ? """
+            Example (other topic). NEUTRAL: «The files still haven't come and we're waiting. Could you please send them today?» → DIRECT: «We have not received the files. Send them today.»
+            Example. NEUTRAL: «Please disable all test traffic, and we will try again tomorrow.» → DIRECT: «Disable all test traffic. We will try again tomorrow.»
+            """ : ""
+        case .friendly:
+            reg = """
+            FRIENDLY register: warm, conversational, like to a colleague you like. Contractions (we'll, it's, don't), casual connectors (so, and), \\
+            light softeners for requests («could you», «it'd be great if», «no worries»; in Russian/Ukrainian «давай», «можешь», «було б круто»). \\
+            No stiff office words (ensure, provide, kindly, regarding, inform). Do NOT start with a fixed lead-in such as «Just a heads-up» or «Quick note»: begin straight with the content. \\
+            No greeting word, no thanks, no emoji, no compliments, nothing the neutral text does not say.
+            """
+            ex = en ? """
+            Example (other topic). NEUTRAL: «The files have not been received. Please send them today.» → FRIENDLY: «The files haven't come through yet, so could you send them over today?»
+            Example. NEUTRAL: «The meeting is moved to Friday because the room is busy.» → FRIENDLY: «We're moving the meeting to Friday, the room's taken.»
+            """ : ""
+        }
+        var s = """
+        You restyle a finished message. Input: NEUTRAL TEXT in \(l.englishName). Output: the same message in the tone below. \
+        The output language is \(l.englishName) ONLY (the same as the input): never switch language, never use English examples as wording in another language.
+        \(reg)
+        \(ex)
+        Hard rules:
+        - Keep EVERY fact, request, condition, number, date, name and the strength of every opinion. Add NOTHING: no new reasons, promises, offers, thanks, greetings, apologies, lead-ins.
+        - Change the wording clearly: reword every sentence in the register, do not copy it. Do not just add or drop one word.
+        - Keep «if» as «if»; a demand stays a demand; keep the form of address (you/Вы/Ви) and who does what.
+        Output ONLY the restyled text: no comments, no quotes, no alternatives.
+        """
+        if !rules.isEmpty { s += "\n\n# User's rules and glossary (authoritative)\n" + rules }
+        return s
+    }
+
     static func formalHint(_ l: Language) -> String {
         switch l {
         case .russian: "«Вы» with a capital letter, «Здравствуйте», «не могли бы Вы»"
@@ -443,7 +543,43 @@ enum ExtrasPrompt {
 
 // MARK: - Parsing
 
+/// Lexical checks of a tone: what the register forbids («Прямо» has no «please», «По-деловому» no contractions).
+enum ToneLexicon {
+    static func has(_ pattern: String, _ s: String) -> Bool { s.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil }
+
+    static func violations(_ text: String, tone: ComposeTone, language: Language) -> [String] {
+        var v: [String] = []
+        switch (tone, language) {
+        case (.direct, .english):
+            if has("\\bplease\\b|could you|would you|kindly|would like|if possible|we hope|\\bperhaps\\b|we appreciate|i think|would be great", text) { v.append("DIRECT must not use please / could you / would like / kindly / hope: use imperatives or «we will»") }
+        case (.direct, .ukrainian), (.direct, .russian):
+            if has("будь ласка|будь-ласка|будьте ласкаві|пожалуйста|будьте добры|не могли б|не могли бы|чи не могли|якщо можливо|если возможно", text) { v.append("DIRECT must not use «будь ласка / пожалуйста / не могли б»: use imperatives or a flat statement") }
+        case (.professional, .english):
+            if has("\\b\\w+(n't|'ll|'re|'ve|'d|'m)\\b|\\b(it|that|there|he|she|here)'s\\b|\\bwe're\\b", text) { v.append("BUSINESSLIKE must not use contractions: write the full forms") }
+            if has("\\b(will|would|can|is|are|was|were) be (made|stopped|requested|required|informed|liked|processed|sent|taken)\\b|\\bis not liked\\b", text) { v.append("BUSINESSLIKE must keep who does what: «we will…», «you must…», not passive voice") }
+            if has("\\b(just|really|quick|a bit|pretty|heads-up|no worries)\\b", text) { v.append("BUSINESSLIKE must not use chatty words (just, really, quick, a bit)") }
+        case (.professional, _) where language != .english && language != .ukrainian && language != .russian: break
+        case (.friendly, .english):
+            if has("^(just a heads-up|quick note|heads-up|just a quick)", text.trimmingCharacters(in: .whitespaces)) { v.append("FRIENDLY must not start with a fixed lead-in (heads-up / quick note): start with the content") }
+            if !has("\\b\\w+(n't|'ll|'re|'ve|'d|'m)\\b|\\b(it|that|there|here)'s\\b|\\bwe're\\b|\\bjust\\b|\\breally\\b|\\bquick\\b|no worries|heads-up|\\bso\\b", text) { v.append("FRIENDLY needs contractions and casual connectors (we'll, it's, just, so)") }
+            if has("\\b(ensure|provide|kindly|regarding|inform|pursuant|herewith)\\b", text) { v.append("FRIENDLY must not use stiff office words (ensure, provide, kindly, regarding)") }
+        default: break
+        }
+        return v
+    }
+
+    static func words(_ s: String) -> Set<String> { Set(s.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)) }
+    /// Jaccard similarity of the word sets (1 = same words).
+    static func similarity(_ a: String, _ b: String) -> Double {
+        let x = words(a), y = words(b)
+        return x.isEmpty && y.isEmpty ? 1 : Double(x.intersection(y).count) / Double(max(1, x.union(y).count))
+    }
+}
+
 enum ExtrasParsing {
+    /// A check problem that means a lost / invented FACT (not a style complaint).
+    static func isFactProblem(_ w: String) -> Bool { !w.hasPrefix("DIRECT") && !w.hasPrefix("BUSINESSLIKE") && !w.hasPrefix("FRIENDLY") }
+
     static func jsonObject(_ content: String) -> [String: Any]? {
         var json = content.trimmingCharacters(in: .whitespacesAndNewlines)
         if let a = json.firstIndex(of: "{"), let b = json.lastIndex(of: "}"), a <= b { json = String(json[a...b]) }

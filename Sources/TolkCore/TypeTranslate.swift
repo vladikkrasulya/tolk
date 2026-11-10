@@ -63,13 +63,20 @@ public enum TypeTranslate {
         return any
     }
 
-    /// Letters of a line that can be a message, 0 for chrome: a short "Name 10:41" header, or one or two bare words
-    /// (a name, a button). A message has at least 3 words or 20 letters.
+    /// Letters of a line that can be a message, 0 for chrome: a short "Name 10:41" header, one or two bare words
+    /// (a name, a button), a menu / panel caption (Title Case, separators, no sentence punctuation). A message has
+    /// 3+ words with a comma / sentence mark, or 5+ words.
     static func messageLetters(_ line: String) -> Int {
         let n = line.filter(\.isLetter).count
         if line.count <= 40, line.range(of: #"\d{1,2}[:.]\d{2}"#, options: .regularExpression) != nil { return 0 }
-        let words = line.split(whereSeparator: { $0.isWhitespace }).count
-        return words >= 3 || n >= 20 ? n : 0
+        let words = line.split(whereSeparator: { $0.isWhitespace })
+        guard words.count >= 3 else { return 0 }
+        let punctuated = line.contains { ",.!?…;:—".contains($0) } || line.contains(" - ")
+        if line.contains(where: { "·|›»•▸▾".contains($0) }) { return 0 }
+        let caps = words.filter { $0.first?.isUppercase == true }.count
+        if !punctuated, caps == words.count { return 0 }
+        if punctuated { return n }
+        return words.count >= 5 ? n : 0
     }
 
     static func normalize(_ s: String) -> String {
@@ -259,6 +266,9 @@ extension SelfTest {
         check(T.blockingWarnings(["калька: «a» → «b»", "⚠️ перевод не на том языке: французский вместо английский"]).isEmpty,
               "type-translate: calque and language warnings do not block")
         check(T.warningHint(["⚠️ потеряна ссылка https://x"]).hasPrefix("⚠ потеряна ссылка"), "type-translate: warning hint text")
+        func d0(_ text: String, _ partner: T.Partner?, known: Bool) -> T.Verdict {
+            T.decide(text: text, partner: partner, screenKnown: known, primary: .russian, secondary: .english, explicitlyOn: true, auto: false)
+        }
         // Partner detection
         let screen = """
         Anna Müller 10:41
@@ -272,6 +282,15 @@ extension SelfTest {
         check(p?.message.contains("Конечно") != true, "type-translate: own earlier message is not the partner's")
         check(T.partner(screen: "Anna Müller\n10:41\nReply", draft: "Привет, как дела?") == nil, "type-translate: chrome lines are not messages")
         check(T.partner(screen: "", draft: "Привет, как дела?") == nil, "type-translate: no screen text, no partner")
+        // Only interface captions in Ukrainian on screen (TextEdit): not a conversation
+        let ui = "Звичайний\nБезіменний\nШрифт\nІнтервали між рядками\nСписки та нумерація\nТаблиці Стилі\nЗмінено вчора о 10:41"
+        let uiDraft = "Привет, как дела у вас сегодня?"
+        check(T.partner(screen: ui, draft: uiDraft) == nil, "type-translate: UI captions are not a partner message", "\(String(describing: T.partner(screen: ui, draft: uiDraft)))")
+        check(!T.screenIsAllSameLanguage(screen: ui, draft: uiDraft), "type-translate: UI-only screen is unknown")
+        check(d0(uiDraft, T.partner(screen: ui, draft: uiDraft), known: T.screenIsAllSameLanguage(screen: ui, draft: uiDraft)) == .translate(source: .russian, target: .english),
+              "type-translate: UI-only Ukrainian screen + Russian draft -> English")
+        let chatUk = "Анна 10:41\nПривіт! Чи можеш надіслати оновлений рахунок до п'ятниці?\nВи 10:43\nЗвісно, надішлю сьогодні ввечері."
+        check(T.partner(screen: chatUk, draft: "Хорошо, договорились")?.language == .ukrainian, "type-translate: a real Ukrainian chat -> Ukrainian")
         let withDraft = "Hello there, nice to meet you today\nПривет, рад познакомиться с вами"
         check(T.partner(screen: withDraft, draft: "Привет, рад познакомиться с вами")?.message == "Hello there, nice to meet you today",
               "type-translate: the draft's own line on screen is skipped")

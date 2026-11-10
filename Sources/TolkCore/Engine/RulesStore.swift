@@ -76,7 +76,8 @@ public final class RulesStore: @unchecked Sendable {
                 let toCyrillic = target == .russian || target == .ukrainian || target == .bulgarian || target == .kazakh
                 let header = toCyrillic ? "## Glossary: English → how to write it in the translation"
                                         : "## Glossary: Russian → how to write it in English"
-                parts.append(([header] + hits.map { Self.orient($0.text, toCyrillic: toCyrillic) }).joined(separator: "\n"))
+                let lines = hits.compactMap { Self.oriented($0.text, toCyrillic: toCyrillic) }
+                if !lines.isEmpty { parts.append(([header] + lines).joined(separator: "\n")) }
             } else {
                 parts.append(([p.glossaryHeader.isEmpty ? "## Glossary" : p.glossaryHeader] + hits.map(\.text))
                     .joined(separator: "\n"))
@@ -93,7 +94,7 @@ public final class RulesStore: @unchecked Sendable {
         let range = NSRange(text.startIndex..., in: text)
         var out: [GlossaryHit] = []
         for line in p.glossary where line.patterns.contains(where: { $0.firstMatch(in: text, range: range) != nil }) {
-            var body = Self.orient(line.text, toCyrillic: toCyrillic)
+            guard var body = Self.oriented(line.text, toCyrillic: toCyrillic) else { continue }
             if body.hasPrefix("- ") { body.removeFirst(2) }
             for pair in body.components(separatedBy: ";") {
                 let sides = pair.components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -113,6 +114,23 @@ public final class RulesStore: @unchecked Sendable {
         let clean = side.replacingOccurrences(of: "\\([^)]*\\)", with: " ", options: .regularExpression)
         return clean.components(separatedBy: CharacterSet(charactersIn: "/,"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.count >= 2 }
+    }
+
+    /// `orient` for the prompt: nil when no pair of the line applies in this direction.
+    /// A pair written «русское → English» is the user's hint for writing English («разжать лимит → raise»,
+    /// «Добрый день → Hello»): it is one-way. Turned around it put chat slang into formal Russian letters
+    /// («credit limit increase» → «разжатие кредитного лимита»). Pairs written «English → русское» work both ways.
+    static func oriented(_ line: String, toCyrillic: Bool) -> String? {
+        guard toCyrillic else { return orient(line, toCyrillic: false) }
+        var body = line.trimmingCharacters(in: .whitespaces)
+        if body.hasPrefix("- ") || body.hasPrefix("* ") { body.removeFirst(2) }
+        let kept = body.components(separatedBy: ";").filter { pair in
+            let sides = pair.components(separatedBy: "→")
+            guard sides.count == 2 else { return true }
+            return !(isMostlyCyrillic(sides[0]) && !isMostlyCyrillic(sides[1]))
+        }
+        guard !kept.isEmpty else { return nil }
+        return orient("- " + kept.joined(separator: ";"), toCyrillic: true)
     }
 
     /// "- без жести → nothing explicit; a → b" turned so that each pair points into the target script.

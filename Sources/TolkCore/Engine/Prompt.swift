@@ -10,7 +10,7 @@ enum Prompt {
         Keep unchanged: names, numbers, IDs and order numbers, URLs and macros like {clickid}, emails, code, field names, @mentions, names of companies, products and services, emoji.
         Keep the original formatting: line breaks, lists, markdown.
         Translate the meaning, not the word order: write what a native speaker would naturally say in this situation, using their own idiom instead of a word-for-word rendering.
-        \(antiCalque(for: r.target))
+        \(antiCalque(for: r.target, source: r.text))
         \(consistency(for: r))
         """
         if let ex = r.protectedExample { s += "\n\n# Protected placeholders\n" + EntityMasker.promptNote(example: ex) }
@@ -40,11 +40,11 @@ enum Prompt {
             The user's text is the CONTINUATION of a message whose beginning is already translated.
             Beginning (source):
             \"\"\"
-            \(c.source.suffix(3000))
+            \(c.source.suffix(2000))
             \"\"\"
             Beginning (its translation, final — do not change it):
             \"\"\"
-            \(c.translation.suffix(3000))
+            \(c.translation.suffix(2000))
             \"\"\"
             Translate ONLY the user's new text, which follows the beginning. Do not repeat or rewrite the beginning.
             Stay consistent with it: the same terms, names, grammatical gender, form of address, formality and style.
@@ -76,25 +76,21 @@ enum Prompt {
     }
 
     /// Calques are the main quality problem of a small model: it copies the source word order and idioms.
-    static func antiCalque(for target: Language) -> String {
+    /// The general line is always sent; the phrase rules only when their phrase is in `source` (see `PhraseRules`).
+    /// `source` nil = general line only.
+    static func antiCalque(for target: Language, source: String? = nil) -> String {
+        let general: String
         switch target {
         case .russian, .ukrainian:
-            "Avoid English-shaped constructions in \(target.englishName) (no «имеет смысл», «дайте мне знать», «в конце дня», «взять душ»-type calques; no English word order, no literal idioms): say it the way a native \(target.englishName) speaker would. " +
-            "Business idioms: «please advise» → «подскажите, как действовать дальше», «please note» → «обратите внимание» (never «примите к сведению»), «moving forward» → «в дальнейшем», «per our call» → «как договорились на созвоне», «circle back» → «вернёмся к этому», «on your end» → «у вас». " +
-            "Keep the person: «we» stays «мы», never «я». «Net-30 / net-45» → «оплата через 30 / 45 дней после выставления счёта» (not «после оплаты»)."
+            general = "Avoid English-shaped constructions in \(target.englishName) (no «имеет смысл», «дайте мне знать», «в конце дня», «взять душ»-type calques; no English word order, no literal idioms): say it the way a native \(target.englishName) speaker would. Keep the person: «we» stays «мы», never «я»."
         case .english:
-            "Avoid Slavic word order and literal idioms in English (no «Did you forget to take?» for «ты не забыл забрать?», no «I have a question to you»): say it the way a native English speaker would. " +
-            "«Попрошу вас / прошу вас сделать X» is a request: write «Please do X», never «I'll ask you to». " +
-            "«С нашей стороны / с вашей стороны» about traffic, feeds or data means where it goes or comes from (to our feeds, in your traffic), not «from our side»; keep who does what unambiguous. " +
-            "«Значит / раз так, вы видите…» is a conclusion: write «so you can see / you clearly see», not «you must see» (it reads as an order). " +
-            "«Убрать X с вашей / нашей стороны», «убрать X от нас», «подливать / лить нам X» = remove X from the traffic you send us / stop sending us X: name whose traffic it is, never «from our side». " +
-            "«Лить / заливать / льёте» about traffic = send / drive traffic (not «campaign»); «чистый / всё чисто» = clean (not «clear»). " +
-            "«Сабайди / сабы» = sub IDs (never transliterate: not «Sabaydi»), but keep «SubID» exactly as written. «Лив» (landing, traffic) = bounce / drop-off rate. «Вынуждены уведомить» = «we must inform you» (not «please be advised»). «Net-30» = 30 days from the INVOICE date. " +
-            "«Не делайте так / этого в дальнейшем» = «please don't do this again» (not «moving forward»). " +
-            "Keep conditions and closing phrases exact: «до выяснения» = «until this is clarified» (not «until further notice»), «закрываем вопрос» = «let's close the issue»."
+            general = "Avoid Slavic word order and literal idioms in English (no «Did you forget to take?» for «ты не забыл забрать?», no «I have a question to you»): say it the way a native English speaker would. «We» stays «we», «you» stays «you»: do not change who the subject is."
         default:
-            "Avoid literal idioms and the word order of the source language: say it the way a native \(target.englishName) speaker would."
+            return "Avoid literal idioms and the word order of the source language: say it the way a native \(target.englishName) speaker would."
         }
+        guard let source else { return general }
+        let notes = PhraseRules.matching(source, target: target)
+        return notes.isEmpty ? general : general + "\nNotes for phrases of this text:\n" + notes.map { "- " + $0 }.joined(separator: "\n")
     }
 
     /// Rules found by the 50-text comparison (2026-11-09): mixed «Вы/вы», English number format in Russian,
@@ -109,6 +105,7 @@ enum Prompt {
         case .russian, .ukrainian:
             rules.append("Russian/Ukrainian number format: space between thousands and a decimal comma (5 000 USD, 0,02 %, 8 416,20 USD).")
             rules.append("Use ONE form of address for the whole text: formal → «Вы» with a capital letter everywhere; chat → «ты»; never mix.")
+            rules.append("Slang renderings from the glossary (разжать, стопнуть, фуфло, лить / подливать, сабы, маякнуть) fit only a casual source. If the source is a formal letter or the tone is formal, use the neutral business word instead (увеличить, приостановить, некачественный трафик, направлять трафик, sub ID, сообщить).")
         default:
             rules.append("English number format: comma between thousands and a decimal point (5,000 USD, 0.02%).")
             rules.append("Greetings: «Добрый день» / «Здравствуйте» → «Hello» or «Hi <Name>,» — never «Good day» or «Good afternoon».")
@@ -119,8 +116,81 @@ enum Prompt {
     static func tone(_ t: Tone) -> String {
         switch t {
         case .auto: "keep the tone and register of the original (chat stays casual, email stays formal)."
-        case .chat: "The user chose CHAT tone — this overrides the tone of the original and any tone rule above: short, informal, natural, like colleagues in Slack/Telegram; informal address (ты in Russian/Ukrainian, du in German, tu in French, etc.), no stiff phrases. Keep the slang and the emotional strength of the original — do not neutralize it (it dies → сдохнет, not «перестанет работать»; clickbait af → лютый кликбейт). But never add swearing or vulgarity that is not in the original."
+        case .chat: "The user chose CHAT tone — this overrides the tone of the original and any tone rule above: short, informal, natural, like colleagues in Slack/Telegram; informal address (ты in Russian/Ukrainian, du in German, tu in French, etc.), no stiff phrases. Keep the slang and the emotional strength of the original — do not neutralize it (it dies → сдохнет, not «перестанет работать»; clickbait af → лютый кликбейт). But never add swearing or vulgarity that is not in the original, and do not make the text more slangy than it is: plain «let me know», «sorry», «thanks for the info», «the tech team», «unsatisfactory» stay plain («дай знать», «извини», «спасибо за информацию», «техническая команда», «неудовлетворительное») — slang only where the source itself is slang. Industry jargon from the glossary is fine."
         case .formal: "The user chose FORMAL tone — this overrides the tone of the original and any tone rule above: polite business email, courteous and professional; formal address (Вы in Russian/Ukrainian, Sie in German, vous in French, etc.; e.g. «Здравствуйте», «не могли бы Вы»); no slang greetings like «Привет»/«hey»."
         }
+    }
+}
+
+
+/// Rules about one phrase or one piece of jargon, found on the trap corpus. Each goes into the prompt only when its
+/// trigger is in the source text: always-on, they bled into unrelated sentences («до завершения проверки» came out
+/// as «until this is clarified» because of the «до выяснения» rule, «Уточнить…» as «Also need to clarify…») and
+/// made every prompt longer.
+enum PhraseRules {
+    struct Rule { let trigger: String; let text: String }
+
+    /// Source Russian / Ukrainian → English.
+    static let toEnglish: [Rule] = [
+        Rule(trigger: #"\b(по)?прошу\b|\bпросим\b"#,
+             text: "«Попрошу вас / прошу вас сделать X» is a request: write «Please do X», never «I'll ask you to»."),
+        Rule(trigger: #"с (нашей|вашей) сторон"#,
+             text: "«С нашей стороны / с вашей стороны» about traffic, feeds or data means where it goes or comes from (to our feeds, in your traffic), not «from our side»; keep who does what unambiguous."),
+        Rule(trigger: #"\bзначит\b|раз так|раз вы\b"#,
+             text: "«Значит / раз так, вы видите…» is a conclusion: write «so you can see / you clearly see», not «you must see» (it reads as an order)."),
+        Rule(trigger: #"\bубра|\bубер|подлив|подмеш|\bот нас\b"#,
+             text: "«Убрать X с вашей / нашей стороны», «убрать X от нас», «подливать / лить нам X» = remove X from the traffic you send us / stop sending us X: name whose traffic it is, never «from our side»."),
+        Rule(trigger: #"\bль[юеёё]|\bлит[ьеи]\b|\bлил|залив|залит|зальё|\bчист"#,
+             text: "«Лить / заливать / льёте» about traffic = send / drive traffic (not «campaign»); «чистый / всё чисто» = clean (not «clear»)."),
+        Rule(trigger: #"сабайди|\bсаб(ы|ов|а|ам|ами|у)?\b|subid"#,
+             text: "«Сабайди / сабы» = sub IDs (never transliterate: not «Sabaydi»), but keep «SubID» exactly as written."),
+        Rule(trigger: #"\bлив(а|у|ом|е)?\b"#, text: "«Лив» (landing, traffic) = bounce / drop-off rate."),
+        Rule(trigger: #"вынужден\w* (вас |вам )?(уведом|сообщ|проинформ|известить)"#, text: "«Вынуждены уведомить» = «we must inform you» (not «please be advised»)."),
+        Rule(trigger: #"net-?\d\d"#, text: "«Net-30» = 30 days from the INVOICE date."),
+        Rule(trigger: #"в дальнейшем|впредь|больше так"#,
+             text: "«Не делайте так / этого в дальнейшем» = «please don't do this again» (not «moving forward»)."),
+        Rule(trigger: #"\bне (показыва|да[её]т|отвеча|дела[её]т)"#,
+             text: "«Не показываете / не даёте / не отвечаете / не делаете» = plain «you don't show / give / answer / do», never «you refuse to» (refusing is a stronger claim)."),
+        Rule(trigger: #"\bлев(ый|ое|ая|ые|ого|ому|ым|ых|ую|ак)"#,
+             text: "The slang word «левый / левое / левак» about traffic, geo, leads = off-target, unrelated or shady — not «invalid» or «fraudulent»."),
+        Rule(trigger: #"\bmfa\b"#, text: "«MFA-сайты / MFA-площадки» = «MFA sites», keep the noun «sites», not «traffic»."),
+        Rule(trigger: #"ну такое"#, text: "«Ну такое.» as a reaction = «Meh.» / «So-so.» (not «It's okay»)."),
+        Rule(trigger: #"(?m)(^|[.!?…]\s+|\n)\s*(и |а |ещё |еще |также |не )?[а-яё]{3,}(ть|ться|ти|чь)\s"#,
+             text: "A sentence that starts with an infinitive and has no subject («Уточнить реквизиты», «Не забыть отправить акт») is a to-do or reminder: keep it impersonal («Need to check…», «Don't forget to send…»); never invent a subject «I'll / I will», and add «also / and» only where the source has «и / ещё / также»."),
+        Rule(trigger: #"обращаем (ваше )?внимание|сообщаем|уведомляем|информируем|повідомляємо|звертаємо увагу"#,
+             text: "«Обращаем внимание / сообщаем / уведомляем, что…» = «Please note that…» or simply state the fact — never «Please be advised»."),
+        Rule(trigger: #"до выяснения"#, text: "«До выяснения» = «until this is clarified» (not «until further notice»)."),
+        Rule(trigger: #"закр(ываем|оем|ыли|ыть) вопрос"#, text: "«Закрываем вопрос» = «let's close the issue»."),
+    ]
+
+    /// Source English → Russian / Ukrainian.
+    static let toRussian: [Rule] = [
+        Rule(trigger: #"please advise"#, text: "«Please advise.» on its own (asking what to do next) → «Подскажите, как действовать дальше»; «could you please advise on / why / when …» is just a polite question → «подскажите, пожалуйста, …»."),
+        Rule(trigger: #"(please|kindly) (note|be advised|be informed)"#, text: "«Please note / kindly note / please be advised» → «обратите внимание» (never «примите к сведению»)."),
+        Rule(trigger: #"(moving|going) forward"#, text: "«Moving forward» → «в дальнейшем»."),
+        Rule(trigger: #"per our (call|conversation|discussion)"#, text: "«Per our call» → «как договорились на созвоне»."),
+        Rule(trigger: #"circle back"#, text: "«Circle back» → «вернёмся к этому»."),
+        Rule(trigger: #"on (your|our|my) end"#, text: "«On your end» → «у вас» («on our end» → «у нас»)."),
+        Rule(trigger: #"heads[- ]?up"#, text: "«Heads-up / quick heads-up» = «Предупреждаю: …» / «Чтобы вы знали: …» (keep it, never drop it)."),
+        Rule(trigger: #"(?m)^\s*(also|and|plus|todo|to do)\b\s*[:,—-]"#,
+             text: "An impersonal English line («Also: confirm the amount») stays impersonal («Ещё нужно уточнить сумму»), no invented «я»."),
+        Rule(trigger: #"\bcommit"#, text: "«Commit to X» = «взять на себя обязательство по X / обязаться», not «гарантировать» (guarantee is a separate word)."),
+        Rule(trigger: #"net-?\d\d"#, text: "Keep «Net-30 / Net-45» as written (it means payment is due 30 / 45 days after the INVOICE date; if you explain it, never «после оплаты»)."),
+        Rule(trigger: #"\bfinance\b"#, text: "«Finance / the finance team» = «финансовый отдел / бухгалтерия», never «финтех»."),
+        Rule(trigger: #"\bfyi\b"#, text: "«FYI» = «к сведению»."),
+    ]
+
+    /// Both directions: a chat header copied from Telegram.
+    static let header = Rule(trigger: #"(?m)^[^\n\[\]]{2,80},\s\[[^\]\n]{0,40}\d{1,2}:\d{2}"#,
+                             text: "A line like «Name Surname, [9 лист. 2026 р., 15:03:57]:» (chat header copied from Telegram) is NOT text: leave it exactly as written (no translation, no transliteration of the name, no date conversion).")
+
+    static func matching(_ source: String, target: Language) -> [String] {
+        let rules: [Rule]
+        switch target {
+        case .english: rules = toEnglish + [header]
+        case .russian, .ukrainian: rules = toRussian + [header]
+        default: return []
+        }
+        return rules.filter { source.range(of: $0.trigger, options: [.regularExpression, .caseInsensitive]) != nil }.map(\.text)
     }
 }

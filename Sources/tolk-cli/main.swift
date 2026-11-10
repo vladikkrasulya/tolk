@@ -38,7 +38,7 @@ if CommandLine.arguments.dropFirst().first == "--ac-spawn" {
     while true { sleep(1000) }
 }
 var twice = false
-var trapCorpusPath: String?, trapOut: String?, trapOnly: String?
+var trapCorpusPath: String?, trapOut: String?, trapOnly: String?, trapBack = false
 // `tolk-cli --ac-stats [JSON_PATH [LOG_PATH]]` prints the autocomplete statistics (JSON, else the log). Read-only.
 if CommandLine.arguments.dropFirst().first == "--ac-stats" {
     let a = Array(CommandLine.arguments.dropFirst(2))
@@ -77,6 +77,7 @@ while let a = args.next() {
     case "--check": checkOnly = value()                      // run only the automatic check: text = source, value = translation
     case "--trap-corpus": trapCorpusPath = value()           // JSON corpus of basic traps: translate each, check the rules, print a summary (model!)
     case "--trap-out": trapOut = value()                     // with --trap-corpus: also write the results as JSON
+    case "--trap-back": trapBack = true                       // with --trap-corpus: also translate every result back and compare the key elements
     case "--trap-only": trapOnly = value()                   // with --trap-corpus: only ids/traps from this comma list
     case "--twice": twice = true                             // translate the text twice in one process: shows the result cache
     case "--self-test": selfTest = true                      // engine checks without model or network
@@ -316,14 +317,31 @@ if let trapCorpusPath {
             }
             out = out.trimmingCharacters(in: .whitespacesAndNewlines)
             let secs = Date().timeIntervalSince(t0); totalSecs += secs
-            let f = TrapCorpus.failures(it, translation: out)
+            var f = TrapCorpus.failures(it, translation: out)
+            var backText = "", backIssues: [String] = []
+            if trapBack, !out.isEmpty {
+                for try await e in eng.translate(TranslationRequest(text: out, source: it.to, target: it.from, tone: .auto)) {
+                    if case let .delta(d) = e { backText += d }
+                }
+                backText = backText.trimmingCharacters(in: .whitespacesAndNewlines)
+                backIssues = BackCheck.compare(source: it.text, back: backText, lang: it.from)
+            }
+            let rulesOK = f.isEmpty
+            f += backIssues.map { "↩︎ " + $0 }
             results.append((it, f.isEmpty))
             print("[\(it.id) \(it.trap)] \(f.isEmpty ? "ок" : "ПРОВАЛ")\n  \(it.text)\n  → \(out.replacingOccurrences(of: "\n", with: " "))")
+            if trapBack { print("  ↩︎ \(backText.replacingOccurrences(of: "\n", with: " "))") }
             for x in f { print("  ✗ \(x)") }
-            json.append(["id": it.id, "trap": it.trap, "text": it.text, "translation": out, "passed": f.isEmpty, "failures": f, "secs": secs])
+            json.append(["id": it.id, "trap": it.trap, "text": it.text, "translation": out, "passed": f.isEmpty, "rules_ok": rulesOK, "back_ok": backIssues.isEmpty,
+                         "back": backText, "failures": f, "secs": secs])
         }
         print("\n=== сводка (верно по автопроверке) ===")
         for s in TrapCorpus.summary(results) { print("\(s.trap.padding(toLength: 10, withPad: " ", startingAt: 0)) \(s.passed)/\(s.total)") }
+        if trapBack {
+            let ro = json.filter { ($0["rules_ok"] as? Bool) == true }.count, bo = json.filter { ($0["back_ok"] as? Bool) == true }.count
+            let both = json.filter { ($0["rules_ok"] as? Bool) == true && ($0["back_ok"] as? Bool) == true }.count
+            print("правила: \(ro)/\(results.count), обратный перевод: \(bo)/\(results.count), оба сигнала: \(both)/\(results.count), спорных (сигналы расходятся): \(json.filter { ($0["rules_ok"] as? Bool) != ($0["back_ok"] as? Bool) }.count)")
+        }
         print("всего \(results.filter(\.passed).count)/\(results.count), в среднем \(String(format: "%.1f", totalSecs / Double(max(1, results.count)))) с на текст")
         if let trapOut, let d = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .withoutEscapingSlashes]) {
             try? d.write(to: URL(fileURLWithPath: (trapOut as NSString).expandingTildeInPath))

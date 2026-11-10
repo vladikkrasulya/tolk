@@ -109,7 +109,7 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                         }
                         if coldFailure == nil { do {
                             try await UsageBox.$current.withValue(usage) {
-                                for try await chunk in EntityMasking.stream(resolved, provider: primary) {
+                                for try await chunk in ChatHeaderKeeper.stream(EntityMasking.stream(resolved, provider: primary), source: resolved.text) {
                                     try Task.checkCancellation()
                                     if firstAt == nil { firstAt = Date() }
                                     chunks += 1
@@ -149,7 +149,7 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                     continuation.yield(.started(provider: fallback.name, source: resolved.source, target: resolved.target))
                     produced = ""
                     do {
-                        for try await chunk in fallback.translate(resolved) {
+                        for try await chunk in ChatHeaderKeeper.stream(fallback.translate(resolved), source: resolved.text) {
                             try Task.checkCancellation()
                             if firstAt == nil { firstAt = Date() }
                             produced += chunk
