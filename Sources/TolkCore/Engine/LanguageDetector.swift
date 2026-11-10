@@ -66,9 +66,20 @@ public enum LanguageDetector {
         let h = r.languageHypotheses(withMaximum: 4)
         let words = text.split(whereSeparator: { $0.isWhitespace }).count
         if (h[.ukrainian] ?? 0) >= 0.6 { return .ukrainian }
-        if words >= 3, text.count >= 25, (h[.bulgarian] ?? 0) >= 0.9 { return .bulgarian }
-        if words >= 3, text.count >= 25, (h[.kazakh] ?? 0) >= 0.9 { return .kazakh }
+        // NL alone is not enough: «Привет, спасибо за информацию» scores ≥ 0.9 "Bulgarian". Require evidence that
+        // Russian cannot produce: a distinctive Bulgarian function word, or a Kazakh-only letter.
+        if words >= 3, text.count >= 25, (h[.bulgarian] ?? 0) >= 0.9, hasBulgarianWord(text) { return .bulgarian }
+        if words >= 3, text.count >= 25, (h[.kazakh] ?? 0) >= 0.9, text.contains(where: { "әғқңөұүһӘҒҚҢӨҰҮҺ".contains($0) }) { return .kazakh }
         return .russian
+    }
+
+    private static let bulgarianWords: Set<String> = [
+        "е", "са", "съм", "сме", "със", "ще", "това", "тази", "този", "които", "който", "какво", "благодаря", "моля",
+        "здравей", "здравейте", "обаче", "сега", "днес", "утре", "искам", "няма", "към", "още", "беше", "нашата", "вашата",
+    ]
+
+    static func hasBulgarianWord(_ text: String) -> Bool {
+        text.lowercased().split(whereSeparator: { !$0.isLetter }).contains { bulgarianWords.contains(String($0)) }
     }
 
     private static func recognize(_ text: String, among candidates: [Language]) -> Language? {

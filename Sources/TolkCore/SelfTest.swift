@@ -39,6 +39,7 @@ public enum SelfTest {
         hotKeyRules(check)
         tails(check)
         modelUsage(check)
+        cyrillicDetection(check)
         trapCorpus(check)
         hardening(check)
         return (check.total, check.failures)
@@ -60,6 +61,17 @@ public enum SelfTest {
         check(ok("Thanks for the update.", "Thank you for the update."), "refine guard: no greeting, no question accepted")
         check(!ok("Thanks.", "  "), "refine guard: empty edit rejected")
         check(ok("Hi there. Can you come? (please)?", "Hi there. Could you come?"), "refine guard: question kept accepted")
+    }
+
+    // MARK: Cyrillic language detection (short Russian must not become Bulgarian)
+
+    static func cyrillicDetection(_ check: Check) {
+        for t in ["Привет, спасибо за информацию", "Спасибо, получил, смотрим", "Добрый день, коллеги, отправил счет на оплату",
+                  "Можно. И уточнить, на какую именно сумму выставлять инвойс."] {
+            check(LanguageDetector.detect(t) == .russian, "detect: Russian stays Russian", t)
+        }
+        check(LanguageDetector.detect("Благодаря за информацията, ще проверя това утре и ще ви пиша.") == .bulgarian, "detect: real Bulgarian")
+        check(LanguageDetector.detect("Дякую за інформацію, перевірю завтра") == .ukrainian, "detect: Ukrainian")
     }
 
     // MARK: Model usage (background warm-up only after recent use)
