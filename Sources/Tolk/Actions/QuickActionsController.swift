@@ -1,4 +1,3 @@
-// Owned by the "quick actions" session.
 import AppKit
 import Carbon.HIToolbox
 import TolkCore
@@ -14,21 +13,17 @@ import TolkCore
 ///     after 0.5 s (unless something else wrote to it meanwhile). ⌘Z in the app undoes the replace.
 @MainActor
 final class QuickActionsController {
-    /// Posted after a hotkey changes (`setHotKey`, `resetHotKeys`) — the settings page can refresh.
-    static let hotKeysDidChange = Notification.Name("TolkQuickActionsHotKeysDidChange")
-
     let actions = QuickAction.all
     private(set) var engine: TranslationEngine
     private(set) var config: TolkConfig
     /// Max seconds for one action (grab + model + paste).
-    var timeout: TimeInterval = 60
+    var timeout: TimeInterval = 150 // a cold 26B model on CPU needs ~1 min just to load
 
     private let hotKeys = HotKeyCenter()
-    private var store = QuickActionHotKeyStore()
+    private let store = QuickActionHotKeyStore()
     private let hud = QuickActionHUD()
     private var tokens: [String: UInt32] = [:]
     private var escToken: UInt32?
-    private var started = false
 
     private var run: Task<Void, Never>?
     private(set) var isBusy = false
@@ -45,18 +40,7 @@ final class QuickActionsController {
 
     /// Registers all hotkeys. Returns false if any of them could not be registered
     /// (taken by another app); the others still work.
-    @discardableResult func start() -> Bool {
-        started = true
-        return registerAll()
-    }
-
-    func stop() {
-        cancel()
-        hotKeys.unregisterAll()
-        tokens.removeAll()
-        escToken = nil
-        started = false
-    }
+    @discardableResult func start() -> Bool { registerAll() }
 
     /// Call after the config changes (the app rebuilds the engine).
     func update(engine: TranslationEngine, config: TolkConfig) {
@@ -68,31 +52,10 @@ final class QuickActionsController {
 
     func hotKey(for action: QuickAction) -> HotKeyCombo? { store.hotKey(for: action) }
 
-    /// nil = disable. Returns false (and keeps the old shortcut) if the combo is used by
-    /// another quick action or cannot be registered (taken system-wide).
-    @discardableResult func setHotKey(_ combo: HotKeyCombo?, for action: QuickAction) -> Bool {
-        if let combo, actions.contains(where: { $0 != action && hotKey(for: $0) == combo }) { return false }
-        let old = hotKey(for: action)
-        store.set(combo, for: action)
-        guard started else { notifyChange(); return true }
-        if registerOne(action) { notifyChange(); return true }
-        store.set(old, for: action)
-        _ = registerOne(action)
-        return false
-    }
-
-    func resetHotKeys() {
-        store.reset()
-        if started { _ = registerAll() }
-        notifyChange()
-    }
-
     /// Ids of actions whose shortcut is configured but not registered (conflict) — to warn in settings.
     var failedActions: [QuickAction] {
         actions.filter { hotKey(for: $0) != nil && tokens[$0.id] == nil }
     }
-
-    private func notifyChange() { NotificationCenter.default.post(name: Self.hotKeysDidChange, object: self) }
 
     private func registerAll() -> Bool {
         actions.reduce(true) { ok, a in registerOne(a) && ok }
@@ -159,11 +122,25 @@ final class QuickActionsController {
         if Task.isCancelled { return cancelled() }
         guard let selected = await grabSelection() else {
             if Task.isCancelled { return cancelled() }
+            Diagnostics.log("quick \(action.id): no selection")
             hud.showMessage(QuickActionText.noSelection, kind: .info); return
         }
+        Diagnostics.log("quick \(action.id): \(selected.count) chars selected in \(app?.bundleIdentifier ?? "?")")
         if Task.isCancelled { return cancelled() }
 
-        // 3. Model.
+        // 3. Model. While the first word has not arrived, show how long the (maybe cold) model has been loading.
+        let waitStart = Date()
+        var gotText = false
+        var hudBase = QuickActionText.progress(verb: action.progressVerb, provider: nil, tone: tone)
+        let ticker = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled, !gotText else { return }
+                let n = Int(Date().timeIntervalSince(waitStart))
+                if n >= 4 { self?.hud.update(QuickActionText.loading(hudBase, seconds: n)) }
+            }
+        }
+        defer { ticker.cancel() }
         let result: CollectedText
         do {
             result = try await TextCollector.collect(engine.translate(action.request(text: selected, tone: tone))) { [weak self] event in
@@ -173,12 +150,15 @@ final class QuickActionsController {
                     let text = UIText.isFallbackProvider(provider)
                         ? QuickActionText.fallback(verb: action.progressVerb, provider: provider, tone: tone)
                         : QuickActionText.progress(verb: action.progressVerb, provider: provider, tone: tone)
+                    hudBase = text
                     self.hud.update(text)
+                case .delta: gotText = true
                 default: break
                 }
             }
         } catch {
             if error is CancellationError || Task.isCancelled { return cancelled() }
+            Diagnostics.log("quick \(action.id): failed: \(error.localizedDescription)")
             if action.needsQwen, error is TolkError { hud.showMessage(QuickActionText.qwenDown, kind: .error); return }
             hud.showMessage(UIText.errorMessage(error), kind: .error); return
         }
@@ -190,14 +170,28 @@ final class QuickActionsController {
         }
         // The user may have switched apps while waiting — never paste into the wrong window.
         if let app, NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier {
+            // Do not lose a minute of model work: leave the result on the clipboard.
+            leaveOnClipboard(text)
             hud.showMessage(QuickActionText.appChanged, kind: .error); return
+        }
+        // Read-only field (static text, locked text view): ⌘V would do nothing but we would say "Готово".
+        if FocusProbe.focusedFieldIsReadOnly() {
+            Diagnostics.log("quick \(action.id): focused field is read-only — result left on the clipboard")
+            leaveOnClipboard(text)
+            hud.showMessage(QuickActionText.readOnly, kind: .info); return
         }
 
         // 4. Replace.
+        Diagnostics.log("quick \(action.id): \(result.provider) → \(text.count) chars, pasting")
         pasting = true
         unregisterEsc()
         await paste(text)
         hud.showMessage(QuickActionText.done, kind: .success)
+    }
+
+    private func leaveOnClipboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     private func cancelled() {

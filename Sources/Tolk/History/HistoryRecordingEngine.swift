@@ -1,4 +1,4 @@
-// Owned by the "history" helper. Decorator that records finished translations into `HistoryStore`.
+// Decorator that records finished translations into `HistoryStore`.
 //
 //   let popupEngine = HistoryRecordingEngine(engine, origin: "popup", store: history)
 //
@@ -14,16 +14,13 @@ final class HistoryRecordingEngine: TranslationEngine, @unchecked Sendable {
     let store: HistoryStore
     /// App the text came from, read when the request starts. Default: the last active app other than Tolk
     /// (for "page"/"image" nil — the text was typed or captured in Tolk itself).
-    var appProvider: @Sendable () -> (name: String, bundleID: String?)?
+    let appProvider: @Sendable () -> (name: String, bundleID: String?)?
 
-    init(_ base: TranslationEngine, origin: String, store: HistoryStore,
-         appProvider: (@Sendable () -> (name: String, bundleID: String?)?)? = nil) {
+    init(_ base: TranslationEngine, origin: String, store: HistoryStore) {
         self.base = base
         self.origin = origin
         self.store = store
-        if let appProvider {
-            self.appProvider = appProvider
-        } else if origin == "page" || origin == "image" || origin == "document" {
+        if origin == "page" || origin == "image" || origin == "document" {
             self.appProvider = { nil }
         } else {
             ExternalAppTracker.shared.start()
@@ -55,8 +52,11 @@ final class HistoryRecordingEngine: TranslationEngine, @unchecked Sendable {
                             break
                         case .finished:
                             guard started, !Task.isCancelled else { break }
-                            store.record(HistoryEntry(origin: origin, app: app?.name, source: request.text,
-                                                      translation: text, sourceLanguage: source,
+                            // Live typing sends only the changed tail; history keeps the whole message.
+                            let ctx = request.context
+                            store.record(HistoryEntry(origin: origin, app: app?.name,
+                                                      source: (ctx?.source ?? "") + request.text,
+                                                      translation: (ctx?.translation ?? "") + text, sourceLanguage: source,
                                                       targetLanguage: target, provider: provider, mode: mode,
                                                       appBundleID: app?.bundleID),
                                          requestedAt: requestedAt)
@@ -73,6 +73,10 @@ final class HistoryRecordingEngine: TranslationEngine, @unchecked Sendable {
 
     func addGlossaryTerm(source: String, translation: String) throws {
         try base.addGlossaryTerm(source: source, translation: translation)
+    }
+
+    func refine(source: String, translation: String, from: Language, to: Language, tone: Tone) -> AsyncThrowingStream<String, Error> {
+        base.refine(source: source, translation: translation, from: from, to: to, tone: tone)
     }
 
     func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote] {

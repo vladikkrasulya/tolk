@@ -1,4 +1,3 @@
-// Owned by the "image" session.
 import AppKit
 import TolkCore
 import UniformTypeIdentifiers
@@ -63,11 +62,6 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
     private var textEdited = false
     private var ocrTask: Task<Void, Never>?
     private var copyResetWork: [ObjectIdentifier: DispatchWorkItem] = [:]
-
-    /// True while OCR or the translation is running (used by the demo / tests).
-    var isBusy: Bool { ocrTask != nil || translator.isRunning }
-    var recognizedText: String { sourceView?.string ?? "" }
-    var translatedText: String { translator.translation }
 
     // Views
     private var emptyView: NSView!
@@ -155,8 +149,10 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
             for i in newPages.indices {
                 if Task.isCancelled { return }
                 if newPages.count > 1 { self.ocrStatus.stringValue = "Распознаю страницу \(i + 1) из \(newPages.count)…" }
+                let t0 = Date()
                 let r = (try? await ImageOCR.recognize(newPages[i].image)) ?? .empty
-                if Task.isCancelled { return }
+                if Task.isCancelled { Diagnostics.log("image page: ocr cancelled"); return }
+                Diagnostics.log("image page: ocr page=\(i + 1)/\(newPages.count) chars=\(r.text.count) ms=\(Int(Date().timeIntervalSince(t0) * 1000))")
                 self.results[i] = r
                 if i == self.currentPage { self.updatePage() }
             }
@@ -307,7 +303,6 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         targetPopup.controlSize = .small
         targetPopup.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         targetPopup.addItem(withTitle: "Язык перевода: авто")
-        targetPopup.lastItem?.representedObject = nil
         targetPopup.menu?.addItem(.separator())
         for l in Language.allCases {
             targetPopup.addItem(withTitle: "\(l.flag)  \(UIText.intoLanguage(l))")
@@ -675,7 +670,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         // Compose the text and remember where every paragraph is (for click-to-select).
         var text = ""
         paragraphRanges = []
-        for (pi, r) in results.enumerated() {
+        for r in results {
             var ranges: [NSRange] = []
             if !r.isEmpty, !text.isEmpty { text += "\n\n" }
             for (i, p) in r.paragraphs.enumerated() {
@@ -685,7 +680,6 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
                 if i < r.paragraphs.count - 1 { text += p.separatorAfter }
             }
             paragraphRanges.append(ranges)
-            _ = pi
         }
         sourceView.string = text
         sourceView.setSelectedRange(NSRange(location: 0, length: 0))

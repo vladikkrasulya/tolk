@@ -76,12 +76,22 @@ public struct TranslationRequest: Sendable, Equatable {
     /// The message this text replies to (partner's original). The translation then keeps the partner's
     /// terms, names and register so the conversation reads as one thread.
     public var replyTo: String?
+    /// Live typing: `text` is only the changed tail of a longer message; this is the unchanged beginning
+    /// and its translation (see `IncrementalSession`). The model translates `text` only, consistent with it.
+    public var context: TranslationContext?
 
     public init(text: String, source: Language? = nil, target: Language? = nil, tone: Tone = .auto,
-                mode: TextMode = .translate, replyTo: String? = nil) {
+                mode: TextMode = .translate, replyTo: String? = nil, context: TranslationContext? = nil) {
         self.text = text; self.source = source; self.target = target; self.tone = tone; self.mode = mode
-        self.replyTo = replyTo
+        self.replyTo = replyTo; self.context = context
     }
+}
+
+/// The already translated beginning of a message whose tail is being translated now.
+public struct TranslationContext: Sendable, Equatable {
+    public var source: String
+    public var translation: String
+    public init(source: String, translation: String) { self.source = source; self.translation = translation }
 }
 
 /// Request after language detection, handed to a provider.
@@ -92,11 +102,12 @@ public struct ResolvedRequest: Sendable, Equatable {
     public var tone: Tone
     public var mode: TextMode
     public var replyTo: String?
+    public var context: TranslationContext?
 
     public init(text: String, source: Language, target: Language, tone: Tone, mode: TextMode = .translate,
-                replyTo: String? = nil) {
+                replyTo: String? = nil, context: TranslationContext? = nil) {
         self.text = text; self.source = source; self.target = target; self.tone = tone; self.mode = mode
-        self.replyTo = replyTo
+        self.replyTo = replyTo; self.context = context
     }
 }
 
@@ -125,6 +136,9 @@ public struct TranslationStats: Sendable, Equatable {
     public var tokensExact: Bool
     /// Why the primary model was not used (nil = it was).
     public var fallbackReason: String?
+    /// Problems found by the automatic check of the finished translation (a lost number or link,
+    /// wrong output language). Short Russian phrases for the status line; empty = nothing found.
+    public var warnings: [String] = []
 
     public init(provider: String, route: Route, firstChunk: TimeInterval?, total: TimeInterval,
                 outputTokens: Int?, tokensExact: Bool, fallbackReason: String?) {
@@ -193,9 +207,16 @@ public protocol TranslationEngine: AnyObject, Sendable {
     func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote]
     /// 3–4 alternative renderings of `fragment` (a word/phrase of `translation`) that fit the context. Empty if unavailable.
     func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String]
+    /// Second, "editor" pass over a finished translation: same meaning, numbers and names, but phrased the way
+    /// a native speaker would write it (removes calques). Streams the improved text; on any problem streams
+    /// `translation` unchanged.
+    func refine(source: String, translation: String, from: Language, to: Language, tone: Tone) -> AsyncThrowingStream<String, Error>
 }
 
 public extension TranslationEngine {
+    func refine(source: String, translation: String, from: Language, to: Language, tone: Tone) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { c in c.yield(translation); c.finish() }
+    }
     func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote] { [] }
     func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String] { [] }
 }
@@ -228,7 +249,7 @@ public struct GlossaryProfile: Codable, Sendable, Equatable, Identifiable {
 /// App settings. Stored as JSON at `TolkConfig.defaultPath`; missing file = defaults.
 public struct TolkConfig: Codable, Sendable, Equatable {
     public var ollamaURL: String = "http://192.168.1.13:11434"
-    public var model: String = "qwen-translate"
+    public var model: String = "gemma-translate"
     /// Rules + glossary in Markdown, injected into the system prompt.
     public var rulesPath: String = "~/Translate/rules.md"
     /// Default direction: `primary`/Ukrainian -> `secondary`; any other language -> `primary`.
@@ -236,11 +257,10 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public var secondaryLanguage: Language = .english
     /// Max seconds between the two Cmd+C presses.
     public var doubleCopyInterval: Double = 0.4
-    public var useGoogleFallback: Bool { fallback == .google }
     public var fallback: FallbackProvider = .google
     /// Glossary profiles; the active one decides the rules file (and may override the model).
     public var profiles: [GlossaryProfile] = TolkConfig.defaultProfiles(workRules: "~/Translate/rules.md")
-    public var activeProfileID: String = "work"
+    public var activeProfileID: String = "home"
 
     public static func defaultProfiles(workRules: String) -> [GlossaryProfile] {
         [GlossaryProfile(id: "work", name: "Работа", rulesPath: workRules),
@@ -273,7 +293,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
 
     /// System-wide autocomplete (local model, ghost text, Tab accepts).
     public var autocomplete: Bool = false
-    /// GGUF model for autocomplete (same as `AutocompletePrompt.defaultModelPath`; TolkCore cannot see the app target).
+    /// GGUF model for autocomplete.
     public var autocompleteModel: String = "~/Library/Application Support/Tolk/models/gemma-4-E4B-it-q4_0.gguf"
     /// Bundle ids where autocomplete stays off (terminals, IDEs).
     public var autocompleteOffApps: [String] = TolkConfig.defaultAutocompleteOffApps
@@ -385,7 +405,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
 
     /// Writes the config as pretty JSON (creates the folder). Posts `TolkConfig.didChange`.
     public func save(to path: String = defaultPath) throws {
-        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        let url = URL(fileURLWithPath: expandPath(path))
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -397,7 +417,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public static let didChange = Notification.Name("TolkConfigDidChange")
 
     public static func load(from path: String = defaultPath) -> TolkConfig {
-        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        let url = URL(fileURLWithPath: expandPath(path))
         guard let data = try? Data(contentsOf: url) else { return TolkConfig() }
         return (try? JSONDecoder().decode(TolkConfig.self, from: data)) ?? TolkConfig()
     }

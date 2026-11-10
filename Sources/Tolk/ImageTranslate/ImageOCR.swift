@@ -1,4 +1,4 @@
-// Owned by the "image" session. Offline OCR (Vision) + layout analysis: lines -> paragraphs in reading order.
+// Offline OCR (Vision) + layout analysis: lines -> paragraphs in reading order.
 import AppKit
 import Vision
 
@@ -12,7 +12,6 @@ struct OCRParagraph: Sendable, Equatable {
 
 struct OCRResult: Sendable, Equatable {
     var paragraphs: [OCRParagraph]
-    var imageSize: CGSize
 
     var isEmpty: Bool { paragraphs.isEmpty }
 
@@ -26,7 +25,7 @@ struct OCRResult: Sendable, Equatable {
         return out
     }
 
-    static let empty = OCRResult(paragraphs: [], imageSize: .zero)
+    static let empty = OCRResult(paragraphs: [])
 }
 
 enum ImageOCR {
@@ -86,7 +85,7 @@ enum ImageOCR {
             let rect = CGRect(x: b.minX * w, y: (1 - b.maxY) * h, width: b.width * w, height: b.height * h)
             return LayoutLine(text: text, rect: rect)
         }
-        return OCRResult(paragraphs: TextLayout.paragraphs(from: lines), imageSize: CGSize(width: w, height: h))
+        return OCRResult(paragraphs: TextLayout.paragraphs(from: lines))
     }
 }
 
@@ -131,12 +130,7 @@ struct LayoutLine: Equatable {
 enum TextLayout {
     static func paragraphs(from lines: [LayoutLine]) -> [OCRParagraph] {
         guard !lines.isEmpty else { return [] }
-        let blocks = order(groupIntoBlocks(lines))
-        var result: [OCRParagraph] = []
-        for block in blocks {
-            result.append(contentsOf: split(block))
-        }
-        return result
+        return order(groupIntoBlocks(lines)).flatMap(split)
     }
 
     // MARK: Step 1 — blocks
@@ -183,8 +177,8 @@ enum TextLayout {
         let unit = max(1, blocks.map(\.lineHeight).sorted()[blocks.count / 2])
         let rows = cut(blocks, vertical: false)
         let cols = cut(blocks, vertical: true)
-        let rowGap = rows.count > 1 ? rows.gap / unit : -1
-        let colGap = cols.count > 1 && cols.gap > 0.5 * unit ? cols.gap / unit : -1
+        let rowGap = rows.groups.count > 1 ? rows.gap / unit : -1
+        let colGap = cols.groups.count > 1 && cols.gap > 0.5 * unit ? cols.gap / unit : -1
         if rowGap < 0 && colGap < 0 {
             return blocks.sorted { ($0.rect.minY, $0.rect.minX) < ($1.rect.minY, $1.rect.minX) }
         }
@@ -193,7 +187,7 @@ enum TextLayout {
     }
 
     /// Splits blocks wherever there is an empty band across all of them (rows when `vertical` is false).
-    private static func cut(_ blocks: [Block], vertical: Bool) -> (groups: [[Block]], gap: CGFloat, count: Int) {
+    private static func cut(_ blocks: [Block], vertical: Bool) -> (groups: [[Block]], gap: CGFloat) {
         let lo: (Block) -> CGFloat = { vertical ? $0.rect.minX : $0.rect.minY }
         let hi: (Block) -> CGFloat = { vertical ? $0.rect.maxX : $0.rect.maxY }
         let sorted = blocks.sorted { lo($0) < lo($1) }
@@ -210,7 +204,7 @@ enum TextLayout {
             }
             reach = max(reach, hi(b))
         }
-        return (groups, maxGap, groups.count)
+        return (groups, maxGap)
     }
 
     // MARK: Step 3 — paragraphs inside a block

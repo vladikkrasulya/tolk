@@ -1,4 +1,3 @@
-// Owned by the "glossary" session. Foundation only.
 // CSV "Термин,Перевод,Комментарий" for sharing a glossary (Excel / Numbers / Google Sheets).
 import Foundation
 

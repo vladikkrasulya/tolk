@@ -1,4 +1,4 @@
-// Owned by the "main window" session. Debug-only preview of the main window with a fake engine.
+// Debug-only preview of the main window with a fake engine.
 //
 //   TOLK_MAIN_DEMO=translate|image|glossary|settings swift run Tolk   — opens the main window on that section
 //   TOLK_UI_APPEARANCE=dark|light                                     — force the appearance

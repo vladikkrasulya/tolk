@@ -1,4 +1,3 @@
-// Owned by the "input" session.
 import AppKit
 import ApplicationServices
 
@@ -55,6 +54,15 @@ final class DoubleCopyMonitor {
         self.tap = tap
         self.runLoopSource = source
         return true
+    }
+
+    /// Called by a slow timer: macOS can switch a tap off without telling us (e.g. after sleep/wake or a stall).
+    func ensureAlive() {
+        guard let tap else { return }
+        if CGEvent.tapIsEnabled(tap: tap) { return }
+        CGEvent.tapEnable(tap: tap, enable: true)
+        if !CGEvent.tapIsEnabled(tap: tap) { stop(); start() }
+        Diagnostics.log("double Cmd+C: event tap was disabled — re-enabled")
     }
 
     func stop() {
@@ -136,6 +144,10 @@ final class DoubleCopyMonitor {
     }
 
     private func deliver(_ text: String?) {
+        // Password managers mark what they copy as concealed/transient (nspasteboard.org): that text must
+        // never leave the Mac (the model server or the Google fallback), so no popup for it.
+        let types = NSPasteboard.general.types?.map(\.rawValue) ?? []
+        if types.contains("org.nspasteboard.ConcealedType") { return }
         guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         onTrigger?(text, NSEvent.mouseLocation)
     }

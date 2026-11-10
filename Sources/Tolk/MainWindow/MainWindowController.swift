@@ -1,4 +1,3 @@
-// Owned by the "main window" session.
 import AppKit
 import TolkCore
 
@@ -33,7 +32,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             }
         }
 
-        /// ⌘1…⌘4 in the "Окно" menu.
+        /// ⌘1…⌘7 in the "Окно" menu.
         var keyEquivalent: String {
             switch self {
             case .translate: "1"; case .image: "2"; case .documents: "3"; case .history: "4"
@@ -116,8 +115,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     /// Shows the window on the last used section.
     func show() { show(current) }
 
-    var translatePage: TranslatePageViewController? { pages[.translate] as? TranslatePageViewController }
-
     private func present() {
         AppPresence.shared.windowWillAppear()
         guard let window else { return }
@@ -134,13 +131,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window?.title = section.title
         window?.subtitle = ""
     }
-
-    // MARK: - Menu actions (Окно → Перевод ⌘1 … Настройки ⌘4, Tolk → Настройки ⌘,)
-
-    @objc func showTranslate(_ sender: Any?) { show(.translate) }
-    @objc func showImage(_ sender: Any?) { show(.image) }
-    @objc func showGlossary(_ sender: Any?) { show(.glossary) }
-    @objc func showSettingsSection(_ sender: Any?) { show(.settings) }
 
     // MARK: - NSWindowDelegate
 

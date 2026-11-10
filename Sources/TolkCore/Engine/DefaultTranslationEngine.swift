@@ -9,7 +9,9 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
     public let fallback: TranslationProvider?
 
     public convenience init(config: TolkConfig) {
-        let rules = RulesStore(path: config.effectiveRulesPath)
+        // Fresh install: the «Дом» file does not exist yet — built-in neutral rules are used in memory.
+        let rules = RulesStore(path: config.effectiveRulesPath,
+                               builtIn: config.activeProfile.id == "home" ? DefaultRules.home : nil)
         let fallback: TranslationProvider?
         switch config.fallback {
         case .google: fallback = GoogleProvider()
@@ -33,6 +35,7 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                 let t0 = Date()
                 var firstAt: Date?
                 var chunks = 0
+                var produced = ""
                 let usage = UsageBox()
                 func stats(_ provider: TranslationProvider, reason: String?) -> TranslationStats {
                     let route: TranslationStats.Route
@@ -42,11 +45,17 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                     default: route = .web
                     }
                     let exact = usage.completionTokens
-                    return TranslationStats(provider: provider.name, route: route,
-                                            firstChunk: firstAt.map { $0.timeIntervalSince(t0) },
-                                            total: Date().timeIntervalSince(t0),
-                                            outputTokens: exact ?? (provider is OllamaProvider ? chunks : nil),
-                                            tokensExact: exact != nil, fallbackReason: reason)
+                    var st = TranslationStats(provider: provider.name, route: route,
+                                              firstChunk: firstAt.map { $0.timeIntervalSince(t0) },
+                                              total: Date().timeIntervalSince(t0),
+                                              outputTokens: exact ?? (provider is OllamaProvider ? chunks : nil),
+                                              tokensExact: exact != nil, fallbackReason: reason)
+                    // Only the new text and its translation are compared when a context was given.
+                    if resolved.mode == .translate {
+                        st.warnings = TranslationCheck.warnings(source: resolved.text, translation: produced,
+                                                                from: resolved.source, to: resolved.target)
+                    }
+                    return st
                 }
                 do {
                     guard !resolved.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -57,13 +66,21 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                     if await primary.isAvailable() {
                         continuation.yield(.started(provider: primary.name, source: resolved.source, target: resolved.target))
                         var gotChunk = false
-                        do {
+                        var coldFailure: String?
+                        // Cold model: wait for the load in a separate request (never cut by our timeout,
+                        // never cancelled by the user closing the popup). Too long -> fall back, load goes on.
+                        if let ollama = primary as? OllamaProvider, await ollama.ensureReady(timeout: Self.coldLoadWait) == .stillLoading {
+                            try Task.checkCancellation()
+                            coldFailure = "модель ещё загружается на vkbox (холодный старт), прогрев продолжается"
+                        }
+                        if coldFailure == nil { do {
                             try await UsageBox.$current.withValue(usage) {
                                 for try await chunk in primary.translate(resolved) {
                                     try Task.checkCancellation()
                                     if firstAt == nil { firstAt = Date() }
                                     chunks += 1
                                     gotChunk = true
+                                    produced += chunk
                                     continuation.yield(.delta(chunk))
                                 }
                             }
@@ -71,23 +88,35 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                             continuation.yield(.finished); continuation.finish(); return
                         } catch {
                             // Mid-stream failure or cancellation: nothing sensible to fall back to.
-                            if gotChunk || error is CancellationError || Task.isCancelled { throw error }
+                            if error is CancellationError || Task.isCancelled { throw error }
+                            if gotChunk { throw TolkError.unavailable("Перевод прервался на середине: \(Self.describe(error))") }
                             failure = Self.describe(error)
-                        }
+                        } } else { failure = coldFailure }
                     } else {
                         failure = "vkbox недоступен (Ollama не отвечает)"
                     }
                     // Google can only translate; a polish request has no fallback.
                     guard let fallback, resolved.mode == .translate else {
-                        throw TolkError.unavailable(failure ?? "\(primary.name) недоступен")
+                        let why = failure ?? "\(primary.name) недоступен"
+                        throw TolkError.unavailable(resolved.mode == .polish
+                            ? "«Причесать» работает только через модель на vkbox, а она сейчас недоступна: \(why)"
+                            : "Перевод не получился: \(why). Запасной перевод выключен (Настройки → Перевод).")
                     }
                     try Task.checkCancellation()
                     continuation.yield(.fellBack(from: primary.name, reason: failure ?? ""))
                     continuation.yield(.started(provider: fallback.name, source: resolved.source, target: resolved.target))
-                    for try await chunk in fallback.translate(resolved) {
-                        try Task.checkCancellation()
-                        if firstAt == nil { firstAt = Date() }
-                        continuation.yield(.delta(chunk))
+                    produced = ""
+                    do {
+                        for try await chunk in fallback.translate(resolved) {
+                            try Task.checkCancellation()
+                            if firstAt == nil { firstAt = Date() }
+                            produced += chunk
+                            continuation.yield(.delta(chunk))
+                        }
+                    } catch {
+                        if error is CancellationError || Task.isCancelled { throw error }
+                        // No silent trip to the cloud: Apple was chosen as the private fallback.
+                        throw TolkError.unavailable("\(failure ?? "vkbox недоступен"). Запасной перевод \(fallback.name): \(Self.describe(error))" + Self.googleHint(for: fallback))
                     }
                     continuation.yield(.stats(stats(fallback, reason: failure)))
                     continuation.yield(.finished)
@@ -101,32 +130,48 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
     }
 
     public func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote] {
-        guard let ollama = primary as? OllamaProvider, await ollama.isAvailable() else { return [] }
+        // Only if the model is already in memory: an optional footnote must never trigger a 30 s cold load.
+        guard let ollama = primary as? OllamaProvider, await ollama.isModelLoaded() == true else { return [] }
         return await ollama.notes(source: source, translation: translation, from: from, to: to)
     }
 
     public func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String] {
-        guard let ollama = primary as? OllamaProvider, await ollama.isAvailable() else { return [] }
+        guard let ollama = primary as? OllamaProvider, await ollama.isModelLoaded() == true else { return [] }
         return await ollama.alternatives(for: fragment, in: translation, source: source, from: from, to: to)
     }
 
     /// Dev: the exact system prompt a request would get (CLI --show-prompt).
     public func debugSystemPrompt(for request: TranslationRequest) -> String {
         let r = LanguageDetector.resolve(request, config: config)
-        return Prompt.system(for: r, rules: rules.promptBlock(for: r.text + "\n" + (r.replyTo ?? ""), target: r.target))
+        let selector = [r.text, r.replyTo, r.context?.source].compactMap { $0 }.joined(separator: "\n")
+        return Prompt.system(for: r, rules: rules.promptBlock(for: selector, target: r.target))
     }
 
     public func addGlossaryTerm(source: String, translation: String) throws {
         try rules.addTerm(source: source, translation: translation)
     }
 
+    /// How long a user request waits for a cold model before switching to the fallback (the load goes on).
+    static let coldLoadWait: TimeInterval = 75
+
+    private static let hintLock = NSLock()
+    nonisolated(unsafe) private static var hintShown = false
+    /// One-time advice (per launch) when the private fallback (Apple) failed: how to enable Google.
+    static func googleHint(for fallback: TranslationProvider) -> String {
+        guard fallback is AppleTranslationProvider else { return "" }
+        let first = hintLock.withLock { let f = !hintShown; hintShown = true; return f }
+        return first ? "\nСовет: если приватность не критична, выберите запасной «Google» в Настройки → Перевод — тогда перевод пойдёт через интернет." : ""
+    }
+
     static func describe(_ error: Error) -> String {
         if let u = error as? URLError {
             switch u.code {
-            case .timedOut: return "Модель: таймаут"
-            case .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .cannotFindHost:
-                return "vkbox недоступен (\(u.localizedDescription))"
-            default: return "Модель: \(u.localizedDescription)"
+            case .timedOut: return "модель не отвечает (таймаут)"
+            case .networkConnectionLost: return "связь с vkbox оборвалась"
+            case .cannotConnectToHost, .notConnectedToInternet, .cannotFindHost, .dnsLookupFailed:
+                return "vkbox недоступен (нет связи с сетью или сервером)"
+            case .cancelled: return "запрос отменён"
+            default: return "ошибка сети (\(u.code.rawValue))"
             }
         }
         return (error as? LocalizedError)?.errorDescription ?? "\(error)"

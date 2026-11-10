@@ -1,4 +1,3 @@
-// Owned by the "main window" session.
 import AppKit
 import ApplicationServices
 import SwiftUI
@@ -183,9 +182,6 @@ final class SettingsModel: ObservableObject {
 
     // MARK: Rules file
 
-    var rulesURL: URL { URL(fileURLWithPath: (config.effectiveRulesPath as NSString).expandingTildeInPath) }
-    var rulesExists: Bool { FileManager.default.fileExists(atPath: rulesURL.path) }
-
     /// Translation models on the server (`*-translate`), plus the ones already configured.
     var translateModels: [String] {
         var names = availableModels.map { $0.replacingOccurrences(of: ":latest", with: "") }
@@ -220,18 +216,6 @@ final class SettingsModel: ObservableObject {
         guard config.profiles.count > 1 else { return }
         config.profiles.removeAll { $0.id == id }
         if config.activeProfileID == id { config.activeProfileID = config.profiles[0].id }
-    }
-
-    func chooseRulesFile() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Выберите файл правил и глоссария (Markdown)"
-        panel.prompt = "Выбрать"
-        panel.directoryURL = rulesURL.deletingLastPathComponent()
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        config.rulesPath = (url.path as NSString).abbreviatingWithTildeInPath
     }
 
     func revealAutocompleteModel() {
@@ -298,11 +282,6 @@ final class SettingsModel: ObservableObject {
             return knownAppNames[bundleID] ?? bundleID
         }
         return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
-    }
-
-    func revealRules() {
-        if rulesExists { NSWorkspace.shared.activateFileViewerSelecting([rulesURL]) }
-        else { NSSound.beep() }
     }
 }
 
@@ -536,15 +515,17 @@ struct SettingsView: View {
 
     private var languageSection: some View {
         Section {
-            Picker("Основной язык", selection: $model.config.primaryLanguage) {
-                ForEach(Language.allCases, id: \.self) { Text("\($0.flag)  \(UIText.capitalized($0))").tag($0) }
-            }
-            Picker("Второй язык", selection: $model.config.secondaryLanguage) {
-                ForEach(Language.allCases, id: \.self) { Text("\($0.flag)  \(UIText.capitalized($0))").tag($0) }
-            }
+            languagePicker("Основной язык", selection: $model.config.primaryLanguage)
+            languagePicker("Второй язык", selection: $model.config.secondaryLanguage)
             hint("Текст на основном языке (и на украинском) переводится на второй, всё остальное — на основной.")
         } header: {
             Text("Языки по умолчанию")
+        }
+    }
+
+    private func languagePicker(_ title: String, selection: Binding<Language>) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(Language.allCases, id: \.self) { Text("\($0.flag)  \(UIText.capitalized($0))").tag($0) }
         }
     }
 
@@ -900,7 +881,6 @@ private struct CheckLabel: View {
         .lineLimit(2)
     }
 }
-
 
 /// Picker of translation models with human descriptions; «Другая…» reveals a free text field.
 struct ModelPicker: View {

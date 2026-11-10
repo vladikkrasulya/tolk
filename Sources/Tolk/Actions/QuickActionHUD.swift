@@ -1,4 +1,3 @@
-// Owned by the "quick actions" session.
 import AppKit
 
 /// Small non-activating plate near the mouse cursor: spinner + status, or a short result message.

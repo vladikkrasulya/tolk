@@ -31,24 +31,17 @@ public final class AppleTranslationProvider: TranslationProvider, @unchecked Sen
                     #if canImport(Translation)
                     if #available(macOS 26.0, *) {
                         let src = Self.localeLanguage(request.source), dst = Self.localeLanguage(request.target)
-                        let status = await LanguageAvailability().status(from: src, to: dst)
+                        // LanguageAvailability can also hang without a run loop / without Translation services.
+                        let status: LanguageAvailability.Status = try await Self.race(seconds: 5, what: "Проверка языков Apple не ответила за 5 с") { await LanguageAvailability().status(from: src, to: dst) }
                         guard status == .installed else {
                             throw TolkError.unavailable(status == .unsupported
                                 ? "Apple не умеет переводить \(request.source.label) → \(request.target.label)"
-                                : "Языки для перевода Apple не скачаны: Системные настройки → Основные → Язык и регион → Языки перевода")
+                                : "не скачаны языки (\(request.source.label) → \(request.target.label)): Системные настройки → Основные → Язык и регион → Языки перевода → Скачать")
                         }
                         let session = TranslationSession(installedSource: src, target: dst)
                         let text = request.text
                         // Never hang: Apple's service can stall (e.g. without a main run loop).
-                        let response = try await withThrowingTaskGroup(of: TranslationSession.Response?.self) { g in
-                            g.addTask { try await session.translate(text) }
-                            g.addTask { try await Task.sleep(nanoseconds: 15_000_000_000); return nil }
-                            defer { g.cancelAll() }
-                            guard let first = try await g.next(), let r = first else {
-                                throw TolkError.unavailable("Перевод Apple не ответил за 15 с")
-                            }
-                            return r
-                        }
+                        let response: TranslationSession.Response = try await Self.race(seconds: 15, what: "Перевод Apple не ответил за 15 с") { try await session.translate(text) }
                         try Task.checkCancellation()
                         continuation.yield(response.targetText)
                         continuation.finish()
@@ -61,6 +54,16 @@ public final class AppleTranslationProvider: TranslationProvider, @unchecked Sen
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// Result or timeout, whichever first. Not a task group: a group would wait for the stuck call too.
+    static func race<T: Sendable>(seconds: Double, what: String, _ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        let once = NSLock(); var done = false
+        return try await withCheckedThrowingContinuation { (c: CheckedContinuation<T, Error>) in
+            func finish(_ r: Result<T, Error>) { once.lock(); defer { once.unlock() }; if !done { done = true; c.resume(with: r) } }
+            Task { do { finish(.success(try await work())) } catch { finish(.failure(error)) } }
+            Task { try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9)); finish(.failure(TolkError.unavailable(what))) }
         }
     }
 }

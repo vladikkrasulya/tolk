@@ -18,7 +18,13 @@ public final class RulesStore: @unchecked Sendable {
         var glossary: [GlossaryLine] = []
     }
 
-    public init(path: String) { self.path = expandPath(path) }
+    /// Used in memory when the file does not exist (fresh install); never written unless the user adds a term.
+    private let builtIn: String?
+
+    public init(path: String, builtIn: String? = nil) { self.path = expandPath(path); self.builtIn = builtIn }
+
+    /// True when the rules come from the built-in text because the file is missing.
+    public var usesBuiltIn: Bool { builtIn != nil && !FileManager.default.fileExists(atPath: path) }
 
     /// Rules block for the system prompt: style always, glossary only lines matching `text`.
     /// With `target`, every glossary pair is turned to point INTO the target language
@@ -77,7 +83,7 @@ public final class RulesStore: @unchecked Sendable {
         let entry = "- \(s) → \(t)"
         lock.lock(); defer { lock.unlock() }
         let url = URL(fileURLWithPath: path)
-        var lines = ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
+        var lines = ((try? String(contentsOf: url, encoding: .utf8)) ?? builtIn ?? "")
             .components(separatedBy: "\n")
         if let g = lines.firstIndex(where: Self.isGlossaryHeader) {
             var end = lines[(g + 1)...].firstIndex { $0.hasPrefix("#") } ?? lines.count
@@ -101,7 +107,7 @@ public final class RulesStore: @unchecked Sendable {
         let m = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
         if m != mtime || m == nil {
             mtime = m
-            let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+            let text = (try? String(contentsOfFile: path, encoding: .utf8)) ?? (m == nil ? builtIn ?? "" : "")
             parsed = Self.parse(text)
         }
         return parsed
@@ -150,19 +156,65 @@ public final class RulesStore: @unchecked Sendable {
             .filter { $0.count >= 2 }
     }
 
-    /// Case-insensitive match at a word start. Russian/Ukrainian forms drop a trailing vowel so that
-    /// "капа" also matches "капу/капы", "постбек" matches "постбеки".
+    /// Case-insensitive whole-word match.
+    /// Latin terms: only regular inflection may follow (s/es/ed/d/ing, 's, y→ies, doubled final consonant),
+    /// so "cap" matches "caps", "capped" but not "capital"; "feed" not "feedback". A verb entry ("to scale")
+    /// does not fire when a particle follows that changes the meaning ("scale back").
+    /// Cyrillic terms: matched by stem; a trailing vowel of a 4+ letter word is dropped and an ending of up to
+    /// 3 letters is allowed, so «капа» matches «капу/капы/капой» but not «капитал».
     static func pattern(for term: String) -> NSRegularExpression? {
-        let words = term.lowercased().split(separator: " ").map(String.init).filter { !$0.isEmpty }
+        let words = term.lowercased().split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init).filter { !$0.isEmpty }
         guard !words.isEmpty else { return nil }
-        let vowels: Set<Character> = ["а", "я", "о", "е", "ы", "и", "і", "у", "ю", "й", "ь"]
-        let stems = words.map { w -> String in
-            var w = w
-            if w.unicodeScalars.contains(where: { (0x0400...0x04FF).contains($0.value) }),
-               w.count >= 4, let last = w.last, vowels.contains(last) { w.removeLast() }
-            return NSRegularExpression.escapedPattern(for: w)
+        let start = "(?<![\\p{L}\\p{N}])"
+        let end = "(?![\\p{L}\\p{N}])"
+        let isCyr = { (w: String) in w.unicodeScalars.contains { (0x0400...0x04FF).contains($0.value) } }
+        var parts: [String] = []
+        for (i, w) in words.enumerated() {
+            let last = i == words.count - 1
+            if isCyr(w) {
+                let stem = cyrillicStem(w)
+                parts.append(NSRegularExpression.escapedPattern(for: stem) + "\\p{L}{0,3}")
+            } else if last {
+                parts.append(latinForms(w))
+            } else {
+                parts.append(NSRegularExpression.escapedPattern(for: w))
+            }
         }
-        let body = stems.joined(separator: "\\w*[\\s-]+")
-        return try? NSRegularExpression(pattern: "(?<![\\p{L}\\p{N}])" + body, options: [.caseInsensitive])
+        var body = parts.joined(separator: "[\\s-]+")
+        var tail = end
+        if words.count == 2, words[0] == "to", !isCyr(words[1]) {
+            tail += "(?!\\s+(?:back|away|around|off|over|out)(?![\\p{L}\\p{N}]))"
+        }
+        body = start + body + tail
+        return try? NSRegularExpression(pattern: body, options: [.caseInsensitive])
+    }
+
+    static func cyrillicStem(_ word: String) -> String {
+        let vowels: Set<Character> = ["а", "я", "о", "е", "ы", "и", "і", "у", "ю", "й", "ь", "ї", "є"]
+        var w = word
+        let twoLetter = ["ая", "яя", "ое", "ее", "ый", "ий", "ой", "ую", "юю", "ых", "их", "ій", "ою"]
+        if w.count >= 6, twoLetter.contains(String(w.suffix(2))) { w.removeLast(2) }
+        else if w.count >= 4, let last = w.last, vowels.contains(last) { w.removeLast() }
+        return w
+    }
+
+    /// "cap" -> cap(?:s|es|ed|d|ing|'s|’s|ped|ping) — whole word, regular inflection only.
+    static func latinForms(_ w: String) -> String {
+        guard let lastChar = w.last, lastChar.isLetter, w.count >= 2 else { return NSRegularExpression.escapedPattern(for: w) }
+        let esc = NSRegularExpression.escapedPattern(for: w)
+        var alts = ["s", "es", "ed", "d", "ing", "'s", "’s", "s'", "s’"]
+        let vowels: Set<Character> = ["a", "e", "i", "o", "u"]
+        var stemAlts: [String] = []
+        if lastChar == "e" {
+            stemAlts.append(NSRegularExpression.escapedPattern(for: String(w.dropLast())) + "ing")
+        } else if lastChar == "y" {
+            let stem = NSRegularExpression.escapedPattern(for: String(w.dropLast()))
+            stemAlts += [stem + "ies", stem + "ied"]
+        } else if !vowels.contains(lastChar), lastChar != "w", lastChar != "x" {
+            let c = NSRegularExpression.escapedPattern(for: String(lastChar))
+            alts += ["\(c)ed", "\(c)ing"]
+        }
+        let all = stemAlts + alts.map { esc + NSRegularExpression.escapedPattern(for: $0) }
+        return "(?:" + esc + "|" + all.joined(separator: "|") + ")"
     }
 }

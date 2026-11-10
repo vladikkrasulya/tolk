@@ -1,4 +1,3 @@
-// Owned by the "main window" session.
 import AppKit
 import TolkCore
 
@@ -45,8 +44,9 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             runner.cancel()
             runner = TranslationRunner(engine: engine)
             runner.onUpdate = { [weak self] in self?.handle($0) }
-        runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
+            runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
             lastTranslatedRequest = nil
+            live.reset()
             if isViewLoaded {
                 spinner.stopAnimation(nil)
                 DispatchQueue.main.async { [weak self] in self?.translateNow(force: true) }
@@ -91,6 +91,17 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
     private var awaitingFirstDelta = false
     private var copyResetWork: DispatchWorkItem?
 
+    // Live typing: sentence cache + the current request's plan.
+    private let live = LiveTranslation()
+    private var step: LiveTranslation.Step?
+    private var keptPrefix = ""
+    private var tail = ""
+    // Editor pass
+    private let refiner = RefineRunner()
+    private var refineButton: NSButton!
+    private var beforeRefine: String?
+    private var configObserver: NSObjectProtocol?
+
     static let inputFontSize: CGFloat = 18
 
     private var tone: Tone {
@@ -104,8 +115,12 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         super.init(nibName: nil, bundle: nil)
         runner.onUpdate = { [weak self] in self?.handle($0) }
         runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
+        configObserver = NotificationCenter.default.addObserver(forName: TolkConfig.didChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.live.reset() }
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
+    deinit { if let o = configObserver { NotificationCenter.default.removeObserver(o) } }
 
     // MARK: - Public
 
@@ -129,6 +144,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         guard isViewLoaded else { return }
         debounceTask?.cancel()
         runner.cancel()
+        refiner.cancel()
         spinner.stopAnimation(nil)
         lastTranslatedRequest = nil
     }
@@ -180,13 +196,18 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         let request = TranslationRequest(text: text, source: selectedSource, target: selectedTarget, tone: tone)
         if !force, request == lastTranslatedRequest { return }
         lastTranslatedRequest = request
+        if force { live.reset() } // ⌘↩, engine/profile change, loaded text: one full request
 
+        let wasRunning = runner.isRunning
         runner.cancel()
-        translation = ""
+        resetRefine()
         fellBackFrom = nil
         noticeLabel.isHidden = true
-        copyButton.isEnabled = false
         guard !text.isEmpty else {
+            live.reset(); step = nil
+            translation = ""; tail = ""; keptPrefix = ""
+            copyButton.isEnabled = false
+            refineButton.isEnabled = false
             setOutput("", color: .labelColor)
             spinner.stopAnimation(nil)
             providerBadge.text = ""
@@ -195,24 +216,53 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             updateStatus()
             return
         }
-        awaitingFirstDelta = true
-        // Like DeepL: keep the previous translation visible but dimmed until the new one starts;
-        // an empty pane says «Перевожу…».
-        if outputView.string.isEmpty {
-            outputPlaceholderView.placeholder = "Перевожу…"
-        } else if let storage = outputView.textStorage {
-            storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor,
-                                 range: NSRange(location: 0, length: storage.length))
+        let key = LiveTranslation.key(source: selectedSource, target: selectedTarget, tone: tone, mode: .translate,
+                                      config: TolkConfig.load())
+        let st = live.prepare(text: text, source: selectedSource, target: selectedTarget, tone: tone, key: key)
+        Diagnostics.log(st.logLine)
+        step = st
+        keptPrefix = st.kind == .partial ? st.kept : ""
+        tail = ""
+        guard let toSend = st.request else {
+            // Nothing meaningful changed: the shown translation must equal the kept one.
+            if wasRunning { statusLine?.reset() }
+            spinner.stopAnimation(nil)
+            awaitingFirstDelta = false
+            translation = st.kept
+            setOutput(st.kept, color: .labelColor)
+            copyButton.isEnabled = !st.kept.isEmpty
+            refineButton.isEnabled = !st.kept.isEmpty
+            return
+        }
+        copyButton.isEnabled = false
+        refineButton.isEnabled = false
+        if st.kind == .partial {
+            // The kept part stays on screen without flicker; the tail streams in after it.
+            translation = st.kept
+            awaitingFirstDelta = false
+            setOutput(st.kept, color: .labelColor)
+        } else {
+            translation = ""
+            awaitingFirstDelta = true
+            // Like DeepL: keep the previous translation visible but dimmed until the new one starts;
+            // an empty pane says «Перевожу…».
+            if outputView.string.isEmpty {
+                outputPlaceholderView.placeholder = "Перевожу…"
+            } else if let storage = outputView.textStorage {
+                storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor,
+                                     range: NSRange(location: 0, length: storage.length))
+            }
         }
         spinner.startAnimation(nil)
         statusLine?.waiting(provider: "…")
-        runner.start(request)
+        runner.start(toSend)
     }
 
     private func handle(_ update: TranslationRunner.Update) {
         switch update {
         case let .started(provider, source, target):
             statusLine?.waiting(provider: provider)
+            live.started(source: source, target: target)
             detectedSource = source
             detectedTarget = target
             providerBadge.text = UIText.providerName(provider)
@@ -228,21 +278,27 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
                 awaitingFirstDelta = false
                 setOutput("", color: .labelColor)
             }
-            translation += chunk
+            tail += chunk
+            translation = keptPrefix + tail
             outputView.textStorage?.append(NSAttributedString(string: chunk, attributes: textAttributes()))
             copyButton.isEnabled = true
         case let .fellBack(from, reason):
             statusLine?.fellBack(reason: reason)
             fellBackFrom = from
-            translation = ""
+            // Only the streamed tail goes; the kept part stays on screen.
+            tail = ""
+            translation = keptPrefix
             awaitingFirstDelta = true
-            setOutput("", color: .labelColor)
+            setOutput(keptPrefix, color: .labelColor)
+            awaitingFirstDelta = keptPrefix.isEmpty
             copyButton.isEnabled = false
-            showNotice("\(UIText.providerName(from)) недоступен — переключаюсь на Google", color: .systemOrange)
+            showNotice("\(UIText.providerName(from)) недоступен — переключаюсь на запасной перевод", color: .systemOrange)
             noticeLabel.toolTip = reason
         case .finished:
             spinner.stopAnimation(nil)
             awaitingFirstDelta = false
+            if let st = step, !tail.isEmpty { live.commit(st, tail: tail) }
+            refineButton.isEnabled = !translation.isEmpty
         case let .failed(message):
             statusLine?.failed(message)
             spinner.stopAnimation(nil)
@@ -277,11 +333,12 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
 
     // MARK: - Actions
 
-    @objc private func directionChanged(_ sender: NSPopUpButton) { translateNow() }
+    @objc private func directionChanged(_ sender: NSPopUpButton) { live.reset(); translateNow() }
 
     @objc private func swapDirection() {
         let newSource = selectedTarget ?? detectedTarget
         let newTarget = selectedSource ?? detectedSource
+        live.reset()
         sourcePopup.selectItem(at: index(of: newSource))
         targetPopup.selectItem(at: index(of: newTarget))
         let result = translation.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -295,6 +352,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
 
     @objc private func toneChanged(_ sender: NSSegmentedControl) {
         tone = Tone.allCases[max(0, sender.selectedSegment)]
+        live.reset()
         translateNow()
     }
 
@@ -304,6 +362,62 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         updateCounter()
         translateNow()
         focusInput()
+    }
+
+    // MARK: - Editor pass
+
+    private func resetRefine() {
+        refiner.cancel()
+        beforeRefine = nil
+        refineButton?.title = "Отредактировать"
+    }
+
+    @objc private func refineClicked() {
+        if let old = beforeRefine {   // «Вернуть»
+            beforeRefine = nil
+            translation = old
+            setOutput(old, color: .labelColor)
+            refineButton.title = "Отредактировать"
+            live.reset()
+            return
+        }
+        let source = inputView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !translation.isEmpty, !runner.isRunning, !source.isEmpty,
+              let from = selectedSource ?? detectedSource, let to = selectedTarget ?? detectedTarget else { return }
+        let old = translation
+        var refined = ""
+        spinner.startAnimation(nil)
+        refineButton.isEnabled = false
+        copyButton.isEnabled = false
+        live.reset()
+        awaitingFirstDelta = false
+        refiner.start(engine: engine, source: source, translation: old, from: from, to: to, tone: tone,
+                      onDelta: { [weak self] chunk in
+            guard let self else { return }
+            if refined.isEmpty { self.setOutput("", color: .labelColor) }
+            refined += chunk
+            self.translation = refined
+            self.outputView.textStorage?.append(NSAttributedString(string: chunk, attributes: self.textAttributes()))
+        }, onDone: { [weak self] in
+            guard let self else { return }
+            self.spinner.stopAnimation(nil)
+            let t = refined.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty || t == old.trimmingCharacters(in: .whitespacesAndNewlines) {
+                self.translation = old; self.setOutput(old, color: .labelColor)
+            } else {
+                self.beforeRefine = old
+                self.refineButton.title = "Вернуть"
+            }
+            self.refineButton.isEnabled = true
+            self.copyButton.isEnabled = true
+        }, onFail: { [weak self] message in
+            guard let self else { return }
+            self.spinner.stopAnimation(nil)
+            self.translation = old; self.setOutput(old, color: .labelColor)
+            self.refineButton.isEnabled = true
+            self.copyButton.isEnabled = true
+            self.showNotice(message, color: .systemRed)
+        })
     }
 
     @objc func copyTranslation() {
@@ -371,8 +485,17 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         box.cornerRadius = 12
         box.borderWidth = 1
         box.borderColor = .separatorColor
-        box.fillColor = tinted ? (NSColor.textBackgroundColor.blended(withFraction: 0.035, of: .labelColor) ?? .textBackgroundColor)
-                               : .textBackgroundColor
+        // Dynamic: resolved at draw time, so the card follows the window's appearance (not the one at creation).
+        box.fillColor = tinted
+            ? NSColor(name: nil) { appearance in
+                var result = NSColor.textBackgroundColor
+                appearance.performAsCurrentDrawingAppearance {
+                    result = (NSColor.textBackgroundColor.blended(withFraction: 0.035, of: .labelColor) ?? .textBackgroundColor)
+                        .usingColorSpace(.sRGB) ?? .textBackgroundColor
+                }
+                return result
+            }
+            : .textBackgroundColor
         box.contentViewMargins = .zero
         box.titlePosition = .noTitle
         guard let cv = box.contentView else { return box }
@@ -469,8 +592,16 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         copyButton.imagePosition = .imageLeading
         copyButton.isEnabled = false
         copyButton.toolTip = "Скопировать перевод (⌘↩)"
+        refineButton = NSButton(title: "Отредактировать", target: self, action: #selector(refineClicked))
+        refineButton.bezelStyle = .push
+        refineButton.controlSize = .small
+        refineButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        refineButton.isEnabled = false
+        refineButton.toolTip = "Второй проход: убрать кальки, сохранить смысл"
+        refineButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         statusLine = StatusLineView()
-        let outBottom = NSStackView(views: [statusLine, noticeLabel, UIFactory.spacer(), copyButton])
+        let outBottom = NSStackView(views: [statusLine, noticeLabel, UIFactory.spacer(), refineButton, copyButton])
+        outBottom.spacing = 6
         outBottom.orientation = .horizontal
 
         let leftCard = card(inScroll, bottom: inBottom, tinted: false)

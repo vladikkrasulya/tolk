@@ -7,6 +7,7 @@ import TolkCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var config = TolkConfig.load()
+    private let isFirstRun = FirstRunView.isNeeded // no tolk.json yet: evaluated before anything can save it
     private var engine: DefaultTranslationEngine!
 
     // Features
@@ -48,6 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
         if ProcessInfo.processInfo.environment["TOLK_MAIN_DEMO"] != nil { MainWindowDemo.runIfRequested(); return }
+        // Dev: TOLK_TEST_OLLAMA=http://127.0.0.1:11999 points this run at a fake server (cold-model / down tests); not saved.
+        if let url = ProcessInfo.processInfo.environment["TOLK_TEST_OLLAMA"] { config.ollamaURL = url; config.autocomplete = false }
         #endif
         engine = DefaultTranslationEngine(config: config)
 
@@ -91,6 +94,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         screenCapture.onText = { [weak self] text, point in self?.popup.show(text: text, at: point) }
         screenCapture.onHotKey = { [weak self] in self?.captureScreen() }
         screenCapture.start()
+        if ProcessInfo.processInfo.environment["TOLK_TEST_OVERLAY"] != nil {
+            if ProcessInfo.processInfo.environment["TOLK_TEST_OVERLAY"] == "image" { mainWindow.show(.image) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.captureScreen() }
+        }
+        if let spec = ProcessInfo.processInfo.environment["TOLK_TEST_CAPTURE"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.screenCapture.runTestCapture(spec) }
+        }
         imagePage.screenHotKeyDisplay = screenCapture.hotKeyDisplay
         // Closing the main window stops a long document translation (it would hold an Ollama slot).
         mainWindow.onClose = { [weak self] in self?.imagePage.cancelWork(); self?.documentsPage.cancelWork() }
@@ -106,7 +116,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Launched by hand (Dock, Launchpad, Finder) -> show the window. At login (LaunchAgent passes
         // --background) stay quietly in the menu bar.
-        if !CommandLine.arguments.contains("--background") { mainWindow.show() }
+        if !CommandLine.arguments.contains("--background") {
+            mainWindow.show()
+            if isFirstRun { FirstRunView.present(in: mainWindow.window) }
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { Diagnostics.offerReportIfCrashed() }
 
         #if DEBUG
@@ -136,6 +149,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 exit(0)
             }
         }
+        // Dev: TOLK_MENU_PROBE=file appends the status item position and every menu opening to `file`
+        // (lets a script click the real status item and check that a plain left click opens the menu).
+        if let probe = ProcessInfo.processInfo.environment["TOLK_MENU_PROBE"] {
+            func note(_ s: String) {
+                guard let h = FileHandle(forWritingAtPath: probe) ?? { FileManager.default.createFile(atPath: probe, contents: nil); return FileHandle(forWritingAtPath: probe) }() else { return }
+                h.seekToEndOfFile(); h.write(Data((s + "\n").utf8)); try? h.close()
+            }
+            NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
+                note("OPEN")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self?.statusItem.menu?.cancelTracking() }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let f = self?.statusItem.button?.window?.frame else { return }
+                note("POS \(f.midX) \((NSScreen.screens.first?.frame.height ?? 0) - f.midY)")
+            }
+        }
         // Dev: TOLK_RENDER_MENUICON=file.png renders the menu bar icon preview and quits.
         if let path = ProcessInfo.processInfo.environment["TOLK_RENDER_MENUICON"] {
             MenuBarIcon.renderPreview(to: path); exit(0)
@@ -145,12 +174,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(false, forKey: "tolk.popup.notes")
             popup.replaceEngine(engine) // no history entries from dev renders
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
-                popup.show(text: "Hey Vlad, our CR on your push zones dropped to 0.4%. Can you check the sub IDs?", at: NSPoint(x: 500, y: 700))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 9) { [self] in
+                let env = ProcessInfo.processInfo.environment
+                let at = (env["TOLK_RENDER_POPUP_AT"] ?? "500,700").split(separator: ",").compactMap { Double($0) }
+                popup.show(text: env["TOLK_RENDER_POPUP_TEXT"] ?? "Hey Vlad, our CR on your push zones dropped to 0.4%. Can you check the sub IDs?",
+                           at: NSPoint(x: at.first ?? 500, y: at.last ?? 700))
+                DispatchQueue.main.asyncAfter(deadline: .now() + (Double(env["TOLK_RENDER_POPUP_WAIT"] ?? "") ?? 9)) { [self] in
                     popup.renderForReview(to: "\(dir)/popup.png")
                     UserDefaults.standard.removeObject(forKey: "tolk.popup.notes")
                     exit(0)
                 }
+            }
+        }
+        // Dev: TOLK_STRESS_POPUP=N opens/closes the popup N times at random intervals (races, leaks), then logs
+        // memory + open file/thread counts to stderr.log and quits.
+        if let n = ProcessInfo.processInfo.environment["TOLK_STRESS_POPUP"].flatMap(Int.init) {
+            func rss() -> Int { var info = mach_task_basic_info(); var c = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / 4)
+                _ = withUnsafeMutablePointer(to: &info) { $0.withMemoryRebound(to: integer_t.self, capacity: 1) { task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &c) } }
+                return Int(info.resident_size) / 1_048_576 }
+            let r0 = rss()
+            var i = 0
+            func step() {
+                i += 1
+                if i > n {
+                    popup.hide()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        let line = "stress: \(n) shows, rss \(r0) -> \(rss()) MB, windows \(NSApp.windows.count), visible \(NSApp.windows.filter(\.isVisible).map { String(describing: type(of: $0)) }) popupVisible \(self.popup.isVisible)\n"
+                        FileHandle.standardError.write(Data(line.utf8)); try? line.write(toFile: "/tmp/claude-501/stress.txt", atomically: true, encoding: .utf8); exit(0)
+                    }
+                    return
+                }
+                popup.show(text: "Stress \(i): the quick brown fox jumps over the lazy dog \(i % 7)", at: NSPoint(x: 300 + (i % 5) * 40, y: 600))
+                if i % 3 == 0 { popup.hide() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(Int.random(in: 5...250))) { step() }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { step() }
+        }
+        // Dev: TOLK_TEST_QUICK=translateReplace|polishReplace runs that quick action after 8 s on whatever is selected
+        // in the frontmost app (needs Accessibility for this binary).
+        if let id = ProcessInfo.processInfo.environment["TOLK_TEST_QUICK"], let action = QuickAction.with(id: id) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                Diagnostics.log("test quick action \(id), trusted=\(AXIsProcessTrusted())")
+                self?.quickActions.perform(action)
             }
         }
         // Dev: TOLK_TEST_POPUP="text" opens the popup on launch (reproduce popup issues without clicking).
@@ -225,24 +289,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshAutocompleteMenu()
     }
 
+    private var wantsTypingTap: Bool { config.autocomplete || config.autocorrect || config.autocompleteEmoji }
+
     /// Brings server + controller in line with the config (on launch and on every settings change).
     private func applyAutocomplete() {
         acController.disabledApps = Set(config.autocompleteOffApps)
         AutocompleteFeatures.configure(acController, config: config)
         acServer.setModel(config.autocompleteModel)
         acTimer?.invalidate(); acTimer = nil
+        // The model server belongs to autocomplete; the key tap also serves typo fixes and emoji on their own.
         if config.autocomplete {
             if acServer.state == .stopped { acServer.start() }
+        } else {
+            acServer.stop()
+        }
+        if wantsTypingTap {
             if !acController.isRunning && !acController.start() {
+                Diagnostics.log("autocomplete: event tap not created (Accessibility/Input Monitoring missing?) trusted=\(AXIsProcessTrusted())")
                 _ = DoubleCopyMonitor.hasAccessibility(prompt: true) // same flow as double Cmd+C
                 acTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] t in
                     guard let self else { t.invalidate(); return }
-                    if !self.config.autocomplete || self.acController.start() { t.invalidate(); self.acTimer = nil }
+                    if !self.wantsTypingTap || self.acController.start() { t.invalidate(); self.acTimer = nil }
                 }
             }
         } else {
             acController.stop()
-            acServer.stop()
         }
         refreshAutocompleteMenu()
     }
@@ -321,7 +392,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startHealthChecks() {
         checkHealth()
-        healthTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.checkHealth() }
+        healthTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            self?.checkHealth()
+            self?.monitor?.ensureAlive()
+        }
     }
 
     private func checkHealth() {
@@ -331,6 +405,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if self?.lastHealth != ok { Diagnostics.log("vkbox \(primary.name): \(ok ? "available" : "unavailable")") }
             self?.lastHealth = ok
             self?.showHealth(ok)
+            // Model fell out of memory (idle > keep_alive, Ollama restart): load it in the background now,
+            // so the next translation is not a 35+ s cold start.
+            if ok, let ollama = primary as? OllamaProvider { await ollama.warmUpIfNeeded() }
         }
     }
 
@@ -505,7 +582,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func doubleCopy(_ text: String, at point: NSPoint) {
         // Inside Tolk (main window, or the popup itself — copying its translation twice must not
         // replace it with a translation of the translation) it is just copying.
-        if popupWindow?.isKeyWindow == true || reply.window?.isKeyWindow == true || (NSApp.isActive && NSApp.keyWindow != nil) {
+        if popup.window?.isKeyWindow == true || reply.window?.isKeyWindow == true || (NSApp.isActive && NSApp.keyWindow != nil) {
             Diagnostics.log("double Cmd+C inside Tolk (\(NSApp.keyWindow?.title ?? "popup")) — ignored")
             return
         }
@@ -513,7 +590,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popup.show(text: text, at: point)
     }
 
-    private var popupWindow: NSWindow? { popup.window }
     @objc private func quickTranslate() { quickActions.perform(.translateReplace) }
     @objc private func quickPolish() { quickActions.perform(.polishReplace) }
 

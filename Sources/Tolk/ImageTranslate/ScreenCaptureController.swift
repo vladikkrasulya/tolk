@@ -1,6 +1,7 @@
-// Owned by the "image" session. Global hotkey -> area selection overlay -> ScreenCaptureKit snapshot -> OCR.
+// Global hotkey -> area selection overlay -> ScreenCaptureKit snapshot -> OCR.
 import AppKit
 import Carbon.HIToolbox
+import ImageIO
 import ScreenCaptureKit
 
 /// Global hotkey (default ⌥⇧S) -> the user selects a screen area -> OCR -> `onText(text, point)`.
@@ -12,9 +13,9 @@ final class ScreenCaptureController {
     /// (main window open → image page, otherwise → popup).
     var onHotKey: (() -> Void)?
 
-    /// Carbon virtual key code and modifiers (`optionKey | shiftKey` …). Change with `setHotKey`.
-    private(set) var keyCode = UInt32(kVK_ANSI_S)
-    private(set) var modifiers = UInt32(optionKey | shiftKey)
+    /// Carbon virtual key code and modifiers (`optionKey | shiftKey` …).
+    private let keyCode = UInt32(kVK_ANSI_S)
+    private let modifiers = UInt32(optionKey | shiftKey)
     private var hotKey: GlobalHotKey?
     private var overlay: SelectionOverlay?
 
@@ -23,26 +24,20 @@ final class ScreenCaptureController {
     /// Registers the global hotkey; returns false if registration failed (e.g. taken by another app).
     @discardableResult func start() -> Bool {
         ImageOCR.warmUp()
+        // An unbundled dev build (`swift run`, .build/debug/Tolk) next to the installed app would register the
+        // same ⌥⇧S: both processes show a selection overlay, steal activation from each other, and both
+        // overlays cancel themselves ("app-resigned-active") — the capture silently does nothing.
+        if Bundle.main.bundleIdentifier == nil, ProcessInfo.processInfo.environment["TOLK_DEV_HOTKEY"] == nil {
+            Diagnostics.log("capture: dev build — global hotkey not registered (set TOLK_DEV_HOTKEY=1 to force)")
+            return false
+        }
         hotKey = GlobalHotKey(keyCode: keyCode, modifiers: modifiers) { [weak self] in self?.hotKeyPressed() }
+        Diagnostics.log("capture: hotkey \(hotKeyDisplay) registered=\(hotKey != nil)")
         return hotKey != nil
     }
 
-    func stop() { hotKey = nil }
-
-    /// Re-registers with a new combination (for a future settings field). Keeps the old one on failure.
-    @discardableResult func setHotKey(keyCode: UInt32, modifiers: UInt32) -> Bool {
-        let wasRunning = hotKey != nil
-        guard wasRunning else { self.keyCode = keyCode; self.modifiers = modifiers; return true }
-        hotKey = nil
-        if let hk = GlobalHotKey(keyCode: keyCode, modifiers: modifiers, handler: { [weak self] in self?.hotKeyPressed() }) {
-            hotKey = hk; self.keyCode = keyCode; self.modifiers = modifiers
-            return true
-        }
-        hotKey = GlobalHotKey(keyCode: self.keyCode, modifiers: self.modifiers) { [weak self] in self?.hotKeyPressed() }
-        return false
-    }
-
     private func hotKeyPressed() {
+        Diagnostics.log("capture: hotkey pressed")
         if let onHotKey { onHotKey() } else { captureNow() }
     }
 
@@ -55,13 +50,51 @@ final class ScreenCaptureController {
             guard let self, let image else { return }
             let point = NSPoint(x: rect.minX + 24, y: rect.minY)
             Task { @MainActor in
-                let result = (try? await ImageOCR.recognize(image)) ?? .empty
-                let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                let text = await Self.recognizeLogged(image)
                 if text.isEmpty {
+                    Diagnostics.log("capture: no text found")
                     Toast.show("Текст не найден", near: NSPoint(x: rect.midX, y: rect.midY))
                 } else {
+                    Diagnostics.log("capture: popup shown")
                     self.onText?(text, point)
                 }
+            }
+        }
+    }
+
+    /// OCR with a log line (length and time only — never the text itself).
+    static func recognizeLogged(_ image: CGImage) async -> String {
+        let t0 = Date()
+        var result = OCRResult.empty
+        do { result = try await ImageOCR.recognize(image) }
+        catch { Diagnostics.log("capture: ocr FAILED \(error) px=\(image.width)x\(image.height)") }
+        let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        Diagnostics.log("capture: ocr chars=\(text.count) ms=\(Int(Date().timeIntervalSince(t0) * 1000))")
+        return text
+    }
+
+    /// Debug: `TOLK_TEST_CAPTURE=x,y,w,h` (global coords, bottom-left origin) runs snapshot → OCR → popup without the overlay.
+    func runTestCapture(_ spec: String) {
+        let n = spec.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard n.count == 4 else { Diagnostics.log("test-capture: bad spec"); return }
+        let rect = NSRect(x: n[0], y: n[1], width: n[2], height: n[3])
+        guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(rect) }) else {
+            Diagnostics.log("test-capture: no screen for rect=\(rect)"); return
+        }
+        Diagnostics.log("test-capture: start rect=\(rect) screen=\(screen.frame)")
+        Task { @MainActor in
+            do {
+                let image = try await Self.snapshot(rect, on: screen)
+                Diagnostics.log("test-capture: snapshot px=\(image.width)x\(image.height)")
+                if let dir = ProcessInfo.processInfo.environment["TOLK_TEST_CAPTURE_DUMP"],
+                   let dest = CGImageDestinationCreateWithURL(URL(fileURLWithPath: dir) as CFURL, "public.png" as CFString, 1, nil) {
+                    CGImageDestinationAddImage(dest, image, nil); CGImageDestinationFinalize(dest)
+                }
+                let text = await Self.recognizeLogged(image)
+                if text.isEmpty { Diagnostics.log("capture: no text found") }
+                else { Diagnostics.log("capture: popup shown"); self.onText?(text, NSPoint(x: rect.minX + 24, y: rect.minY)) }
+            } catch {
+                Diagnostics.log("capture: snapshot failed \(error)")
             }
         }
     }
@@ -73,13 +106,20 @@ final class ScreenCaptureController {
         guard Self.ensurePermission() else { completion(nil, .zero); return }
         let overlay = SelectionOverlay()
         self.overlay = overlay
-        overlay.run { [weak self] screen, rect in
+        overlay.run { [weak self] screen, rect, reason in
             self?.overlay = nil
-            guard let screen, rect.width >= 6, rect.height >= 6 else { completion(nil, .zero); return }
+            guard let screen, rect.width >= 6, rect.height >= 6 else {
+                Diagnostics.log("capture: selection cancelled reason=\(reason)")
+                completion(nil, .zero); return
+            }
+            Diagnostics.log("capture: selection screen=\(Int(screen.frame.minX)),\(Int(screen.frame.minY)) rect=\(Int(rect.minX)),\(Int(rect.minY)),\(Int(rect.width)),\(Int(rect.height))")
             Task { @MainActor in
                 do {
-                    completion(try await Self.snapshot(rect, on: screen), rect)
+                    let img = try await Self.snapshot(rect, on: screen)
+                    Diagnostics.log("capture: snapshot ok px=\(img.width)x\(img.height)")
+                    completion(img, rect)
                 } catch {
+                    Diagnostics.log("capture: snapshot failed \(error)")
                     Toast.show("Не удалось снять экран", near: NSPoint(x: rect.midX, y: rect.midY))
                     NSLog("Tolk: screen capture failed: \(error)")
                     completion(nil, rect)
@@ -89,8 +129,6 @@ final class ScreenCaptureController {
     }
 
     // MARK: - Permission
-
-    static var hasPermission: Bool { CGPreflightScreenCaptureAccess() }
 
     /// Returns true if Screen Recording is allowed. Otherwise asks the system once and explains in Russian.
     static func ensurePermission() -> Bool {
@@ -215,14 +253,16 @@ final class GlobalHotKey {
 @MainActor
 final class SelectionOverlay {
     private var windows: [NSWindow] = []
-    private var completion: ((NSScreen?, NSRect) -> Void)?
+    private var completion: ((NSScreen?, NSRect, String) -> Void)?
     private var keyMonitor: Any?
     private var resignObserver: Any?
     private var previousApp: NSRunningApplication?
+    private var shownAt = Date()
 
-    func run(_ completion: @escaping (NSScreen?, NSRect) -> Void) {
+    func run(_ completion: @escaping (NSScreen?, NSRect, String) -> Void) {
         self.completion = completion
         previousApp = NSWorkspace.shared.frontmostApplication
+        shownAt = Date()
         for screen in NSScreen.screens {
             let w = OverlayWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
             w.setFrame(screen.frame, display: false)
@@ -239,7 +279,7 @@ final class SelectionOverlay {
             view.onFinish = { [weak self, weak w] local in
                 guard let self, let w else { return }
                 let global = local.map { $0.offsetBy(dx: w.frame.minX, dy: w.frame.minY) }
-                self.finish(screen: global == nil ? nil : screen, rect: global ?? .zero)
+                self.finish(screen: global == nil ? nil : screen, rect: global ?? .zero, reason: global == nil ? "view-cancel(esc/right-click/too-small)" : "selected")
             }
             w.contentView = view
             windows.append(w)
@@ -249,18 +289,19 @@ final class SelectionOverlay {
         let mouseWindow = windows.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? windows.first
         mouseWindow?.makeKey()
         NSCursor.crosshair.push()
+        Diagnostics.log("capture: overlay shown screens=\(windows.count) active=\(NSApp.isActive) key=\(mouseWindow?.isKeyWindow ?? false)")
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
-            if e.keyCode == UInt16(kVK_Escape) { self?.finish(screen: nil, rect: .zero); return nil }
+            if e.keyCode == UInt16(kVK_Escape) { self?.finish(screen: nil, rect: .zero, reason: "esc"); return nil }
             return e
         }
         resignObserver = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification,
                                                                 object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.finish(screen: nil, rect: .zero) }
+            MainActor.assumeIsolated { self?.finish(screen: nil, rect: .zero, reason: "app-resigned-active front=\(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?") dt=\(Int(Date().timeIntervalSince(self?.shownAt ?? Date()) * 1000))ms") }
         }
     }
 
-    private func finish(screen: NSScreen?, rect: NSRect) {
+    private func finish(screen: NSScreen?, rect: NSRect, reason: String) {
         guard let completion else { return }
         self.completion = nil
         NSCursor.pop()
@@ -273,7 +314,7 @@ final class SelectionOverlay {
         if let prev = previousApp, prev != NSRunningApplication.current {
             prev.activate()
         }
-        completion(screen, rect)
+        completion(screen, rect, reason)
     }
 }
 
@@ -299,12 +340,15 @@ private final class OverlayView: NSView {
     override func resetCursorRects() { addCursorRect(bounds, cursor: .crosshair) }
 
     override func mouseDown(with event: NSEvent) {
+        Diagnostics.log("capture: overlay mouseDown at=\(Int(event.locationInWindow.x)),\(Int(event.locationInWindow.y)) global=\(Int(NSEvent.mouseLocation.x)),\(Int(NSEvent.mouseLocation.y)) activeApp=\(NSApp.isActive)")
         start = convert(event.locationInWindow, from: nil)
         current = start
         needsDisplay = true
     }
 
+    private var dragCount = 0
     override func mouseDragged(with event: NSEvent) {
+        dragCount += 1
         current = convert(event.locationInWindow, from: nil)
         needsDisplay = true
     }
@@ -312,6 +356,9 @@ private final class OverlayView: NSView {
     override func mouseUp(with event: NSEvent) {
         current = convert(event.locationInWindow, from: nil)
         let sel = selection
+        Diagnostics.log("capture: overlay mouseUp at=\(Int(event.locationInWindow.x)),\(Int(event.locationInWindow.y)) global=\(Int(NSEvent.mouseLocation.x)),\(Int(NSEvent.mouseLocation.y))")
+        Diagnostics.log("capture: overlay mouseUp drags=\(dragCount) sel=\(sel.map { "\(Int($0.width))x\(Int($0.height))" } ?? "nil") window=\(window.map { "\(Int($0.frame.minX)),\(Int($0.frame.minY))" } ?? "-")")
+        dragCount = 0
         start = nil; current = nil
         onFinish?(sel.flatMap { $0.width >= 6 && $0.height >= 6 ? $0 : nil })
     }

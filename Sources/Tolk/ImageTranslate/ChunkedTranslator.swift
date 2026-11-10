@@ -1,4 +1,4 @@
-// Owned by the "image" session. Translates long OCR text in paragraph-sized parts, one after another,
+// Translates long OCR text in paragraph-sized parts, one after another,
 // streaming every part into one growing text (keeps requests within the model's limits).
 import Foundation
 import TolkCore
@@ -29,20 +29,18 @@ final class ChunkedTranslator {
     private var done = ""
     private var current = ""
     private var target: Language?
-    private var tone: Tone = .auto
 
     init(engine: TranslationEngine) {
         runner = TranslationRunner(engine: engine)
         runner.onUpdate = { [weak self] in self?.handle($0) }
     }
 
-    func start(text: String, target: Language?, tone: Tone = .auto) {
+    func start(text: String, target: Language?) {
         cancel()
         chunks = Self.chunks(of: text)
         guard !chunks.isEmpty else { return }
         index = 0; done = ""; current = ""; translation = ""
         self.target = target
-        self.tone = tone
         isRunning = true
         runCurrent()
     }
@@ -68,7 +66,7 @@ final class ChunkedTranslator {
         onUpdate?(.progress(index: index, total: chunks.count))
         // The target of the first part is reused for all parts, so an auto direction stays consistent;
         // the source is detected per part (a page may mix languages).
-        runner.start(TranslationRequest(text: chunks[index], source: nil, target: target, tone: tone))
+        runner.start(TranslationRequest(text: chunks[index], source: nil, target: target, tone: .auto))
     }
 
     /// nil for pieces without words (numbers, symbols): those never start a new part.

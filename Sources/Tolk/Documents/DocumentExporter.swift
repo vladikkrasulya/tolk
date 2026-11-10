@@ -1,4 +1,4 @@
-// Owned by the "documents" helper. Writes the translation as Word / RTF / TXT / Markdown.
+// Writes the translation as Word / RTF / TXT / Markdown.
 import AppKit
 import UniformTypeIdentifiers
 
@@ -108,8 +108,8 @@ enum DocumentExporter {
         ps.paragraphSpacing = spacingAfter
         ps.paragraphSpacingBefore = style.headingLevel > 0 && !original ? 6 : 0
         ps.lineHeightMultiple = 1.1
-        var attrs: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: ps]
-        attrs[.foregroundColor] = original ? NSColor(srgbRed: 0.42, green: 0.42, blue: 0.45, alpha: 1) : NSColor.black
+        let color = original ? NSColor(srgbRed: 0.42, green: 0.42, blue: 0.45, alpha: 1) : NSColor.black
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .paragraphStyle: ps, .foregroundColor: color]
         // Line breaks inside a paragraph stay line breaks (not new paragraphs).
         let body = text.replacingOccurrences(of: "\n", with: "\u{2028}")
         return NSAttributedString(string: body + (terminate ? "\n" : ""), attributes: attrs)

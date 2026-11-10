@@ -14,7 +14,8 @@ final class StatusLineView: NSView {
     private var firstChunkAt: Date?
     private var chunks = 0
     private var lastLiveUpdate = Date.distantPast
-    private var slowHint: DispatchWorkItem?
+    private var slowHint: Timer?
+    private var waitStart = Date()
     private var fallbackReason: String?
 
     init(fontSize: CGFloat = 11) {
@@ -46,7 +47,7 @@ final class StatusLineView: NSView {
     // MARK: - States
 
     func reset() {
-        slowHint?.cancel()
+        stopHint()
         provider = ""; firstChunkAt = nil; chunks = 0; fallbackReason = nil
         set("", color: .clear, text: .secondaryLabelColor)
         isHidden = true
@@ -54,25 +55,35 @@ final class StatusLineView: NSView {
 
     /// A request went out; nothing has arrived yet.
     func waiting(provider: String) {
-        slowHint?.cancel()
+        stopHint()
         self.provider = provider
         firstChunkAt = nil; chunks = 0
         isHidden = false
         let local = !UIText.isFallbackProvider(provider)
         set("\(UIText.providerName(provider)) · жду ответ…", color: .tertiaryLabelColor, text: .secondaryLabelColor)
-        // A cold model takes 15–60 s to load on the server; say so instead of looking stuck.
+        // A cold model takes 15–120 s to load on the server; say so, with a running counter, instead of
+        // looking stuck. One 1 s timer only while waiting for the first word (stopped by chunk/finish/fail).
+        waitStart = Date()
         if local {
-            let work = DispatchWorkItem { [weak self] in
-                guard let self, self.firstChunkAt == nil, !self.isHidden else { return }
-                self.set("\(UIText.providerName(self.provider)) · модель загружается на сервере…",
-                         color: .systemYellow, text: .secondaryLabelColor)
+            let t = Timer(timeInterval: 1, repeats: true) { [weak self] t in
+                MainActor.assumeIsolated {
+                    guard let self, self.firstChunkAt == nil, !self.isHidden else { t.invalidate(); return }
+                    let n = Int(Date().timeIntervalSince(self.waitStart))
+                    guard n >= 3 else { return }
+                    let what = n >= 40 ? "модель всё ещё загружается (холодный старт)" : "модель загружается на сервере"
+                    self.set("\(UIText.providerName(self.provider)) · \(what)… \(n) с",
+                             color: .systemYellow, text: .secondaryLabelColor)
+                }
             }
-            slowHint = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+            RunLoop.main.add(t, forMode: .common)
+            slowHint = t
         }
     }
 
+    private func stopHint() { slowHint?.invalidate(); slowHint = nil }
+
     func fellBack(reason: String) {
+        stopHint()
         fallbackReason = reason
         set("переключаюсь на запасной перевод…", color: .systemOrange, text: .systemOrange)
     }
@@ -81,7 +92,7 @@ final class StatusLineView: NSView {
     func chunk() {
         chunks += 1
         let now = Date()
-        if firstChunkAt == nil { firstChunkAt = now; slowHint?.cancel() }
+        if firstChunkAt == nil { firstChunkAt = now; stopHint() }
         guard now.timeIntervalSince(lastLiveUpdate) > 0.2, let first = firstChunkAt else { return }
         lastLiveUpdate = now
         let elapsed = now.timeIntervalSince(first)
@@ -93,7 +104,7 @@ final class StatusLineView: NSView {
     }
 
     func finished(_ st: TranslationStats) {
-        slowHint?.cancel()
+        stopHint()
         isHidden = false
         var parts = [st.routeTitle]
         if let f = st.firstChunk, st.route == .home || st.route == .remote {
@@ -108,12 +119,27 @@ final class StatusLineView: NSView {
             set(parts.joined(separator: " · "), color: st.route == .remote ? .systemBlue : .systemGreen,
                 text: .secondaryLabelColor)
         }
-        toolTip = st.fallbackReason.map { "Запасной перевод. Причина: \($0)" }
+        var tip = st.fallbackReason.map { "Запасной перевод. Причина: \($0)" }
             ?? (st.tokensExact ? "Скорость по данным сервера" : "Скорость примерная")
+        if !st.warnings.isEmpty {
+            // The warning goes first so that tail truncation never hides it; full text in the tooltip.
+            let warn = "⚠ " + st.warnings.joined(separator: "; ")
+            let rest = label.stringValue
+            let attr = NSMutableAttributedString(string: warn, attributes: [
+                .font: label.font as Any, .foregroundColor: NSColor.systemOrange])
+            attr.append(NSAttributedString(string: " · " + rest, attributes: [
+                .font: label.font as Any, .foregroundColor: label.textColor ?? NSColor.secondaryLabelColor]))
+            let para = NSMutableParagraphStyle()
+            para.lineBreakMode = .byTruncatingTail
+            attr.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: attr.length))
+            label.attributedStringValue = attr
+            tip = warn + "\n" + tip
+        }
+        toolTip = tip
     }
 
     func failed(_ message: String) {
-        slowHint?.cancel()
+        stopHint()
         isHidden = false
         set(message, color: .systemRed, text: .systemRed)
     }

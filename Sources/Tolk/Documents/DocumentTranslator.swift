@@ -1,4 +1,4 @@
-// Owned by the "documents" helper. Translates a document paragraph by paragraph, in order, one request at a time.
+// Translates a document paragraph by paragraph, in order, one request at a time.
 import Foundation
 import TolkCore
 
@@ -81,9 +81,15 @@ final class DocumentTranslator {
     func stop() {
         task?.cancel()
         task = nil
-        if let since = activeSince { activeTime += Date().timeIntervalSince(since); activeSince = nil }
+        stopClock()
         current = nil
         partial = ""
+    }
+
+    private func stopClock() {
+        guard let since = activeSince else { return }
+        activeTime += Date().timeIntervalSince(since)
+        activeSince = nil
     }
 
     /// Active (not paused) translation time.
@@ -91,9 +97,12 @@ final class DocumentTranslator {
 
     /// Characters left to translate.
     var remainingChars: Int {
-        var n = 0
-        for (i, p) in paragraphs.enumerated() where translations[i] == nil && p.translatable { n += p.text.count }
-        return max(0, n - partial.count)
+        max(0, pending.reduce(0) { $0 + $1.text.count } - partial.count)
+    }
+
+    /// Untranslated paragraphs that will be sent to the model.
+    private var pending: [DocParagraph] {
+        paragraphs.indices.filter { translations[$0] == nil && paragraphs[$0].translatable }.map { paragraphs[$0] }
     }
 
     /// Seconds left: measured speed (characters per second incl. request overhead) once a few paragraphs are
@@ -101,9 +110,7 @@ final class DocumentTranslator {
     func remainingEstimate(speed: Double, perRequest: Double) -> TimeInterval {
         let chars = Double(remainingChars)
         if measuredChars >= 300, measuredTime > 1 { return chars / (Double(measuredChars) / measuredTime) }
-        var requests = 0
-        for (i, p) in paragraphs.enumerated() where translations[i] == nil && p.translatable { requests += 1 }
-        return chars / speed + Double(requests) * perRequest
+        return chars / speed + Double(pending.count) * perRequest
     }
 
     // MARK: - Loop
@@ -165,7 +172,7 @@ final class DocumentTranslator {
         }
         if Task.isCancelled { return }
         task = nil
-        if let since = activeSince { activeTime += Date().timeIntervalSince(since); activeSince = nil }
+        stopClock()
         onEvent?(.finished)
     }
 

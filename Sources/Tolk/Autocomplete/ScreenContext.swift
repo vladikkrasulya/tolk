@@ -32,7 +32,6 @@ final class ScreenContext {
     private(set) var snapshot: Snapshot?
     private var inflight: Task<Void, Never>?
     private var lastProbe = Date.distantPast
-    private var lastKey: String?
     /// Last context returned from the request path; kept so that an unchanged screen yields byte-identical
     /// text (stable prompt prefix, llama-server KV cache is reused).
     var onUpdate: ((Source, Int, Int) -> Void)?
@@ -56,7 +55,6 @@ final class ScreenContext {
             let ms = Int(Date().timeIntervalSince(t0) * 1000)
             guard let self else { return }
             self.snapshot = Snapshot(key: target.key, text: text, source: source, ms: ms, at: Date())
-            self.lastKey = target.key
             self.inflight = nil
             self.onUpdate?(source, text.count, ms)
         }

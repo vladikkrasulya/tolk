@@ -1,15 +1,17 @@
 // Typo autocorrect for the autocomplete: when a word has just been finished (space or punctuation
 // typed after it) and NSSpellChecker is sure it is misspelled, offers the fix as an instant suggestion.
-// Tab / → replace "word + separator" with "fix + separator". Esc leaves the word alone (remembered for the session).
+// Tab / → replace "word + separator" with "fix + separator". Esc leaves the word alone (remembered until Tolk quits).
 import AppKit
 
 @MainActor
 final class Autocorrect: InstantSuggestionProvider {
     /// Words never corrected: adtech slang (always) + terms from the user's glossary file.
     private var ignored: Set<String> = Autocorrect.builtinSlang
-    /// Words the user rejected for this session.
-    private var rejected: Set<String> = Set(UserDefaults.standard.stringArray(forKey: Autocorrect.rejectedKey) ?? [])
-    private static let rejectedKey = "autocorrectRejectedWords"
+    /// Words the user rejected (Esc, or typed on past the suggestion). Kept until Tolk quits, never stored:
+    /// typing on is not a decision, so it must not silence a word for good.
+    private var rejected: Set<String> = []
+    /// word(lowercased) → flagged by the English checker (for the translit guard).
+    private var englishMisspelled: [String: Bool] = [:]
     /// word(lowercased) → fix, "" = nothing to fix.
     private var cache: [String: String] = [:]
     /// The last suggestion we returned (to notice an implicit Esc, see `suggestion(for:)`).
@@ -18,12 +20,7 @@ final class Autocorrect: InstantSuggestionProvider {
 
     init(rulesPath: String) {
         ignored.formUnion(Autocorrect.glossaryTerms(path: rulesPath))
-    }
-
-    /// The controller may call this when the user dismisses an instant suggestion with Esc.
-    func reject(word: String) {
-        rejected.insert(word.lowercased())
-        UserDefaults.standard.set(Array(rejected), forKey: Autocorrect.rejectedKey)  // "don't correct" survives restarts
+        UserDefaults.standard.removeObject(forKey: "autocorrectRejectedWords")  // hidden permanent list of 0.6.x
     }
 
     // MARK: - InstantSuggestionProvider
@@ -32,14 +29,19 @@ final class Autocorrect: InstantSuggestionProvider {
         // Esc detection without a controller hook: after Esc the typo is still in the text and the
         // provider is asked again (the user typed on). After Tab it is gone (replaced by the fix).
         if let o = offered {
-            if field.textBefore.hasPrefix(o.textBefore) { reject(word: o.word) }
+            if field.textBefore.hasPrefix(o.textBefore) { rejected.insert(o.word.lowercased()) }
             offered = nil
         }
         guard let (word, sep) = Autocorrect.lastFinishedWord(in: field.textBefore) else { return nil }
         let key = word.lowercased()
         guard !rejected.contains(key), !ignored.contains(key) else { return nil }
+        let head = String(field.textBefore.dropLast(word.count + sep.count))
         // A word already used earlier in this text is the user's own (name, slang), not a typo.
-        if Autocorrect.occursEarlier(key, in: String(field.textBefore.dropLast(word.count + sep.count))) { return nil }
+        if Autocorrect.occursEarlier(key, in: head) { return nil }
+        // Capitalized in the middle of a sentence: a name or a brand.
+        if word.first!.isUppercase, !Autocorrect.atSentenceStart(head) { return nil }
+        // Russian/Ukrainian typed in Latin letters ("privet, kak dela"): the English checker flags every word.
+        if script(of: key) == .latin, looksLikeTranslit(head) { return nil }
         guard let fix = fix(for: word) else { return nil }
         offered = (field.textBefore, word)
         return InstantSuggestion(replaceCount: word.count + sep.count, text: fix + sep,
@@ -64,6 +66,38 @@ final class Autocorrect: InstantSuggestionProvider {
         guard word.count >= 3, word.first!.isLetter, word.last!.isLetter else { return nil }
         // "foo.bar" typed as a domain: sep "." with something non-space coming later is not detectable; fine.
         return (word, String(sepChar))
+    }
+
+    /// `head` is the text before a word: true when that word starts the text, a line or a sentence.
+    static func atSentenceStart(_ head: String) -> Bool {
+        var rest = Substring(head)
+        while let c = rest.last, c == " " || c == "\t" || c == "\u{00A0}" || "\"“«([".contains(c) { rest = rest.dropLast() }
+        guard let last = rest.last else { return true }
+        return last.isNewline || ".!?…".contains(last)
+    }
+
+    /// Two or more of the last six Latin words before the caret are not English (and not slang or glossary terms).
+    private func looksLikeTranslit(_ head: String) -> Bool {
+        var words: [String] = []
+        var cur = ""
+        func flush() {
+            let w = cur.lowercased()
+            if w.count >= 3, script(of: w) == .latin { words.append(w) }
+            cur = ""
+        }
+        for ch in head.suffix(120) { if ch.isLetter { cur.append(ch) } else { flush() } }
+        flush()
+        var unknown = 0
+        for w in words.suffix(6) where !ignored.contains(w) {
+            let bad: Bool
+            if let b = englishMisspelled[w] { bad = b } else {
+                bad = NSSpellChecker.shared.checkSpelling(of: w, startingAt: 0, language: "en", wrap: false,
+                                                          inSpellDocumentWithTag: tag, wordCount: nil).location != NSNotFound
+                englishMisspelled[w] = bad
+            }
+            if bad { unknown += 1 }
+        }
+        return unknown >= 2
     }
 
     static func occursEarlier(_ key: String, in text: String) -> Bool {
@@ -94,7 +128,8 @@ final class Autocorrect: InstantSuggestionProvider {
 
     private func fix(for word: String) -> String? {
         // Skip: digits, CamelCase / ALL CAPS, anything not a plain EN/RU/UK word.
-        guard !word.contains(where: { $0.isNumber }) else { return nil }
+        // Hyphenated compounds are checked as one word by the system and get fixed into something else.
+        guard !word.contains(where: { $0.isNumber || $0 == "-" }) else { return nil }
         let letters = word.filter { $0.isLetter }
         let upperTail = letters.dropFirst().contains(where: { $0.isUppercase })
         if upperTail { return nil }
@@ -103,7 +138,7 @@ final class Autocorrect: InstantSuggestionProvider {
         if let c = cache[key] {
             fixed = c
         } else {
-            fixed = computeFix(key) ?? ""
+            fixed = Autocorrect.contractions[key] ?? computeFix(key) ?? ""
             cache[key] = fixed
         }
         if fixed.isEmpty { return nil }
@@ -147,12 +182,20 @@ final class Autocorrect: InstantSuggestionProvider {
             if w.count <= 5 {
                 // Short words: one substitution or one adjacent swap only (same length), no insert/delete.
                 if d == 1 && c.count == w.count { return c }
-            } else if d == 1 || d == 2 && w.count >= 6 {
+            } else if d == 1 || d == 2 && w.count >= 8 {
                 return c
             }
         }
         return nil
     }
+
+    /// English contractions typed without the apostrophe; the spell checker offers other words for them ("dont" → "done").
+    static let contractions: [String: String] = [
+        "dont": "don't", "doesnt": "doesn't", "didnt": "didn't", "cant": "can't", "wont": "won't", "isnt": "isn't",
+        "arent": "aren't", "wasnt": "wasn't", "werent": "weren't", "hasnt": "hasn't", "havent": "haven't", "hadnt": "hadn't",
+        "couldnt": "couldn't", "shouldnt": "shouldn't", "wouldnt": "wouldn't", "youre": "you're", "theyre": "they're",
+        "thats": "that's", "whats": "what's", "ive": "I've", "youve": "you've", "weve": "we've", "theyve": "they've",
+    ]
 
     /// Damerau–Levenshtein (adjacent transposition counts as one edit).
     static func editDistance(_ a: [Character], _ b: [Character]) -> Int {
@@ -191,6 +234,7 @@ final class Autocorrect: InstantSuggestionProvider {
         "слак", "слаке", "слаку", "слака", "тимс", "тимсе", "телега", "телеге", "телегу", "телеги", "гугл", "гугле", "гугла", "фейсбук", "фейсбуке",
         "тикток", "тиктоке", "ютуб", "ютубе", "инста", "инсте", "инсту", "вотсап", "вотсапе", "вацап", "зум", "зуме", "джира", "джире", "джиру",
         "конфа", "конфе", "конфу", "конфы", "чатгпт", "клод", "клода", "клоде", "ватсап", "слэк",
+        "коммит", "коммита", "коммиты", "коммитов", "деплой", "деплоя", "мерж", "мержа", "ревью", "фикс", "фиксы",
         "ок", "окей", "спс", "пжл", "плиз", "хз", "имхо", "лол", "кек"
     ]
 

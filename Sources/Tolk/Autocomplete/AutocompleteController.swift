@@ -3,13 +3,15 @@
 // user accept it with Tab (next word) or → (everything). Esc dismisses.
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 
 @MainActor
 final class AutocompleteController {
     /// Bundle ids of apps where autocomplete is off.
     var disabledApps: Set<String> = []
-    /// Called with the model latency (ms) every time a suggestion is shown.
-    var onSuggestionShown: ((_ ms: Int) -> Void)?
+    /// false = typing help only (typo fixes, emoji): the model is never asked, no screen context, no style learning,
+    /// and the field is read only when the keys typed so far could have finished a word or an emoji code.
+    var modelEnabled = true
     /// Asked in order before the model; the first answer is shown instead of (or before) a model suggestion.
     var instantProviders: [InstantSuggestionProvider] = []
     /// Extra prompt material (instructions, glossary, clipboard, style examples, length).
@@ -36,6 +38,10 @@ final class AutocompleteController {
     private var suggestion: String?
     /// Set while the visible suggestion is an instant replacement (emoji, typo fix).
     private var instant: InstantSuggestion?
+    /// Field the instant suggestion was built for; accepting re-reads the field and compares.
+    private var instantField: (pid: pid_t, textBefore: String)?
+    /// Characters typed since the last click / app switch / non-printing key (typing-help-only mode).
+    private var recentTyped = ""
     /// Text before the caret when the current suggestion was shown (for `onAccepted`).
     private var shownTextBefore = ""
     private var shownBundleID: String?
@@ -48,6 +54,22 @@ final class AutocompleteController {
     private static let repositionDelay: Duration = .milliseconds(50)
     private static let ownPID = ProcessInfo.processInfo.processIdentifier
     private static let modifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+    /// Password managers: never read, whatever the user's list says.
+    private static let alwaysOffApps: Set<String> = [
+        "com.1password.1password", "com.agilebits.onepassword7", "com.bitwarden.desktop", "org.keepassxc.keepassxc",
+        "com.apple.keychainaccess", "com.apple.Passwords", "com.lastpass.LastPass",
+    ]
+
+    private func isOff(_ bundleID: String?) -> Bool {
+        guard let bundleID else { return false }
+        return disabledApps.contains(bundleID) || Self.alwaysOffApps.contains(bundleID)
+    }
+
+    /// Typing-help-only mode: is it worth reading the field after these keys? Only right after "word<separator>"
+    /// (a possible typo) or ":code" (a possible emoji).
+    static func instantWorthChecking(_ recent: String) -> Bool {
+        Autocorrect.lastFinishedWord(in: recent) != nil || EmojiSuggestions.trailingCode(in: recent) != nil
+    }
 
     private enum Key {
         static let tab: Int64 = 48
@@ -133,6 +155,7 @@ final class AutocompleteController {
             if event.getIntegerValueField(.eventSourceUserData) == DoubleCopyMonitor.syntheticMarker { return false }
             cancelPending()
             hide(reason: "click")
+            recentTyped = ""
             return false
         case .keyDown:
             break
@@ -148,14 +171,15 @@ final class AutocompleteController {
         let typed = Self.typedText(event)
 
         // Return sends the message in chats: report it for style learning (before the app clears the field).
-        if (code == 36 || code == 76), mods.isEmpty, let onAccepted, let f = FocusedField.read(), f.pid != Self.ownPID,
-           !(f.bundleID.map(disabledApps.contains) ?? false) {
+        if modelEnabled, (code == 36 || code == 76), mods.isEmpty, let onAccepted, let f = FocusedField.read(), f.pid != Self.ownPID,
+           !isOff(f.bundleID) {
             let msg = (f.textBefore + f.restOfLine).trimmingCharacters(in: .whitespacesAndNewlines)
             if !msg.isEmpty { onAccepted(AcceptedText(kind: .sent, bundleID: f.bundleID, textBefore: msg, accepted: "")) }
         }
 
         if instant != nil {
-            if mods.isEmpty, code == Key.tab || code == Key.rightArrow { acceptInstant(); return true }
+            // A stale suggestion (focus or text changed under it) is dropped and the key goes to the app.
+            if mods.isEmpty, code == Key.tab || code == Key.rightArrow { if acceptInstant() { recentTyped = ""; return true } }
             if mods.isEmpty, code == Key.escape { cancelPending(); hide(reason: "esc"); suppressed = true; return true }
             hide(reason: typed != nil ? "typed" : "key")
         } else if suggestion != nil {
@@ -185,10 +209,23 @@ final class AutocompleteController {
         }
 
         cancelPending()
-        if let typed, mods.isDisjoint(with: [.maskCommand, .maskControl]) {
+        let printing = typed != nil && mods.isDisjoint(with: [.maskCommand, .maskControl])
+        if !modelEnabled {
+            if printing, let typed {
+                suppressed = false
+                recentTyped = String((recentTyped + typed).suffix(40))
+                if Self.instantWorthChecking(recentTyped) { scheduleRequest(after: Self.debounce) }
+            } else if code == 51, mods.isEmpty, !recentTyped.isEmpty {
+                recentTyped.removeLast()
+            } else {
+                recentTyped = ""
+            }
+            return false
+        }
+        if printing {
             suppressed = false
             if let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier, pid != Self.ownPID,
-               !(NSWorkspace.shared.frontmostApplication?.bundleIdentifier.map(disabledApps.contains) ?? false) {
+               !isOff(NSWorkspace.shared.frontmostApplication?.bundleIdentifier) {
                 screenContext.prepare(pid: pid)   // first keystroke in a field: gather context ahead of the request
             }
             scheduleRequest(after: Self.debounce)
@@ -218,6 +255,7 @@ final class AutocompleteController {
         }
         suggestion = nil
         instant = nil
+        instantField = nil
         panel?.hide()
     }
 
@@ -306,9 +344,19 @@ final class AutocompleteController {
         suppressed = false
     }
 
-    /// Emoji / typo fix: delete what it replaces, type the replacement.
-    private func acceptInstant() {
-        guard let i = instant else { return }
+    /// Emoji / typo fix: delete what it replaces, type the replacement. Deleting characters in the wrong place is
+    /// not undoable for us, so the field is read again first: same app, same text before the caret, still at the
+    /// end of the line. Otherwise nothing is touched and false is returned.
+    private func acceptInstant() -> Bool {
+        guard let i = instant else { return false }
+        guard !IsSecureEventInputEnabled(), let shown = instantField, let now = FocusedField.read(),
+              now.pid == shown.pid, now.textBefore == shown.textBefore,
+              now.restOfLine.allSatisfy({ $0.isWhitespace }) else {
+            Diagnostics.log("autocomplete: instant not applied, field changed")
+            cancelPending()
+            hide(reason: "stale")
+            return false
+        }
         deleteBackward(i.replaceCount)
         insert(i.text)
         Diagnostics.log("autocomplete: accepted instant replace=\(i.replaceCount) len=\(i.text.count)")
@@ -317,6 +365,7 @@ final class AutocompleteController {
                          caret: pf.map { NSRect(x: $0.minX, y: $0.minY, width: 1, height: $0.height) })
         cancelPending()
         hide(reason: "accepted-instant", dismissed: false)
+        return true
     }
 
     private func deleteBackward(_ count: Int) {
@@ -431,9 +480,11 @@ final class AutocompleteController {
     }
 
     private func request(generation gen: Int) async {
-        guard server.state == .ready, let field = FocusedField.read() else { return }
+        // Secure input is on while a password is being typed (any app, including web forms): read nothing.
+        guard !IsSecureEventInputEnabled(), !isOff(NSWorkspace.shared.frontmostApplication?.bundleIdentifier),
+              let field = FocusedField.read() else { return }
         if field.pid == Self.ownPID { return }
-        if let id = field.bundleID, disabledApps.contains(id) { return }
+        if isOff(field.bundleID) { return }
         guard field.restOfLine.allSatisfy({ $0.isWhitespace }) else { return }
 
         // Instant suggestions (emoji, typo fix) need no model and win over it.
@@ -442,6 +493,7 @@ final class AutocompleteController {
             if panel == nil { panel = GhostTextPanel() }
             suggestion = nil
             instant = s
+            instantField = (field.pid, field.textBefore)
             shownBundleID = field.bundleID
             panel?.show(s.display, caret: field.caret, fontSize: field.fontSize, rightLimit: field.rightLimit)
             journal.instant(bundleID: field.bundleID, before: field.textBefore, replaceCount: s.replaceCount, display: s.display, caret: field.caret, panel: panel)
@@ -450,6 +502,7 @@ final class AutocompleteController {
             break
         }
         if instant != nil { return }
+        guard modelEnabled, server.state == .ready else { return }
 
         let trimmed = field.textBefore.filter { !$0.isWhitespace }
         guard trimmed.count >= 4, let last = field.textBefore.last, !last.isNewline else { return }
@@ -491,7 +544,6 @@ final class AutocompleteController {
         Diagnostics.log("autocomplete: shown len=\(text.count) ms=\(result.ms) ctx=\(context?.count ?? 0) app=\(now.bundleID ?? "?") fs=\(now.fontSize.map { String(Int($0 * 10)) } ?? "-")/10 ax=\(now.caretInfo) caret=(\(Int(now.caret.minX)),\(Int(now.caret.minY)) \(Int(now.caret.width))x\(Int(now.caret.height))) panel=(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)))")
         journal.shown(bundleID: now.bundleID, before: now.textBefore, text: text, ms: result.ms, ctxChars: context?.count ?? 0,
                       ctxSource: lastContextSource.isEmpty ? nil : lastContextSource, caret: now.caret, panel: panel)
-        onSuggestionShown?(result.ms)
     }
 
     // MARK: - App switching
@@ -500,6 +552,7 @@ final class AutocompleteController {
         screenContext.reset()
         cancelPending()
         hide(reason: "appSwitch")
+        recentTyped = ""
         if let app { FocusedField.enableAccessibility(pid: app.processIdentifier) }
     }
 }

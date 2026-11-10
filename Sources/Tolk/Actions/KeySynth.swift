@@ -1,17 +1,11 @@
-// Owned by the "quick actions" session.
 import AppKit
 import Carbon.HIToolbox
 
 /// Synthetic ⌘C / ⌘V for the frontmost app. Posting needs Accessibility permission.
 /// Every event carries `eventSourceUserData = KeySynth.marker`, so our own taps
-/// (DoubleCopyMonitor) can ignore them: `KeySynth.isTolkEvent(event)`.
+/// (DoubleCopyMonitor) can ignore them.
 enum KeySynth {
-    /// 'TOLK'
-    static let marker: Int64 = 0x544F_4C4B
-
-    static func isTolkEvent(_ event: CGEvent) -> Bool {
-        event.getIntegerValueField(.eventSourceUserData) == marker
-    }
+    static let marker = DoubleCopyMonitor.syntheticMarker
 
     /// Presses and releases ⌘+key (key = Carbon/virtual key code, layout-independent).
     static func pressCommand(_ keyCode: Int) {

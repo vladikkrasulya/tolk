@@ -1,5 +1,3 @@
-// Owned by the "glossary" session.
-//
 // "Глоссарий" page of the main window: table of terms + "Стиль и правила" editor over `rules.md`.
 // Autosaves (debounced) through `GlossaryFile`, follows external changes (popup "В глоссарий",
 // VS Code) with `GlossaryFileWatcher`, CSV import/export for sharing.
@@ -524,11 +522,6 @@ final class GlossaryViewController: NSViewController {
         stylePane.isHidden = i != 1
         UserDefaults.standard.set(i, forKey: Self.tabKey)
     }
-
-    /// Shows the "Стиль и правила" tab (e.g. from a menu item).
-    func showStyle() { loadViewIfNeeded(); tabs.selectedSegment = 1; tabChanged() }
-    /// Shows the "Термины" tab and focuses search.
-    func showTerms() { loadViewIfNeeded(); tabs.selectedSegment = 0; tabChanged(); view.window?.makeFirstResponder(search) }
 
     // MARK: - Files
 

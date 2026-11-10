@@ -1,4 +1,4 @@
-// Owned by the "documents" helper. Document model + text extraction (PDF text layer / OCR, rich text, plain text).
+// Document model + text extraction (PDF text layer / OCR, rich text, plain text).
 import AppKit
 import PDFKit
 import TolkCore

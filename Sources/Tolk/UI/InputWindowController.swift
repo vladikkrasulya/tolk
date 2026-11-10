@@ -1,4 +1,4 @@
-// Owned by the "main window" session (v0.3). Thin window around `TranslatePageViewController`.
+// Thin window around `TranslatePageViewController`.
 import AppKit
 import TolkCore
 

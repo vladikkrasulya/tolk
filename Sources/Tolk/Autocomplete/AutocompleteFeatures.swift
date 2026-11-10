@@ -8,6 +8,8 @@ import TolkCore
 enum AutocompleteFeatures {
     static func configure(_ c: AutocompleteController, config: TolkConfig) {
         var providers: [InstantSuggestionProvider] = []
+        // Typo fixes and emoji work on their own; everything that feeds the model needs autocomplete itself on.
+        c.modelEnabled = config.autocomplete
 
         // Frequency → confidence thresholds (measured in autocomplete-eval.md, round 3):
         // rare 0.6 ≈ 67 % right / 17 % shown; normal 0.4 ≈ 45 % / 30 %; often 0.25 ≈ 35 % / 45 %.
@@ -27,7 +29,7 @@ enum AutocompleteFeatures {
         // later sections wrap it: `let base = c.promptExtras; c.promptExtras = { f in var e = base?(f) ?? PromptExtras(); …; return e }`.
         if config.autocompleteEmoji { providers.append(EmojiSuggestions()) }
         let prefs = PromptPrefs(config: config)
-        if config.autocompleteClipboard { ClipboardWatcher.shared.start() }
+        if config.autocomplete && config.autocompleteClipboard { ClipboardWatcher.shared.start() }
         AutocompletePrompt.maxTokens = PromptPrefs.maxTokens(forWords: PromptPrefs.maxWords(for: config.autocompleteLength))
         c.promptExtras = { field in prefs.extras(for: field) }
 
@@ -42,7 +44,7 @@ enum AutocompleteFeatures {
             exit(fails.isEmpty ? 0 : 1)
         }
         #endif
-        if config.autocompleteLearnStyle {
+        if config.autocomplete && config.autocompleteLearnStyle {
             style.load()
             let gen = style.generation
             let prevExtras = c.promptExtras

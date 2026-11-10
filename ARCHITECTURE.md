@@ -111,3 +111,30 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   remembers ignored fixes.
 - Debug journal (menu, 1 hour, local only): jsonl + screenshots around the caret on shown/accepted events.
 - Settings split into tabs: Перевод · Автодополнение · Общие.
+
+## v0.6.2 — translation for everyday use, sentence cache, checks
+- Prompts are neutral (no adtech in the base prompt or notes) with explicit anti-calque guidance per target language;
+  profile files carry the domain. A missing profile file falls back to built-in rules in memory (`DefaultRules.home`,
+  a copy of `~/Translate/home.md` — re-sync by hand when that file changes). Default model `gemma-translate`,
+  default profile `home`.
+- Glossary matching (`RulesStore`): Latin terms match as whole words with regular inflections, Cyrillic terms by stem
+  plus a short ending; only matching lines are injected.
+- Live typing translates only what changed (`IncrementalTranslation.swift`, `UI/LiveTranslation.swift`):
+  `IncrementalSession.plan` returns unchanged / full / partial; a partial request sends the changed tail with
+  `TranslationContext` (earlier source + its translation). ⌘↩, clearing the field, or a change of language, tone,
+  model or config resets the cache. Log line: `incremental: partial kept=3 sent=1 chars=42`. Earlier sentences are
+  not revisited when later text changes their meaning — ⌘↩ retranslates everything.
+- Post-translation check (`TranslationCheck.swift`): lost links, numbers, times → `TranslationStats.warnings`,
+  shown as an orange ⚠ first in the status line.
+- Editor pass (`Refine.swift`, `UI/RefineRunner.swift`): optional second call that removes calques; must keep
+  greetings and the sentence type; «Вернуть» restores the draft. Costs one more request (≈4–5 s).
+- History stores the full text and full translation for partial requests (`HistoryRecordingEngine`).
+- First-run screen (`MainWindow/FirstRunView.swift`); not shown on a `--background` start.
+- Typing help without the model: the key tap also runs when only `autocorrect` or `autocompleteEmoji` is on
+  (`AppDelegate.wantsTypingTap`, `AutocompleteController.modelEnabled = false`): no llama-server, no screen context,
+  no style learning; the field is read only after a finished word or an emoji code. Accepting a fix re-reads the
+  field and compares app and text; secure input and password managers are never read.
+- Tests: `swift run tolk-cli --self-test` (no XCTest in the CLT). New CLI flags: `--rules PATH`, `--context-source`,
+  `--context-translation`, `--check TRANSLATION`, `--refine`.
+- Measured (`~/Translate/test-corpus`): everyday corpus `verdict-home.md` — texts with calques 17 → 4 of 50;
+  work corpus `results-2026-11-10-1122.md` — 50/50, ≈5.9 s per text.

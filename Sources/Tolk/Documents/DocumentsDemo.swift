@@ -1,4 +1,4 @@
-// Owned by the "documents" helper. Debug-only hooks for the «Документы» page (no AppDelegate wiring needed:
+// Debug-only hooks for the «Документы» page (no AppDelegate wiring needed:
 // DocumentsViewController.init calls `runIfRequested` once).
 //
 //   TOLK_DOCS_EXTRACT=/a.pdf:/b.docx .build/debug/Tolk --background   — print extracted paragraphs and quit

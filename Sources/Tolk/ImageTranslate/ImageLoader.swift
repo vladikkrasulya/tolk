@@ -1,4 +1,4 @@
-// Owned by the "image" session. Loads images/PDF pages from files, the pasteboard and drags.
+// Loads images/PDF pages from files, the pasteboard and drags.
 import AppKit
 import ImageIO
 import UniformTypeIdentifiers

@@ -1,4 +1,3 @@
-// Owned by the "main window" session.
 import AppKit
 
 /// Dock icon + main menu. The app lives in the menu bar (`.accessory`); while the main window

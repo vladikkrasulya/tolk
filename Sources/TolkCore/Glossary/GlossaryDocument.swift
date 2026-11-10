@@ -1,5 +1,3 @@
-// Owned by the "glossary" session. Foundation only.
-//
 // Editable model of `rules.md` that writes back the same Markdown `RulesStore` reads:
 //   <!-- usage note -->            preamble, kept verbatim
 //   ## Стиль                       free text, always injected into the prompt
@@ -105,7 +103,7 @@ public struct GlossaryDocument: Equatable, Sendable {
             }
             if line.hasPrefix("#") {
                 closeGlossary()
-                if RulesStoreCompat.isGlossaryHeader(line) {
+                if RulesStore.isGlossaryHeader(line) {
                     section = .glossary
                     if !sawGlossary { pendingInsert = true }
                     sawGlossary = true
@@ -191,7 +189,7 @@ public struct GlossaryDocument: Equatable, Sendable {
         if !hasStyleNode, !style.glTrimmed.isEmpty {
             // No style section in the file: put one before the glossary (or at the end).
             let block = [Self.defaultStyleHeader, ""] + style.glTrimmed.components(separatedBy: "\n") + [""]
-            if let g = out.firstIndex(where: RulesStoreCompat.isGlossaryHeader) {
+            if let g = out.firstIndex(where: RulesStore.isGlossaryHeader) {
                 out.insert(contentsOf: block, at: g)
             } else {
                 Self.trimTrailingBlank(&out)
@@ -318,15 +316,6 @@ public struct GlossaryDocument: Equatable, Sendable {
 
     static func trimTrailingBlank(_ a: inout [String]) {
         while let l = a.last, l.glTrimmed.isEmpty { a.removeLast() }
-    }
-}
-
-/// Mirrors `RulesStore.isGlossaryHeader` (internal there; kept identical on purpose).
-enum RulesStoreCompat {
-    static func isGlossaryHeader(_ line: String) -> Bool {
-        guard line.hasPrefix("#") else { return false }
-        let l = line.lowercased()
-        return l.contains("глоссар") || l.contains("глосар") || l.contains("glossary")
     }
 }
 

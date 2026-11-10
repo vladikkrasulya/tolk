@@ -1,4 +1,4 @@
-// Owned by the "image" session. Image preview with the recognized paragraphs highlighted.
+// Image preview with the recognized paragraphs highlighted.
 import AppKit
 
 /// Shows an image aspect-fit and outlines recognized paragraphs. Hover highlights, click reports the index.

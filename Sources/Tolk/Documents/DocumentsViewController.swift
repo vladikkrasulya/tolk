@@ -1,4 +1,4 @@
-// Owned by the "documents" helper. «Документы» page: open a whole document (PDF, Word, RTF, ODT, HTML, TXT, MD),
+// «Документы» page: open a whole document (PDF, Word, RTF, ODT, HTML, TXT, MD),
 // translate it paragraph by paragraph with pause / resume, export to Word / RTF / TXT / Markdown.
 import AppKit
 import TolkCore
@@ -219,8 +219,8 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
                 guard let self else { return }
                 self.extractTask = nil
                 self.loadingSpinner.stopAnimation(nil)
-                if error is CancellationError || Task.isCancelled { self.show(.empty); return }
                 self.show(.empty)
+                if error is CancellationError || Task.isCancelled { return }
                 self.showAlert(error.localizedDescription)
             }
         }
@@ -231,6 +231,11 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         guard let doc = document, !doc.paragraphs.isEmpty else { return }
         hideNotice()
         if translator.isComplete { translator.reset(); tableView.reloadData(); heightCache = [:]; noteAllHeights() }
+        runTranslator()
+    }
+
+    /// Starts the translator; a changed language / tone while translations exist starts over with the new ones.
+    private func runTranslator() {
         let target = selectedTarget
         let tone = selectedTone
         if translator.hasAnyTranslation, translator.target != target || translator.tone != tone {
@@ -298,11 +303,8 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         subtitle.alignment = .center
         subtitle.preferredMaxLayoutWidth = 480
 
-        let open = NSButton(title: "Открыть файл…", target: self, action: #selector(openFile(_:)))
-        open.bezelStyle = .rounded
+        let open = toolButton("Открыть файл…", symbol: "folder", #selector(openFile(_:)))
         open.controlSize = .large
-        open.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
-        open.imagePosition = .imageLeading
         open.keyEquivalent = "\r"
 
         let hint = UIFactory.label("Сканы в PDF распознаются прямо на этом Mac. Перевод сохраняется в Word, RTF, TXT или Markdown.",
@@ -392,11 +394,8 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         let savedTone = UserDefaults.standard.string(forKey: Self.toneKey).flatMap(Tone.init(rawValue:)) ?? .formal
         toneControl.selectedSegment = Tone.allCases.firstIndex(of: savedTone) ?? 2
 
-        translateButton = NSButton(title: "Перевести", target: self, action: #selector(primaryAction(_:)))
-        translateButton.bezelStyle = .rounded
+        translateButton = toolButton("Перевести", symbol: "play.fill", #selector(primaryAction(_:)))
         translateButton.keyEquivalent = "\r"
-        translateButton.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: nil)
-        translateButton.imagePosition = .imageLeading
         pauseButton = toolButton("Пауза", symbol: "pause.fill", #selector(pauseAction(_:)), tip: "Приостановить перевод; готовые абзацы сохранятся")
         cancelButton = toolButton("Отмена", symbol: "stop.fill", #selector(cancelAction(_:)), tip: "Остановить перевод; готовые абзацы сохранятся")
         saveButton = toolButton("Сохранить как…", symbol: "square.and.arrow.down", #selector(saveAs(_:)),
@@ -463,12 +462,8 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         NotificationCenter.default.addObserver(self, selector: #selector(liveScrollStarted(_:)),
                                                name: NSScrollView.willStartLiveScrollNotification, object: scrollView)
 
-        followButton = NSButton(title: "К текущему абзацу", target: self, action: #selector(followAgain(_:)))
-        followButton.bezelStyle = .rounded
-        followButton.controlSize = .regular
-        followButton.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: nil)
-        followButton.imagePosition = .imageLeading
-        followButton.toolTip = "Снова следить за переводом"
+        followButton = toolButton("К текущему абзацу", symbol: "arrow.down.circle", #selector(followAgain(_:)),
+                                  tip: "Снова следить за переводом")
         followButton.isHidden = true
         followButton.translatesAutoresizingMaskIntoConstraints = false
 
@@ -530,7 +525,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
                                                name: NSWindow.didEndLiveResizeNotification, object: nil)
     }
 
-    private func toolButton(_ title: String, symbol: String, _ action: Selector, tip: String) -> NSButton {
+    private func toolButton(_ title: String, symbol: String, _ action: Selector, tip: String? = nil) -> NSButton {
         let b = NSButton(title: title, target: self, action: action)
         b.bezelStyle = .rounded
         b.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
@@ -691,17 +686,12 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         let complete = translator.isComplete
         let changed = any && (translator.target != selectedTarget || translator.tone != selectedTone)
         switch runState {
-        case .running:
+        case .running, .paused:
+            let running = runState == .running
             translateButton.isHidden = true
             pauseButton.isHidden = false
-            pauseButton.title = "Пауза"
-            pauseButton.image = NSImage(systemSymbolName: "pause.fill", accessibilityDescription: nil)
-            cancelButton.isHidden = false
-        case .paused:
-            translateButton.isHidden = true
-            pauseButton.isHidden = false
-            pauseButton.title = "Продолжить"
-            pauseButton.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: nil)
+            pauseButton.title = running ? "Пауза" : "Продолжить"
+            pauseButton.image = NSImage(systemSymbolName: running ? "pause.fill" : "play.fill", accessibilityDescription: nil)
             cancelButton.isHidden = false
         case .idle:
             translateButton.isHidden = !hasDoc
@@ -725,19 +715,14 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         runState == .running ? pause() : resume()
     }
 
-    @objc private func cancelAction(_ sender: Any?) {
-        let row = translator.current
-        translator.stop()
-        setRunState(.idle)
-        markCurrent(nil)
-        if let row { reloadRow(row) }
-        updateProgress()
-    }
+    @objc private func cancelAction(_ sender: Any?) { stopTranslator(to: .idle) }
 
-    private func pause() {
+    private func pause() { stopTranslator(to: .paused) }
+
+    private func stopTranslator(to state: RunState) {
         let row = translator.current
         translator.stop()
-        setRunState(.paused)
+        setRunState(state)
         markCurrent(nil)
         if let row { reloadRow(row) }
         updateProgress()
@@ -745,18 +730,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
 
     private func resume() {
         hideNotice()
-        if translator.hasAnyTranslation, translator.target != selectedTarget || translator.tone != selectedTone {
-            // Settings changed while paused: start over with the new ones.
-            translator.reset()
-            heightCache = [:]
-            tableView.reloadData()
-        }
-        autoFollow = true
-        saved = false
-        setRunState(.running)
-        translator.start(target: selectedTarget, tone: selectedTone)
-        updateHeaderTitle()
-        updateProgress()
+        runTranslator()
     }
 
     // MARK: - Translator events

@@ -1,5 +1,3 @@
-// Owned by the "glossary" session. Foundation only.
-//
 // `rules.md` on disk: load, atomic save with a one-time backup, merge with changes made
 // elsewhere (popup "В глоссарий" -> RulesStore.addTerm, VS Code), and a file watcher.
 import Foundation
@@ -9,10 +7,10 @@ public final class GlossaryFile: @unchecked Sendable {
     public var backupPath: String { path + ".bak" }
 
     /// Text last read from / written to disk; the base for detecting external changes.
-    public private(set) var baseText: String = ""
+    private var baseText: String = ""
     private let lock = NSLock()
 
-    public init(path: String) { self.path = (path as NSString).expandingTildeInPath }
+    public init(path: String) { self.path = expandPath(path) }
 
     /// Reads the file (missing file = empty document with standard sections).
     public func load() -> GlossaryDocument {
@@ -32,7 +30,6 @@ public final class GlossaryFile: @unchecked Sendable {
         public var document: GlossaryDocument
         /// Entries that appeared on disk in the meantime and were merged in.
         public var mergedFromDisk: Int
-        public var wrote: Bool
     }
 
     /// Writes `doc`. If the file changed on disk since the last load/save, terms added there
@@ -58,7 +55,7 @@ public final class GlossaryFile: @unchecked Sendable {
         let out = doc.markdown()
         guard out != disk else {
             baseText = disk
-            return SaveResult(document: doc, mergedFromDisk: merged, wrote: false)
+            return SaveResult(document: doc, mergedFromDisk: merged)
         }
         let fm = FileManager.default
         let url = URL(fileURLWithPath: path)
@@ -69,7 +66,7 @@ public final class GlossaryFile: @unchecked Sendable {
         try out.write(to: url, atomically: true, encoding: .utf8) // temp file + rename
         baseText = out
         // Ids are kept so the UI can keep its selection; layout of `doc` stays valid for the next save.
-        return SaveResult(document: doc, mergedFromDisk: merged, wrote: true)
+        return SaveResult(document: doc, mergedFromDisk: merged)
     }
 
     private static func key(_ e: GlossaryEntry) -> String {
@@ -90,7 +87,7 @@ public final class GlossaryFileWatcher: @unchecked Sendable {
     private var pending: DispatchWorkItem?
 
     public init(path: String, onChange: @escaping () -> Void) {
-        self.path = (path as NSString).expandingTildeInPath
+        self.path = expandPath(path)
         self.onChange = onChange
         queue.async { self.startDir(); self.startFile() }
     }

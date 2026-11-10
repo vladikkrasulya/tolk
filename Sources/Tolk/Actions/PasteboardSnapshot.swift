@@ -1,17 +1,10 @@
-// Owned by the "quick actions" session.
 import AppKit
 
 /// Full copy of a pasteboard: every item with every type's data, in order.
 /// Used to put the user's clipboard back after the synthetic ⌘C / ⌘V.
-struct PasteboardSnapshot: Equatable {
-    struct Item: Equatable { var entries: [(type: NSPasteboard.PasteboardType, data: Data)]
-        static func == (a: Item, b: Item) -> Bool {
-            a.entries.map(\.type) == b.entries.map(\.type) && a.entries.map(\.data) == b.entries.map(\.data)
-        }
-    }
+struct PasteboardSnapshot {
+    struct Item { var entries: [(type: NSPasteboard.PasteboardType, data: Data)] }
     var items: [Item]
-
-    var isEmpty: Bool { items.isEmpty }
 
     static func capture(_ pb: NSPasteboard = .general) -> PasteboardSnapshot {
         let items = (pb.pasteboardItems ?? []).map { item in

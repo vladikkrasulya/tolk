@@ -1,4 +1,4 @@
-// Owned by the "history" helper. «История» page: local history of translations (only on this Mac).
+// «История» page: local history of translations (only on this Mac).
 //
 // Search + list grouped by day on the left, the selected entry (full texts, copy / open / delete) on the right.
 // Reloads on `HistoryStore.didChange` — only while the page is on screen; a hidden page just marks itself stale.
@@ -563,14 +563,6 @@ final class HistoryViewController: NSViewController {
         }
         reload()
     }
-
-    #if DEBUG
-    func selectFirstEntryForReview() {
-        if let i = rows.firstIndex(where: { if case .entry = $0 { true } else { false } }) {
-            table.selectRowIndexes([i], byExtendingSelection: false)
-        }
-    }
-    #endif
 }
 
 // MARK: - Table

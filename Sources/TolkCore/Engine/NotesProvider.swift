@@ -5,20 +5,19 @@ import Foundation
 enum NotesPrompt {
     static func system(from: Language, to: Language, rules: String) -> String {
         var s = """
-        You review a \(from.englishName) → \(to.englishName) translation made for a person working in adtech
-        (ad network, RTB/oRTB, SSP/DSP, publishers, advertisers, traffic, fraud, payouts, integrations, QPS).
-        Find at most 3 terms or phrases in the SOURCE that are industry jargon, slang or ambiguous, where a generic
-        translator often gets it wrong or inconsistent (e.g. "scale up", "cap", "bid", "разжать QPS", "залить трафик").
+        You review a \(from.englishName) → \(to.englishName) translation.
+        Find at most 3 terms or phrases in the SOURCE that are specialist jargon, slang, idioms or ambiguous words,
+        where a generic translator often gets it wrong or inconsistent (the field comes from the user's glossary and the text itself).
         Skip ordinary words, names, IDs and numbers.
         The user's glossary below is authoritative: never suggest anything that contradicts it, and skip terms it already covers.
-        Suggest only what a native-speaking adtech professional would really write in a work chat or email;
+        Suggest only what a native speaker would really write in a chat or email;
         if you are not sure a variant is better, leave "suggestion" empty — a confirmed correct choice is a useful note too.
         If nothing is debatable, return an empty list — do not invent notes.
         For each note:
         - "term": exact phrase from the source;
         - "used": how the translation rendered it (exact words from the translation);
-        - "suggestion": a clearly better industry variant in \(to.englishName), or "";
-        - "note": in Russian, at most 15 words: what it means in adtech and why this variant.
+        - "suggestion": a clearly better variant in \(to.englishName), or "";
+        - "note": in Russian, at most 15 words: what it means and why this variant.
         Answer with JSON only: {"notes":[{"term":"","used":"","suggestion":"","note":""}]}
         """
         if !rules.isEmpty { s += "\n\n# User's rules and glossary\n" + rules }
@@ -35,7 +34,7 @@ extension OllamaProvider {
         req.timeoutInterval = timeout
         let body: [String: Any] = [
             "model": model, "stream": false, "reasoning_effort": "none", "temperature": 0.3,
-            "response_format": ["type": "json_object"],
+            "response_format": ["type": "json_object"], "max_tokens": 300,
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
@@ -54,10 +53,10 @@ extension OllamaProvider {
 
     func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String] {
         let system = """
-        You help a translator from \(from.englishName) to \(to.englishName) working in adtech.
+        You help a translator from \(from.englishName) to \(to.englishName).
         Give 3 or 4 alternative ways to render the FRAGMENT inside the TRANSLATION, in \(to.englishName),
         each fitting the sentence grammatically (same case/number/tense) so it can replace the fragment as is.
-        Prefer natural industry wording. Do not repeat the fragment itself.
+        Prefer natural, idiomatic wording (and the user's glossary terms if relevant). Do not repeat the fragment itself.
         Answer JSON only: {"alternatives":["...","..."]}
         """
         let user = "SOURCE:\n\(source)\n\nTRANSLATION:\n\(translation)\n\nFRAGMENT:\n\(fragment)"
@@ -78,7 +77,7 @@ extension OllamaProvider {
             "model": model,
             "stream": false,
             "reasoning_effort": "none",
-            "temperature": 0.2,
+            "temperature": 0.2, "max_tokens": 500,
             "response_format": ["type": "json_object"],
             "messages": [
                 ["role": "system", "content": NotesPrompt.system(from: from, to: to, rules: rules.promptBlock(for: source))],
@@ -101,8 +100,16 @@ extension OllamaProvider {
     static func parseNotes(_ content: String, source: String) -> [TranslationNote] {
         var json = content.trimmingCharacters(in: .whitespacesAndNewlines)
         if let a = json.firstIndex(of: "{"), let b = json.lastIndex(of: "}") { json = String(json[a...b]) }
-        struct Wrapper: Decodable { var notes: [TranslationNote]? }
-        guard let d = json.data(using: .utf8), let w = try? JSONDecoder().decode(Wrapper.self, from: d) else { return [] }
+        // Element by element: one malformed note must not throw away the good ones.
+        guard let d = json.data(using: .utf8), let root = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let raw = root["notes"] as? [[String: Any]] else { return [] }
+        func str(_ v: Any?) -> String? { (v as? String) }
+        let decoded: [TranslationNote] = raw.compactMap { o in
+            guard let term = str(o["term"]), let note = str(o["note"]) else { return nil }
+            return TranslationNote(term: term, used: str(o["used"]) ?? "", suggestion: str(o["suggestion"]), note: note)
+        }
+        struct Wrapper { var notes: [TranslationNote]? }
+        let w = Wrapper(notes: decoded)
         let lowered = source.lowercased()
         return (w.notes ?? []).compactMap { n in
             var n = n

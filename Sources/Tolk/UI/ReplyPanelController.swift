@@ -29,6 +29,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     private var translation = ""
     private var debounce: DispatchWorkItem?
     private var monitors: [Any] = []
+    private var presentGeneration = 0
     private var drafts: [String: String] = [:]   // partner text -> unsent draft (survives an accidental close)
 
     // Views
@@ -42,12 +43,23 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     private var inputView: ReplyInputView!
     private var inputHeight: NSLayoutConstraint!
     private var outputLabel: NSTextField!
-    private var outputBox: NSView!
     private var spinner: NSProgressIndicator!
     private var toneControl: NSSegmentedControl!
     private var copyButton: NSButton!
     private var insertButton: NSButton!
     private var tone: Tone = .auto
+
+    // Live typing: sentence cache + the current request's plan.
+    private let live = LiveTranslation()
+    private var step: LiveTranslation.Step?
+    private var keptPrefix = ""
+    private var tail = ""
+    private var detected: (source: Language, target: Language)?
+    // Editor pass
+    private let refiner = RefineRunner()
+    private var refineButton: NSButton!
+    private var beforeRefine: String?
+    private var configObserver: NSObjectProtocol?
 
     init(engine: TranslationEngine) {
         self.engine = engine
@@ -55,10 +67,16 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         super.init()
         runner.onUpdate = { [weak self] in self?.handle($0) }
         runner.onStats = { [weak self] in self?.statusLine?.finished($0) }
+        configObserver = NotificationCenter.default.addObserver(forName: TolkConfig.didChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.live.reset() }
+        }
     }
+
+    deinit { if let o = configObserver { NotificationCenter.default.removeObserver(o) } }
 
     func replaceEngine(_ new: TranslationEngine) {
         runner.cancel()
+        live.reset()
         engine = new
         runner = TranslationRunner(engine: new)
         runner.onUpdate = { [weak self] in self?.handle($0) }
@@ -66,11 +84,11 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     }
 
     var window: NSWindow? { panel }
-    var isVisible: Bool { panel?.isVisible ?? false }
 
     // MARK: - Show / hide
 
     func show(_ ctx: ReplyContext) {
+        presentGeneration += 1 // a fade-out of the previous close must not hide this window
         build()
         context = ctx
         let appName = ctx.app?.localizedName ?? "чат"
@@ -81,6 +99,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
 
         inputView.string = drafts[ctx.partnerText] ?? ""
         translation = ""
+        live.reset(); step = nil; resetRefine()
         setOutput("", placeholder: true)
         if !inputView.string.isEmpty { scheduleTranslation(delay: 0) }
 
@@ -96,12 +115,25 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
 
     func close() {
         runner.cancel()
+        refiner.cancel()
         debounce?.cancel()
         removeMonitors()
-        if let ctx = context { drafts[ctx.partnerText] = inputView.string }
+        spinner?.stopAnimation(nil)
+        statusLine?.reset() // no "model is loading" counter ticking behind a hidden window
+        if let ctx = context {
+            drafts[ctx.partnerText] = inputView.string.isEmpty ? nil : inputView.string
+            if drafts.count > 20 { drafts = drafts.filter { $0.key == ctx.partnerText } } // keep memory bounded
+        }
         guard let panel, panel.isVisible else { return }
+        presentGeneration += 1
+        let generation = presentGeneration
         NSAnimationContext.runAnimationGroup({ c in c.duration = 0.1; panel.animator().alphaValue = 0 },
-                                            completionHandler: { MainActor.assumeIsolated { panel.orderOut(nil); panel.alphaValue = 1 } })
+                                            completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard self?.presentGeneration == generation else { return }
+                panel.orderOut(nil); panel.alphaValue = 1
+            }
+        })
     }
 
     // MARK: - Translation
@@ -121,32 +153,69 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     private func translateNow() {
         guard let ctx = context else { return }
         let text = inputView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let wasRunning = runner.isRunning
         runner.cancel()
-        guard !text.isEmpty else { translation = ""; setOutput("", placeholder: true); updateButtons(); return }
+        resetRefine()
+        guard !text.isEmpty else {
+            live.reset(); step = nil
+            translation = ""; setOutput("", placeholder: true); spinner.stopAnimation(nil); updateButtons(); return
+        }
+        let key = LiveTranslation.key(source: nil, target: ctx.partnerLanguage, tone: tone, mode: .translate,
+                                      config: TolkConfig.load(), replyTo: ctx.partnerText)
+        let st = live.prepare(text: text, source: nil, target: ctx.partnerLanguage, tone: tone,
+                              replyTo: ctx.partnerText, key: key)
+        Diagnostics.log(st.logLine)
+        step = st
+        keptPrefix = st.kind == .partial ? st.kept : ""
+        tail = ""
+        guard let request = st.request else {
+            // Nothing meaningful changed: the shown translation must equal the kept one.
+            if wasRunning { statusLine?.reset() }
+            spinner.stopAnimation(nil)
+            pendingFirstChunk = false
+            translation = st.kept
+            setOutput(st.kept, placeholder: st.kept.isEmpty)
+            updateButtons()
+            return
+        }
         spinner.startAnimation(nil)
-        // Keep the previous translation, dimmed, until the new one starts.
-        if !translation.isEmpty { outputLabel.textColor = .tertiaryLabelColor }
         pendingFirstChunk = true
+        if st.kind == .partial {
+            // The kept part stays on screen, undimmed; the tail streams in after it.
+            translation = st.kept
+            setOutput(st.kept, placeholder: false)
+        } else if !translation.isEmpty {
+            // Keep the previous translation, dimmed, until the new one starts.
+            outputLabel.textColor = .tertiaryLabelColor
+        }
         statusLine?.waiting(provider: "…")
-        runner.start(TranslationRequest(text: text, target: ctx.partnerLanguage, tone: tone, replyTo: ctx.partnerText))
+        runner.start(request)
     }
 
     private var pendingFirstChunk = false
 
     private func handle(_ u: TranslationRunner.Update) {
         switch u {
-        case let .started(provider, _, _):
+        case let .started(provider, source, target):
             statusLine?.waiting(provider: provider)
+            live.started(source: source, target: target)
+            detected = (source, target)
         case let .fellBack(_, reason):
             statusLine?.fellBack(reason: reason)
-            break
+            // Only the streamed tail goes; the kept part stays.
+            tail = ""
+            translation = keptPrefix
+            pendingFirstChunk = true
+            if !keptPrefix.isEmpty { setOutput(keptPrefix, placeholder: false) }
         case let .delta(chunk):
             statusLine?.chunk()
-            if pendingFirstChunk { translation = ""; pendingFirstChunk = false }
-            translation += chunk
+            if pendingFirstChunk { pendingFirstChunk = false; tail = "" }
+            tail += chunk
+            translation = keptPrefix + tail
             setOutput(translation, placeholder: false)
         case .finished:
             spinner.stopAnimation(nil)
+            if let st = step, !tail.isEmpty { live.commit(st, tail: tail) }
         case let .failed(message):
             statusLine?.failed(message)
             spinner.stopAnimation(nil)
@@ -168,6 +237,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
 
     private func updateButtons() {
         let ready = !translation.isEmpty && !pendingFirstChunk
+        refineButton.isEnabled = ready && !runner.isRunning && !refiner.isRunning
         copyButton.isEnabled = ready
         insertButton.isEnabled = ready && context?.app != nil
     }
@@ -176,7 +246,60 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
 
     @objc private func toneChanged(_ sender: NSSegmentedControl) {
         tone = Tone.allCases[max(0, sender.selectedSegment)]
+        live.reset()
         scheduleTranslation(delay: 0)
+    }
+
+    // MARK: - Editor pass
+
+    private func resetRefine() {
+        refiner.cancel()
+        beforeRefine = nil
+        refineButton?.title = "Отредактировать"
+    }
+
+    @objc private func refineClicked() {
+        if let old = beforeRefine {   // «Вернуть»
+            beforeRefine = nil
+            translation = old
+            setOutput(old, placeholder: false)
+            refineButton.title = "Отредактировать"
+            live.reset()
+            updateButtons()
+            return
+        }
+        guard let ctx = context, !translation.isEmpty, !pendingFirstChunk, !runner.isRunning else { return }
+        let source = inputView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let old = translation
+        let from = detected?.source ?? .russian
+        var refined = ""
+        spinner.startAnimation(nil)
+        refineButton.isEnabled = false
+        live.reset()
+        refiner.start(engine: engine, source: source, translation: old, from: from, to: ctx.partnerLanguage, tone: tone,
+                      onDelta: { [weak self] chunk in
+            guard let self else { return }
+            refined += chunk
+            self.translation = refined
+            self.setOutput(refined, placeholder: false)
+        }, onDone: { [weak self] in
+            guard let self else { return }
+            self.spinner.stopAnimation(nil)
+            let t = refined.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty || t == old.trimmingCharacters(in: .whitespacesAndNewlines) {
+                self.translation = old; self.setOutput(old, placeholder: false)
+            } else {
+                self.beforeRefine = old
+                self.refineButton.title = "Вернуть"
+            }
+            self.updateButtons()
+        }, onFail: { [weak self] message in
+            guard let self else { return }
+            self.spinner.stopAnimation(nil)
+            self.translation = old; self.setOutput(old, placeholder: false)
+            self.statusLine?.failed(message)
+            self.updateButtons()
+        })
     }
 
     @objc private func toggleOriginal() { setOriginalVisible(!showOriginal) }
@@ -227,7 +350,12 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         inputView.string = ""
         close()
         app.activate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        // Paste only once the chat app really is frontmost (activation can take longer than a fixed delay).
+        let deadline = Date().addingTimeInterval(1.5)
+        func pasteWhenFront() {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier != app.processIdentifier, Date() < deadline {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: pasteWhenFront); return
+            }
             let src = CGEventSource(stateID: .combinedSessionState)
             for down in [true, false] {
                 let e = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: down) // V
@@ -236,6 +364,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
                 e?.post(tap: .cghidEventTap)
             }
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: pasteWhenFront)
         Diagnostics.log("reply inserted into \(app.localizedName ?? "?")")
     }
 
@@ -392,7 +521,6 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         outputRow.orientation = .horizontal
         outputRow.alignment = .top
         outputRow.spacing = 6
-        outputBox = outputRow
 
         // Footer
         toneControl = UIFactory.toneControl(target: self, action: #selector(toneChanged(_:)))
@@ -402,12 +530,16 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         insertButton.keyEquivalent = "\r"
         insertButton.keyEquivalentModifierMask = .command
         insertButton.toolTip = "Вернуться в чат и вставить ответ (отправите сами)"
-        for b in [copyButton!, insertButton!] {
+        refineButton = NSButton(title: "Отредактировать", target: self, action: #selector(refineClicked))
+        refineButton.toolTip = "Второй проход: убрать кальки, сохранить смысл"
+        for b in [copyButton!, insertButton!, refineButton!] {
             b.bezelStyle = .push
             b.controlSize = .small
             b.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         }
-        let footer = NSStackView(views: [toneControl, UIFactory.spacer(), copyButton, insertButton])
+        refineButton.isEnabled = false
+        refineButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let footer = NSStackView(views: [toneControl, UIFactory.spacer(), refineButton, copyButton, insertButton])
         footer.orientation = .horizontal
         footer.spacing = 6
 

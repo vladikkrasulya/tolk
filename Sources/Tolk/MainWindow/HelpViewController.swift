@@ -43,7 +43,6 @@ struct AnimCanvas<Content: View>: View {
 }
 
 struct HelpView: View {
-
     private let cols = [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)]
 
     var body: some View {
@@ -60,15 +59,15 @@ struct HelpView: View {
                              text: "Его сообщение остаётся сверху, вы пишете по-своему — ответ переводится на его язык. «Вставить в чат ⌘↩» — и отправляете сами.") { hovering in
                         AnimCanvas(active: hovering) { phase in ReplyAnim(phase: phase) }
                     }
-                    HelpCard(title: "Перевести и заменить", keys: ["⌃", "⌥", "T"], keysNote: nil,
+                    HelpCard(title: "Перевести и заменить", keys: ["⌃", "⌥", "T"], keysNote: "по умолчанию",
                              text: "Выделите свой текст в Slack, Telegram или почте — он заменится переводом прямо там. Тон подберётся по программе.") { hovering in
                         AnimCanvas(active: hovering) { phase in ReplaceAnim(phase: phase, from: "Скинь стату за неделю", to: "Send me the weekly stats") }
                     }
-                    HelpCard(title: "Причесать английский", keys: ["⌃", "⌥", "P"], keysNote: nil,
+                    HelpCard(title: "Причесать английский", keys: ["⌃", "⌥", "P"], keysNote: "по умолчанию",
                              text: "Без перевода: исправит грамматику и сделает текст как у носителя из индустрии.") { hovering in
                         AnimCanvas(active: hovering) { phase in ReplaceAnim(phase: phase, from: "we was checked yours traffic", to: "we've checked your traffic") }
                     }
-                    HelpCard(title: "Перевести с экрана", keys: ["⌥", "⇧", "S"], keysNote: nil,
+                    HelpCard(title: "Перевести с экрана", keys: ["⌥", "⇧", "S"], keysNote: "по умолчанию",
                              text: "Выделите мышью область экрана — текст распознается прямо на Mac и переведётся. Если открыто окно Tolk — результат появится в «Фото и скриншоты».") { hovering in
                         AnimCanvas(active: hovering) { phase in CaptureAnim(phase: phase) }
                     }
@@ -77,9 +76,9 @@ struct HelpView: View {
                         AnimCanvas(active: hovering) { phase in DropAnim(phase: phase) }
                     }
                 }
-                AutocompleteHelpCard()
                 PopupButtonsCard()
                 TroubleCard()
+                AutocompleteHelpCard()
             }
             .padding(24)
         }
@@ -156,7 +155,6 @@ struct MiniWindow<Content: View>: View {
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(tint))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12)))
-
     }
 }
 
@@ -280,6 +278,16 @@ struct DropAnim: View {
 
 // MARK: - Popup buttons and trouble
 
+private extension View {
+    /// Full-width rounded card used by the info blocks under the feature grid.
+    func infoCardStyle() -> some View {
+        padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)))
+    }
+}
+
 struct PopupButtonsCard: View {
     private let rows: [(String, String, String)] = [
         ("arrow.uturn.backward", "Обратный перевод", "проверить, что смысл не потерялся"),
@@ -310,10 +318,7 @@ struct PopupButtonsCard: View {
             Text("История — все переводы на этом Mac с поиском. Профиль «Работа / Дом» — меню Tolk или «Настройки»: у каждого свой глоссарий и модель.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)))
+        .infoCardStyle()
     }
 }
 
@@ -322,15 +327,12 @@ struct AutocompleteHelpCard: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "text.cursor").font(.title2).foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Автодополнение").font(.headline)
-                Text("Включается в меню Tolk. Пока вы печатаете, серый текст у курсора предлагает продолжение: Tab или → принимает, Esc скрывает. В терминалах и редакторах кода выключено — список в «Настройках».")
+                Text("Автодополнение (по умолчанию выключено)").font(.headline)
+                Text("Необязательная функция в разработке, не связана с переводом. Включается в меню Tolk. Пока вы печатаете, серый текст у курсора предлагает продолжение: Tab или → принимает, Esc скрывает. В терминалах и редакторах кода выключено — список в «Настройках».")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)))
+        .infoCardStyle()
     }
 }
 
@@ -340,13 +342,10 @@ struct TroubleCard: View {
             Image(systemName: "lifepreserver").font(.title2).foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Если что-то не так").font(.headline)
-                Text("Меню Tolk в строке меню → «Сообщить о проблеме…» копирует отчёт — просто перешлите его. Если Tolk упадёт, при следующем запуске он сам предложит скопировать отчёт. Иконка в строке меню показывает, кто переводит: Qwen на домашнем сервере или Google.")
+                Text("Меню Tolk в строке меню → «Сообщить о проблеме…» копирует отчёт — просто перешлите его. Если Tolk упадёт, при следующем запуске он сам предложит скопировать отчёт. Иконка в строке меню показывает, кто переводит: модель на домашнем сервере или запасной перевод (Apple/Google, как выбрано в Настройках).")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)))
+        .infoCardStyle()
     }
 }

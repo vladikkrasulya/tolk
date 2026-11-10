@@ -1,5 +1,5 @@
 // What we send to the local model and how its raw continuation becomes a suggestion.
-// Owned by the "model eval" session. Measurements and examples: ~/Translate/test-corpus/autocomplete-eval.md
+// Measurements and examples: ~/Translate/test-corpus/autocomplete-eval.md
 //
 // Chosen after benchmarking Gemma 4 E4B base (Q4_K_M) vs it (QAT q4_0) on 36 adtech/chat fragments (EN+RU):
 // the it model with a short "Message in <app>:" header and NO chat template gave the most sensible,
@@ -14,9 +14,6 @@ enum AutocompletePrompt {
     /// Set by the [prefs] section from the length setting (`PromptPrefs.maxTokens`): 14 for short/medium, ~27 for long.
     nonisolated(unsafe) static var maxTokens = 14
 
-    /// Model file used by default (in ~/Library/Application Support/Tolk/models).
-    static let defaultModelPath = "~/Library/Application Support/Tolk/models/gemma-4-E4B-it-q4_0.gguf"
-
     private static let maxContextChars = 1500
     private static let maxWords = 6
 
@@ -26,27 +23,6 @@ enum AutocompletePrompt {
     static let fewShot = "Message in Slack:\nПривет! Ты уже посмотрел логи по вчерашней кампании?\n\n"
         + "Message in Slack:\nCan you check the feed and send me the report today?\n\n"
         + "Message in Slack:\nСпасибо, получилось запустить, завтра скину результаты.\n\n"
-
-    /// Gemma 4 26B A4B (and other heavily instruction-tuned models) produce garbage on the raw "Message in X:" prompt,
-    /// but work very well inside the Gemma chat template (eval: 14/46 first-word hits vs 6 for E4B, 0 silly vs 14).
-    /// When true, `prompt` wraps everything in `<|turn>user … <turn|><|turn>model` (thinking off).
-    /// Set via `configure(modelPath:)` whenever the model changes (needs one call from AppDelegate/LocalModelServer).
-    nonisolated(unsafe) static var chatTemplate = false
-
-    /// Picks the prompt style from the GGUF file name: "26b" → chat template, everything else → raw.
-    static func configure(modelPath: String) {
-        let f = (modelPath as NSString).lastPathComponent.lowercased()
-        chatTemplate = f.contains("26b") || f.contains("31b")
-    }
-
-    private static let chatInstruction =
-        "You are a typing assistant that continues the user's message exactly at the caret. "
-        + "Reply with ONLY the next few words (no quotes, no markdown, never repeat the text). "
-        + "If the text stops in the middle of a word, begin with the rest of that word, with no space. "
-        + "If it ends with a complete word, begin with a single space (or a comma/period if that fits). "
-        + "Match the language and tone; never invent numbers, names or facts that are not in the text or conversation.\n"
-        + "Examples (text|continuation): 'Привет! Ты уже посмотр'|'ел логи?'  'Can you check the feed and'|' send me the report?'  "
-        + "'Спасибо, получилось запустить, завтра'|' скину результаты.'\n\n"
 
     /// Prompt for a raw `/completion` call. `appName` is the frontmost app (e.g. "Telegram").
     /// `context` is the visible conversation around the field (see `ScreenContext`); it goes FIRST and changes
@@ -66,14 +42,6 @@ enum AutocompletePrompt {
         let ctx = (context ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         // Instructions / clipboard / examples go FIRST (before the conversation): they change rarely, so the prefix
         // stays byte-stable and llama-server's KV cache keeps it while the user types.
-        if chatTemplate {
-            // Instruction first (stable), then notes/clipboard, then conversation, then the typed text last.
-            var body = chatInstruction + extrasPrefix(extras)
-            if !ctx.isEmpty { body += "Conversation in \(place(for: appName)):\n\(ctx)\n\n" }
-            body += "Text typed so far in \(place(for: appName)) (continue it):\n" + text
-                + String(textBefore.reversed().prefix { $0 == " " || $0 == "\t" || $0 == "\u{00A0}" }.reversed())
-            return "<|turn>user\n" + body + "<turn|>\n<|turn>model\n<|channel>thought\n<channel|>"
-        }
         let pre = fewShot + extrasPrefix(extras)
         guard !ctx.isEmpty else { return pre + header(for: appName) + text }
         return pre + "Conversation in \(place(for: appName)):\n\(ctx)\n\nMy next message in this conversation:\n" + text

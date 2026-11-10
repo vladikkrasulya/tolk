@@ -1,4 +1,4 @@
-// Owned by the "history" helper. Local translation history — stored only on this Mac, never sent anywhere.
+// Local translation history — stored only on this Mac, never sent anywhere.
 //
 // File: `~/Library/Application Support/Tolk/history.jsonl`, one JSON entry per line (mode 0600).
 // Appends are cheap; a line whose `id` repeats an earlier one REPLACES it (live typing updates the same entry).
@@ -70,7 +70,7 @@ public final class HistoryStore: @unchecked Sendable {
     private var fileLines = 0
 
     public init(path: String = HistoryStore.defaultPath, maxEntries: Int = 3000, defaults: UserDefaults = .standard) {
-        self.path = (path as NSString).expandingTildeInPath
+        self.path = expandPath(path)
         self.maxEntries = max(1, maxEntries)
         self.defaults = defaults
     }
@@ -272,7 +272,13 @@ public final class HistoryStore: @unchecked Sendable {
         guard let h = FileHandle(forWritingAtPath: path) else { rewrite(); return }
         defer { try? h.close() }
         do {
-            try h.seekToEnd()
+            let end = try h.seekToEnd()
+            if end > 0 {
+                // A crash mid-append can leave a last line without "\n": don't glue the new entry to it.
+                try h.seek(toOffset: end - 1)
+                if try h.read(upToCount: 1) != Data([UInt8(ascii: "\n")]) { line.insert(UInt8(ascii: "\n"), at: 0) }
+                try h.seekToEnd()
+            }
             try h.write(contentsOf: line)
             fileLines += 1
         } catch { rewrite() }

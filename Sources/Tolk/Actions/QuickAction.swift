@@ -1,4 +1,3 @@
-// Owned by the "quick actions" session.
 import Carbon.HIToolbox
 import TolkCore
 
@@ -63,6 +62,7 @@ enum QuickActionText {
         let s = raw.lowercased()
         if s.contains("qwen") || s.contains("ollama") { return "Qwen" }
         if s.contains("google") { return "Google" }
+        if s.contains("gemma") { return "Gemma" }
         return raw
     }
 
@@ -71,7 +71,12 @@ enum QuickActionText {
     static let done = "Готово ✓"
     static let noAccessibility = "Нужен доступ «Универсальный доступ» для Tolk"
     static let qwenDown = "Модель на vkbox недоступна — причесать текст без неё нельзя"
-    static let appChanged = "Окно сменилось — текст не вставлен"
+    static let appChanged = "Окно сменилось — вставлять некуда, результат в буфере обмена"
+    static let readOnly = "Здесь нельзя заменить текст — результат в буфере обмена"
+    /// Waiting for the first word: a cold model on the server is being loaded.
+    static func loading(_ base: String, seconds: Int) -> String {
+        base + " · модель загружается на сервере, \(seconds) с"
+    }
     static let empty = "Пустой ответ — ничего не вставлено"
     static func timeout(_ seconds: Int) -> String { "Нет ответа за \(seconds) с — отменено" }
 }

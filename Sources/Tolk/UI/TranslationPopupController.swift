@@ -1,4 +1,3 @@
-// Owned by the "UI" session.
 import AppKit
 import TolkCore
 
@@ -30,7 +29,6 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
 
     // Views
     private var directionButton: NSButton!
-    private var swapButton: NSButton!
     private var providerBadge: BadgeView!
     private var spinner: NSProgressIndicator!
     private var noticeLabel: NSTextField!
@@ -66,6 +64,10 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     private var frontApp: String?
     private var frontAppRef: NSRunningApplication?
     private var replyButton: NSButton!
+    // Editor pass («Отредактировать» / «Вернуть»)
+    private var refineButton: NSButton!
+    private let refiner = RefineRunner()
+    private var beforeRefine: String?
     private var altBox: NSStackView!
     private var altTask: Task<Void, Never>?
     private var altWork: DispatchWorkItem?
@@ -104,7 +106,10 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
 
     // Placement
     private var anchor: NSPoint = .zero
-    private var placedAbove = false
+    private var lastApply: CFTimeInterval = 0
+    /// Where the panel is heading: an animation may still be running, and panel.frame is mid-way.
+    private var targetFrame = NSRect.zero
+    private let resizeInterval: CFTimeInterval = 0.11
     private var monitors: [Any] = []
     private var copyResetWork: DispatchWorkItem?
 
@@ -132,6 +137,9 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         guard let view = panel?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        // Where the panel really is (multi-monitor checks) and which screen frames exist.
+        let info = "panel=\(panel.frame) screens=\(NSScreen.screens.map { "\($0.frame) visible=\($0.visibleFrame)" })\n"
+        try? info.write(toFile: path + ".txt", atomically: true, encoding: .utf8)
     }
     #endif
 
@@ -150,10 +158,17 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     func hideNow() {
         guard let panel, panel.isVisible else { return }
         presentGeneration += 1
-        runner.cancel(); backRunner.cancel(); notesTask?.cancel(); altTask?.cancel(); altWork?.cancel()
+        runner.cancel(); refiner.cancel(); backRunner.cancel(); notesTask?.cancel(); altTask?.cancel(); altWork?.cancel()
         removeMonitors()
+        stopWaiting()
         panel.orderOut(nil)
         panel.alphaValue = 1
+    }
+
+    /// Nothing may keep ticking behind a hidden popup (spinner, the "model is loading" counter).
+    private func stopWaiting() {
+        spinner?.stopAnimation(nil)
+        statusLine?.reset()
     }
 
     nonisolated func hide() {
@@ -163,7 +178,7 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     private func present(text: String, at point: NSPoint) {
         presentGeneration += 1
         buildIfNeeded()
-        runner.cancel()
+        runner.cancel(); refiner.cancel()
         backRunner.cancel()
         removeMonitors()
 
@@ -193,17 +208,45 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         }
         panel.makeKey() // .nonactivatingPanel: takes keystrokes, the other app stays active
         panel.makeFirstResponder(textView)
+        #if DEBUG
+        // Frame measurements must not be cut short by clicks the user makes elsewhere.
+        if ProcessInfo.processInfo.environment["TOLK_FRAME_LOG"] == nil { installMonitors() }
+        startFrameLog()
+        #else
         installMonitors()
+        #endif
     }
 
+    #if DEBUG
+    /// Dev: TOLK_FRAME_LOG=file samples the panel frame every 10 ms (only changes): "ms top height".
+    private func startFrameLog() {
+        guard let path = ProcessInfo.processInfo.environment["TOLK_FRAME_LOG"] else { return }
+        FileManager.default.createFile(atPath: path, contents: nil)
+        guard let fh = FileHandle(forWritingAtPath: path) else { return }
+        let t0 = Date()
+        var last = NSRect.zero
+        Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { [weak self] t in
+            MainActor.assumeIsolated {
+                guard let self, let p = self.panel, p.isVisible else { if self?.panel?.isVisible != true { t.invalidate() }; return }
+                if p.frame != last {
+                    last = p.frame
+                    let line = String(format: "%5d top=%.1f y=%.1f h=%.1f\n", Int(Date().timeIntervalSince(t0) * 1000), p.frame.maxY, p.frame.minY, p.frame.height)
+                    fh.write(line.data(using: .utf8)!)
+                }
+            }
+        }
+    }
+    #endif
+
     private func dismiss() {
-        runner.cancel()
+        runner.cancel(); refiner.cancel()
         backRunner.cancel()
         notesTask?.cancel()
         altTask?.cancel()
         altWork?.cancel()
         removeMonitors()
         copyResetWork?.cancel()
+        stopWaiting()
         guard let panel, panel.isVisible else { return }
         let generation = presentGeneration
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -225,7 +268,68 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
 
     // MARK: - Translation
 
+    private func resetRefine() {
+        refiner.cancel()
+        beforeRefine = nil
+        refineButton?.isEnabled = false
+        refineButton?.image = NSImage(systemSymbolName: "wand.and.stars", accessibilityDescription: "Отредактировать")
+        refineButton?.toolTip = "Отредактировать. Второй проход: убрать кальки, сохранить смысл"
+    }
+
+    @objc private func refineClicked() {
+        if let old = beforeRefine {   // «Вернуть»
+            resetRefine()
+            translation = old
+            textView.string = ""
+            textView.textStorage?.append(NSAttributedString(string: old, attributes: textAttributes))
+            refineButton.isEnabled = true
+            resetBack(); resetNotes(); hideAlternatives()
+            updateSize()
+            return
+        }
+        guard mainFinished, !translation.isEmpty, let from = requestedSource ?? detectedSource,
+              let to = requestedTarget ?? detectedTarget else { return }
+        let old = translation
+        var refined = ""
+        refineButton.isEnabled = false
+        spinner.startAnimation(nil)
+        resetBack(); resetNotes(); hideAlternatives()
+        refiner.start(engine: engine, source: sourceText, translation: old, from: from, to: to, tone: effectiveTone,
+                      onDelta: { [weak self] chunk in
+            guard let self else { return }
+            if refined.isEmpty { self.textView.string = "" }
+            refined += chunk
+            self.translation = refined
+            self.textView.textStorage?.append(NSAttributedString(string: chunk, attributes: self.textAttributes))
+            self.updateSize()
+        }, onDone: { [weak self] in
+            guard let self else { return }
+            self.spinner.stopAnimation(nil)
+            let t = refined.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty || t == old.trimmingCharacters(in: .whitespacesAndNewlines) {
+                self.translation = old
+                self.textView.string = ""
+                self.textView.textStorage?.append(NSAttributedString(string: old, attributes: self.textAttributes))
+            } else {
+                self.beforeRefine = old
+                self.refineButton.image = NSImage(systemSymbolName: "arrow.counterclockwise", accessibilityDescription: "Вернуть")
+                self.refineButton.toolTip = "Вернуть перевод до редактирования"
+            }
+            self.refineButton.isEnabled = true
+            self.updateSize()
+        }, onFail: { [weak self] message in
+            guard let self else { return }
+            self.spinner.stopAnimation(nil)
+            self.translation = old
+            self.textView.string = ""
+            self.textView.textStorage?.append(NSAttributedString(string: old, attributes: self.textAttributes))
+            self.refineButton.isEnabled = true
+            self.showNotice(message, color: .systemRed)
+        })
+    }
+
     private func startTranslation() {
+        resetRefine()
         translation = ""
         fellBackFrom = nil
         mainFinished = false
@@ -293,20 +397,22 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
             showMessage("Перевожу через запасной сервис…", color: .tertiaryLabelColor)
             showsPlaceholder = true
             copyButton.isEnabled = false
-            showNotice("\(UIText.providerName(from)) недоступен — переключаюсь на Google", color: .systemOrange)
+            showNotice("\(UIText.providerName(from)) недоступен — переключаюсь на запасной перевод", color: .systemOrange)
             noticeLabel.toolTip = reason
         case .finished:
             spinner.stopAnimation(nil)
             mainFinished = true
             if translation.isEmpty { showMessage("Пустой перевод.", color: .secondaryLabelColor) }
             else {
+                refineButton.isEnabled = true
                 // Two Ollama slots: back-translation first, footnotes after it — so a word-alternatives
                 // request or another user is not stuck behind both.
                 if backEnabled { notesAfterBack = notesEnabled; startBack() }
                 else if notesEnabled { startNotes() }
             }
         case let .failed(message):
-            statusLine.failed(message)
+            // The text area already shows the full message; the status line stays short (no duplicate).
+            statusLine.failed(translation.isEmpty ? "Перевод не удался" : message)
             spinner.stopAnimation(nil)
             if translation.isEmpty {
                 showMessage(message, color: .systemRed)
@@ -790,12 +896,13 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
     private func placeInitially() {
         let size = fittingSize()
         let vf = screen(for: anchor).visibleFrame
-        // Prefer below the cursor; go above if the fully grown popup would not fit.
-        let expectedMax = min(size.height + maxTextHeight, vf.height * 0.6)
-        placedAbove = anchor.y - 18 - expectedMax < vf.minY && vf.maxY - anchor.y > anchor.y - vf.minY
-        var origin = NSPoint(x: anchor.x - 24, y: 0)
-        origin.y = placedAbove ? anchor.y + 14 : anchor.y - 18 - size.height
-        panel.setFrame(clamped(NSRect(origin: origin, size: size), in: vf), display: true)
+        // The top edge is the anchor: the popup grows downwards, along the text. If the grown
+        // popup runs out of room, applySize() moves it up once.
+        let top = min(anchor.y - 18, vf.maxY - 8)
+        let x = anchor.x - 24
+        panel.setFrame(clamped(NSRect(x: x, y: top - size.height, width: size.width, height: size.height), in: vf), display: true)
+        lastApply = 0
+        targetFrame = panel.frame
     }
 
     private func fittingSize() -> NSSize {
@@ -816,12 +923,13 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         return min(max(h, minTextHeight), cap)
     }
 
-    /// Streaming calls this on every chunk; resize at most once per ~frame and animate it, so the
-    /// popup grows smoothly instead of jumping on each word.
+    /// Streaming calls this on every chunk; the height changes at most ~9 times a second
+    /// (leading edge immediately, then at most one step per `resizeInterval`), each step animated.
     private func updateSize() {
         guard !resizeScheduled else { return }
         resizeScheduled = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+        let wait = max(0, lastApply + resizeInterval - CACurrentMediaTime())
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
             MainActor.assumeIsolated {
                 self?.resizeScheduled = false
                 self?.applySize()
@@ -831,28 +939,40 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
 
     private func applySize() {
         guard let panel, panel.isVisible || panel.frame.width > 0 else { return }
+        lastApply = CACurrentMediaTime()
         let size = fittingSize()
-        var frame = panel.frame
-        if placedAbove {
-            frame.size = size // bottom edge stays
-        } else {
-            frame.origin.y = frame.maxY - size.height // top edge stays
-            frame.size = size
+        let vf = screen(for: anchor).visibleFrame
+        // Mid-animation panel.frame is a transient value: build on where it is heading. Once the
+        // size has settled use the real frame (the user may have dragged the popup).
+        var frame = (targetFrame != .zero && panel.frame.size != targetFrame.size) ? targetFrame : panel.frame
+        let previous = frame
+        let top = frame.maxY // the top edge never follows the content
+        frame.size = size
+        frame.origin.y = top - size.height
+        if frame.minY < vf.minY + 8 {
+            // No room below: move up once, straight to where the fully grown popup fits.
+            let fullHeight = size.height - textHeight.constant + min(maxTextHeight, vf.height * 0.55)
+            let newTop = min(vf.minY + 8 + max(fullHeight + 20, size.height), vf.maxY - 8) // +20: status line appears at the end
+            frame.origin.y = newTop - size.height
         }
-        let newFrame = clamped(frame, in: screen(for: anchor).visibleFrame)
-        if newFrame != panel.frame {
-            if panel.isVisible, abs(newFrame.height - panel.frame.height) < 400 {
+        frame.origin.x = min(max(frame.minX, vf.minX + 8), vf.maxX - frame.width - 8)
+        if frame != panel.frame || frame != targetFrame {
+            let moved = frame.maxY != previous.maxY
+            targetFrame = frame
+            if panel.isVisible, abs(frame.height - panel.frame.height) < 400 {
                 NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.12
+                    // The one-off move up (no room below) is longer than a plain growth step.
+                    ctx.duration = moved ? 0.25 : 0.12
                     ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                     ctx.allowsImplicitAnimation = true
-                    panel.animator().setFrame(newFrame, display: true)
+                    panel.animator().setFrame(frame, display: true)
                 }
             } else {
-                panel.setFrame(newFrame, display: true)
+                panel.setFrame(frame, display: true)
             }
         }
-        if !showsPlaceholder { textView.scrollToEndOfDocument(nil) }
+        // Follow the end only once the text has reached its maximum height and scrolls.
+        if !showsPlaceholder, scrollView.hasVerticalScroller { textView.scrollToEndOfDocument(nil) }
     }
 
     private func clamped(_ r: NSRect, in vf: NSRect) -> NSRect {
@@ -903,8 +1023,8 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         directionButton.symbolConfiguration = .init(pointSize: 9, weight: .bold)
         directionButton.imagePosition = .imageTrailing
 
-        swapButton = UIFactory.symbolButton("arrow.left.arrow.right", tooltip: "Поменять направление",
-                                            target: self, action: #selector(swapDirection))
+        let swapButton = UIFactory.symbolButton("arrow.left.arrow.right", tooltip: "Поменять направление",
+                                                target: self, action: #selector(swapDirection))
         providerBadge = UIFactory.badge()
         spinner = NSProgressIndicator()
         spinner.style = .spinning
@@ -1007,9 +1127,9 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
 
         // Footer: tone … glossary, copy
         toneControl = UIFactory.toneControl(target: self, action: #selector(toneChanged(_:)))
-        glossaryButton = NSButton(title: "В глоссарий", target: self, action: #selector(toggleGlossaryForm))
+        glossaryButton = NSButton(title: "", target: self, action: #selector(toggleGlossaryForm))
         glossaryButton.setButtonType(.pushOnPushOff)
-        copyButton = NSButton(title: "Копировать", target: self, action: #selector(copyTranslation))
+        copyButton = NSButton(title: "", target: self, action: #selector(copyTranslation))
         for b in [glossaryButton!, copyButton!] {
             b.controlSize = .small
             b.bezelStyle = .push
@@ -1017,8 +1137,8 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         }
         glossaryButton.image = NSImage(systemSymbolName: "book", accessibilityDescription: nil)
         copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: nil)
-        glossaryButton.imagePosition = .imageLeading
-        copyButton.imagePosition = .imageLeading
+        glossaryButton.imagePosition = .imageOnly
+        copyButton.imagePosition = .imageOnly
         backButton = NSButton(title: "", target: self, action: #selector(toggleBack))
         backButton.setButtonType(.pushOnPushOff)
         backButton.image = NSImage(systemSymbolName: "arrow.uturn.backward", accessibilityDescription: nil)
@@ -1033,18 +1153,14 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         insertButton = NSButton(title: "", target: self, action: #selector(insertTranslation))
         insertButton.image = NSImage(systemSymbolName: "text.insert", accessibilityDescription: nil)
         insertButton.toolTip = "Заменить выделенный текст переводом (⌘↩)"
-        insertButton.keyEquivalent = ""
         for b in [backButton!, insertButton!] {
             b.controlSize = .small
             b.bezelStyle = .push
             b.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-            b.imagePosition = .imageLeading
+            b.imagePosition = .imageOnly
         }
-        glossaryButton.title = ""
-        glossaryButton.imagePosition = .imageOnly
         glossaryButton.toolTip = "Добавить термин в глоссарий"
         copyButton.toolTip = "Копировать перевод (⌘C)"
-        for b in [backButton!, insertButton!] { b.imagePosition = .imageOnly }
         // The tone switch must never be squeezed into «А… Чат П…».
         toneControl.setContentCompressionResistancePriority(.required, for: .horizontal)
         toneControl.setContentHuggingPriority(.required, for: .horizontal)
@@ -1057,12 +1173,16 @@ final class TranslationPopupController: NSObject, NSTextFieldDelegate, NSTextVie
         replyButton.toolTip = "Ответить партнёру: пишите по-своему, перевод — на его язык (R)"
         replyButton.isEnabled = false
         replyButton.setContentCompressionResistancePriority(.required, for: .horizontal)
-        copyButton.title = ""
-        copyButton.imagePosition = .imageOnly
-        for b in [backButton!, notesButton!, glossaryButton!, copyButton!, insertButton!] {
+        refineButton = NSButton(title: "", target: self, action: #selector(refineClicked))
+        refineButton.controlSize = .small
+        refineButton.bezelStyle = .push
+        refineButton.imagePosition = .imageOnly
+        refineButton.isEnabled = false
+        resetRefine()
+        for b in [backButton!, notesButton!, refineButton!, glossaryButton!, copyButton!, insertButton!] {
             b.widthAnchor.constraint(equalToConstant: 30).isActive = true  // equal icon buttons
         }
-        let footer = NSStackView(views: [toneControl, UIFactory.spacer(), backButton, notesButton, glossaryButton, copyButton, insertButton, replyButton])
+        let footer = NSStackView(views: [toneControl, UIFactory.spacer(), backButton, notesButton, refineButton, glossaryButton, copyButton, insertButton, replyButton])
         footer.orientation = .horizontal
         footer.spacing = 6
 

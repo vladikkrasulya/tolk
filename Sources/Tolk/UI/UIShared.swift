@@ -1,4 +1,4 @@
-// Owned by the "UI" session. Helpers shared by the popup and the input window.
+// Helpers shared by the popup and the input window.
 import AppKit
 import TolkCore
 
@@ -85,7 +85,8 @@ enum UIText {
     }
 
     static func isFallbackProvider(_ raw: String) -> Bool {
-        raw.lowercased().contains("google")
+        let s = raw.lowercased()
+        return s.contains("google") || s.contains("apple") // not the home model → no "model is loading" hint, orange
     }
 
     static func toneTitle(_ tone: Tone) -> String {
@@ -102,10 +103,6 @@ enum UIText {
 
     static func capitalized(_ l: Language) -> String {
         l.russianName.prefix(1).uppercased() + l.russianName.dropFirst()
-    }
-
-    static func languageName(_ l: Language) -> String {
-        l.russianName
     }
 
     /// "на русский" etc.

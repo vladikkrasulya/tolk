@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:tolk}",
+            "name": "Debug Tolk",
+            "target": "Tolk",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Tolk"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:tolk}",
+            "name": "Release Tolk",
+            "target": "Tolk",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Tolk"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:tolk}",
+            "name": "Debug tolk-cli",
+            "target": "tolk-cli",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug tolk-cli"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:tolk}",
+            "name": "Release tolk-cli",
+            "target": "tolk-cli",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release tolk-cli"
+        }
+    ]
+}
