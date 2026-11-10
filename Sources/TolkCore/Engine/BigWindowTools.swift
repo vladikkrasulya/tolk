@@ -14,6 +14,7 @@ public struct SentenceVariant: Sendable, Equatable {
     public var text: String
     /// Short Russian label: «ближе к тексту», «разговорнее», «короче».
     public var label: String
+    public init(text: String, label: String) { self.text = text; self.label = label }
 }
 
 public enum RewriteMode: String, CaseIterable, Sendable {
@@ -38,6 +39,10 @@ public struct RewriteResult: Sendable, Equatable {
     public var changed: Bool
     /// formal/informal: was the pronoun switch verified (only ru/uk/de/fr; false for English and others).
     public var pronounsChecked: Bool
+    public init(mode: RewriteMode, text: String, accepted: Bool, rejection: String?, changed: Bool, pronounsChecked: Bool) {
+        self.mode = mode; self.text = text; self.accepted = accepted; self.rejection = rejection
+        self.changed = changed; self.pronounsChecked = pronounsChecked
+    }
 }
 
 public struct MessageExplanation: Sendable, Equatable {
@@ -47,7 +52,11 @@ public struct MessageExplanation: Sendable, Equatable {
     public var tone: String
     /// Up to 5 «term — meaning» items; the terms are taken from the message.
     public var terms: [Term]
-    public struct Term: Sendable, Equatable { public var term: String; public var meaning: String }
+    public struct Term: Sendable, Equatable {
+        public var term: String; public var meaning: String
+        public init(term: String, meaning: String) { self.term = term; self.meaning = meaning }
+    }
+    public init(meaning: String, tone: String, terms: [Term]) { self.meaning = meaning; self.tone = tone; self.terms = terms }
 }
 
 public struct ReplyTranslation: Sendable, Equatable {

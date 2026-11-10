@@ -98,7 +98,9 @@ public enum LanguageDetector {
         var target = request.target ?? defaultTarget(for: source, config: config)
         if target == source { target = defaultTarget(for: source, config: config) }
         if target == source { target = source == config.primaryLanguage ? config.secondaryLanguage : config.primaryLanguage }
-        return ResolvedRequest(text: request.text, source: source, target: target, tone: request.tone, mode: .translate,
-                               replyTo: request.replyTo, context: request.context)
+        var r = ResolvedRequest(text: request.text, source: source, target: target, tone: request.tone, mode: .translate,
+                                replyTo: request.replyTo, context: request.context)
+        r.threadContext = request.threadContext
+        return r
     }
 }

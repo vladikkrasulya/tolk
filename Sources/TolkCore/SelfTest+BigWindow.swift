@@ -96,5 +96,35 @@ extension SelfTest {
         check(r2.target == .ukrainian && r2.source == .english, "reply: partner UK, user writes EN -> EN→UK")
         let r3 = engine.replyRequest(message: "Давай созвонимся завтра в 10, удобно?", reply: "Да, удобно")
         check(r3.target == .russian && r3.source != .russian, "reply: both RU -> source is moved off the partner's language")
+
+        // MARK: back-translation diff (meaning only)
+        let bsrc = "Hi Max! CTR is up 12%, but fill rate fell to 64%. We did not raise the floor price. Please send ads.txt by Friday."
+        var bd = BackDiff.compare(source: bsrc, back: "Hello Max! CTR grew by 12%, but fill rate dropped to 64%. We did not increase the floor price. Please send ads.txt by Friday.")
+        check(bd.isClean, "backdiff: synonyms (Hi/Hello, up/grew, fell/dropped, raise/increase) are not reported", "\(bd)")
+        let wrong = "Hi Max! CTR is up 12%, but fill rate fell to 46%. We did raise the floor price. Please send ads.txt by Monday."
+        bd = BackDiff.compare(source: bsrc, back: wrong)
+        let marked = bd.marks.map { (wrong as NSString).substring(with: $0) }
+        check(marked.contains("46") && marked.contains("Monday"), "backdiff: changed number and a new name are marked", "\(marked)")
+        check(bd.missing.contains("64") && bd.missing.contains("Friday") && bd.missing.contains("отрицание"), "backdiff: lost number, name and negation are listed", "\(bd.missing)")
+        bd = BackDiff.compare(source: "We will ship it.", back: "We will not ship it.")
+        check(bd.marks.map { ("We will not ship it." as NSString).substring(with: $0) } == ["not"], "backdiff: added negation is marked")
+        bd = BackDiff.compare(source: "Я никогда не видел этот отчёт.", back: "I never saw this report.")
+        check(bd.isClean, "backdiff: double negation ru vs single en is not a discrepancy", "\(bd)")
+        bd = BackDiff.compare(source: "Спасибо, Максим! Бюджет 1 500 евро.", back: "Thanks, Maksim! The budget is 1,500 euros.")
+        check(!bd.marks.contains { _ in false } && bd.missing.contains("Максим") == true, "backdiff: a name in another script is reported as missing (honest, not silent)", "\(bd)")
+        bd = BackDiff.compare(source: "Budget is 1 500 euro.", back: "The budget is 1,500 euro.")
+        check(bd.isClean, "backdiff: thousand separators do not matter", "\(bd)")
+        bd = BackDiff.compare(source: "Lower the floor price on mobile.", back: "Lower the minimum on mobile.",
+                              glossary: [GlossaryHit(source: "floor price", targets: ["минимальная цена"])])
+        check(bd.missing == ["floor price"], "backdiff: glossary term that did not survive is listed", "\(bd.missing)")
+
+        // MARK: glossary hits for the page
+        let rules = RulesStore(path: "/nonexistent/rules.md", builtIn: "# Style\nBe brief.\n\n## Глоссарий\n- floor price → флор / минимальная цена\n- fill rate → fill rate\n- cap → капа\n")
+        let hits = rules.glossaryHits(in: "Lower the floor price. The fill rate is low, the capital is fine.", target: .russian)
+        check(hits.map(\.source) == ["floor price", "fill rate"] && hits[0].targets == ["флор", "минимальная цена"], "glossary hits: only fired lines (cap ≠ capital), oriented to the target", "\(hits)")
+        let ru = "Снизим флор. Fill rate низкий."
+        let gm = RulesStore.marks(of: hits, in: ru).map { (ru as NSString).substring(with: $0.range) }
+        check(gm == ["флор", "Fill rate"], "glossary marks: renderings found in the translation", "\(gm)")
+        check(rules.glossaryHits(in: "Hello there", target: .english).isEmpty && rules.glossaryHits(in: "Снизим флор", target: .english).first?.targets == ["floor price"], "glossary hits: no hit without the source side; reverse direction is oriented too")
     }
 }

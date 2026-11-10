@@ -30,7 +30,7 @@ final class LiveTranslation {
     static func key(source: Language?, target: Language?, tone: Tone, mode: TextMode,
                     config: TolkConfig, replyTo: String? = nil) -> String {
         [source?.rawValue ?? "-", target?.rawValue ?? "-", tone.rawValue, "\(mode)",
-         config.activeProfileID, config.effectiveModel, replyTo ?? ""].joined(separator: "\u{1F}")
+         config.activeProfileID, config.effectiveModel, RulesFingerprint.of(path: config.effectiveRulesPath), replyTo ?? ""].joined(separator: "\u{1F}")
     }
 
     func prepare(text: String, source: Language?, target: Language?, tone: Tone, mode: TextMode = .translate,

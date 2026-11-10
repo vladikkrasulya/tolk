@@ -86,6 +86,24 @@ final class HistoryRecordingEngine: TranslationEngine, @unchecked Sendable {
     func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String] {
         await base.alternatives(for: fragment, in: translation, source: source, from: from, to: to)
     }
+
+    func sentenceVariants(sentence: String, current: String, fullSource: String, fullTranslation: String,
+                          from: Language, to: Language, tone: Tone) async throws -> [SentenceVariant] {
+        try await base.sentenceVariants(sentence: sentence, current: current, fullSource: fullSource,
+                                        fullTranslation: fullTranslation, from: from, to: to, tone: tone)
+    }
+
+    func rewrite(translation: String, source: String, from: Language, to: Language, mode: RewriteMode) async throws -> RewriteResult {
+        try await base.rewrite(translation: translation, source: source, from: from, to: to, mode: mode)
+    }
+
+    func explain(message: String) async throws -> MessageExplanation { try await base.explain(message: message) }
+
+    func replyRequest(message: String, reply: String, tone: Tone) -> TranslationRequest {
+        base.replyRequest(message: message, reply: reply, tone: tone)
+    }
+
+    func glossaryHits(in text: String, target: Language) -> [GlossaryHit] { base.glossaryHits(in: text, target: target) }
 }
 
 /// Remembers the last active app that is not Tolk (the app a popup / reply / quick action text came from).

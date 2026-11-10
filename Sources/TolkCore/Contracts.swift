@@ -79,11 +79,16 @@ public struct TranslationRequest: Sendable, Equatable {
     /// Live typing: `text` is only the changed tail of a longer message; this is the unchanged beginning
     /// and its translation (see `IncrementalSession`). The model translates `text` only, consistent with it.
     public var context: TranslationContext?
+    /// «Translate again»: skip the engine's result cache; the new result replaces the cached one.
+    public var bypassCache: Bool
+    /// Earlier lines of this conversation (see ThreadMemory): context for pronouns, never translated.
+    public var threadContext: String?
 
     public init(text: String, source: Language? = nil, target: Language? = nil, tone: Tone = .auto,
-                mode: TextMode = .translate, replyTo: String? = nil, context: TranslationContext? = nil) {
+                mode: TextMode = .translate, replyTo: String? = nil, context: TranslationContext? = nil,
+                bypassCache: Bool = false) {
         self.text = text; self.source = source; self.target = target; self.tone = tone; self.mode = mode
-        self.replyTo = replyTo; self.context = context
+        self.replyTo = replyTo; self.context = context; self.bypassCache = bypassCache
     }
 }
 
@@ -103,6 +108,9 @@ public struct ResolvedRequest: Sendable, Equatable {
     public var mode: TextMode
     public var replyTo: String?
     public var context: TranslationContext?
+    public var threadContext: String?
+    /// Set by EntityMasking: an example placeholder, the prompt then explains that placeholders must be copied.
+    public var protectedExample: String?
 
     public init(text: String, source: Language, target: Language, tone: Tone, mode: TextMode = .translate,
                 replyTo: String? = nil, context: TranslationContext? = nil) {
@@ -139,6 +147,8 @@ public struct TranslationStats: Sendable, Equatable {
     /// Problems found by the automatic check of the finished translation (a lost number or link,
     /// wrong output language). Short Russian phrases for the status line; empty = nothing found.
     public var warnings: [String] = []
+    /// The text came from the engine's cache of finished translations: no model was called, `total` ≈ 0.
+    public var fromCache: Bool = false
 
     public init(provider: String, route: Route, firstChunk: TimeInterval?, total: TimeInterval,
                 outputTokens: Int?, tokensExact: Bool, fallbackReason: String?) {
@@ -211,6 +221,15 @@ public protocol TranslationEngine: AnyObject, Sendable {
     /// a native speaker would write it (removes calques). Streams the improved text; on any problem streams
     /// `translation` unchanged.
     func refine(source: String, translation: String, from: Language, to: Language, tone: Tone) -> AsyncThrowingStream<String, Error>
+    // Big-window extras (see Engine/BigWindowTools.swift). Each model call is started by a button press.
+    func sentenceVariants(sentence: String, current: String, fullSource: String, fullTranslation: String,
+                          from: Language, to: Language, tone: Tone) async throws -> [SentenceVariant]
+    func rewrite(translation: String, source: String, from: Language, to: Language, mode: RewriteMode) async throws -> RewriteResult
+    func explain(message: String) async throws -> MessageExplanation
+    /// The request for the reply flow (partner's message + the user's answer); stream it through `translate`.
+    func replyRequest(message: String, reply: String, tone: Tone) -> TranslationRequest
+    /// Glossary entries that fire for `text` when translating into `target` (no model, instant).
+    func glossaryHits(in text: String, target: Language) -> [GlossaryHit]
 }
 
 public extension TranslationEngine {
@@ -219,6 +238,24 @@ public extension TranslationEngine {
     }
     func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote] { [] }
     func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String] { [] }
+    func sentenceVariants(sentence: String, current: String, fullSource: String, fullTranslation: String,
+                          from: Language, to: Language, tone: Tone) async throws -> [SentenceVariant] {
+        throw TolkError.unavailable("Варианты предложения недоступны для этого движка")
+    }
+    func rewrite(translation: String, source: String, from: Language, to: Language, mode: RewriteMode) async throws -> RewriteResult {
+        throw TolkError.unavailable("Переписывание недоступно для этого движка")
+    }
+    func explain(message: String) async throws -> MessageExplanation {
+        throw TolkError.unavailable("Разбор смысла недоступен для этого движка")
+    }
+    func replyRequest(message: String, reply: String, tone: Tone) -> TranslationRequest {
+        let cfg = TolkConfig.load()
+        let partner = LanguageDetector.detect(message)
+        var source = LanguageDetector.detect(reply)
+        if source == partner { source = cfg.primaryLanguage == partner ? cfg.secondaryLanguage : cfg.primaryLanguage }
+        return TranslationRequest(text: reply, source: source, target: partner, tone: tone, replyTo: message)
+    }
+    func glossaryHits(in text: String, target: Language) -> [GlossaryHit] { [] }
 }
 
 /// What translates when the home model is unreachable.

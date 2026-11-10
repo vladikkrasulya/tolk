@@ -33,6 +33,11 @@ final class AutocompleteController {
     private var retainedSelf: Unmanaged<AutocompleteController>?
     private var appObserver: NSObjectProtocol?
     private let journal = SuggestionJournal.shared
+    /// Numbers only (see ACStats): counters per day, model file and app. Never any text.
+    private let stats = ACStatsStore.shared
+    private var statsModel: String { (server.modelPath as NSString).lastPathComponent }
+    /// Called after every recorded event (the menu line «Сегодня: …»).
+    var onStatsChanged: (() -> Void)?
     private var lastContextSource = ""
     /// Apps where typing synthetic key events did not change the field: insert through the pasteboard instead.
     private var pasteApps: Set<String> = []
@@ -275,6 +280,8 @@ final class AutocompleteController {
 
     private func hide(reason: String = "other", dismissed: Bool = true) {
         if suggestion != nil || instant != nil {
+            if suggestion != nil, reason == "typed" { stats.typedOn(model: statsModel, app: shownBundleID); onStatsChanged?() }
+            if suggestion != nil, reason == "esc" { stats.escaped(model: statsModel, app: shownBundleID); onStatsChanged?() }
             Diagnostics.log("autocomplete: hidden reason=\(reason)")
             if dismissed { journal.dismissed(reason: reason, bundleID: shownBundleID) }
         }
@@ -358,6 +365,7 @@ final class AutocompleteController {
         let rest = String(chars[i...])
         let beforeInsert = insertVerified(word, kind: "word", field: verified)
         Diagnostics.log("autocomplete: accepted word len=\(word.count)")
+        stats.acceptedWord(model: statsModel, app: shownBundleID, word: word); onStatsChanged?()
         onAccepted?(AcceptedText(kind: .word, bundleID: shownBundleID, textBefore: shownTextBefore, accepted: word))
         shownTextBefore += word
         anchor?.snap.textBefore += word
@@ -377,6 +385,7 @@ final class AutocompleteController {
         guard let s = suggestion, let verified = verifiedField() else { return false }
         insertVerified(s, kind: "all", field: verified)
         Diagnostics.log("autocomplete: accepted all len=\(s.count)")
+        stats.acceptedAll(model: statsModel, app: shownBundleID, text: s); onStatsChanged?()
         onAccepted?(AcceptedText(kind: .all, bundleID: shownBundleID, textBefore: shownTextBefore, accepted: s))
         cancelPending()
         hide(reason: "accepted-all", dismissed: false)
@@ -397,6 +406,7 @@ final class AutocompleteController {
         deleteBackward(i.replaceCount)
         insert(i.text)
         Diagnostics.log("autocomplete: accepted instant replace=\(i.replaceCount) len=\(i.text.count)")
+        stats.instantAccepted(model: statsModel, app: shownBundleID, chars: i.text.count); onStatsChanged?()
         let pf = panel?.frame
         journal.accepted(kind: "instant", text: i.text, bundleID: shownBundleID,
                          caret: pf.map { NSRect(x: $0.minX, y: $0.minY, width: 1, height: $0.height) })
@@ -537,6 +547,7 @@ final class AutocompleteController {
             panel?.show(s.display, caret: field.caret, fontSize: field.fontSize, rightLimit: field.rightLimit)
             journal.instant(bundleID: field.bundleID, before: field.textBefore, replaceCount: s.replaceCount, display: s.display, caret: field.caret, panel: panel)
             Diagnostics.log("autocomplete: instant replace=\(s.replaceCount) app=\(field.bundleID ?? "?")")
+            stats.instantShown(model: statsModel, app: field.bundleID); onStatsChanged?()
             if s.blocksModel { return }
             break
         }
@@ -584,6 +595,7 @@ final class AutocompleteController {
         shownBundleID = now.bundleID
         let f = panel?.frame ?? .zero
         Diagnostics.log("autocomplete: shown len=\(text.count) ms=\(result.ms) ctx=\(context?.count ?? 0) app=\(now.bundleID ?? "?") fs=\(now.fontSize.map { String(Int($0 * 10)) } ?? "-")/10 ax=\(now.caretInfo) caret=(\(Int(now.caret.minX)),\(Int(now.caret.minY)) \(Int(now.caret.width))x\(Int(now.caret.height))) panel=(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)))")
+        stats.shown(model: statsModel, app: now.bundleID, text: text, ms: result.ms); onStatsChanged?()
         journal.shown(bundleID: now.bundleID, before: now.textBefore, text: text, ms: result.ms, ctxChars: context?.count ?? 0,
                       ctxSource: lastContextSource.isEmpty ? nil : lastContextSource, caret: now.caret, panel: panel)
     }

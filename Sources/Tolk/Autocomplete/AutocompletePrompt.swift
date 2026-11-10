@@ -8,11 +8,27 @@
 // digits/dates, so the space is stripped here and the model's own leading space is handled in `clean`.
 import AppKit
 import Foundation
+import TolkCore
 
 enum AutocompletePrompt {
     /// Tokens to ask for; the suggestion is cut to a few words anyway (Russian needs ~2 tokens per word).
     /// Set by the [prefs] section from the length setting (`PromptPrefs.maxTokens`): 14 for short/medium, ~27 for long.
     nonisolated(unsafe) static var maxTokens = 14
+
+    // MARK: - Format switches (autocomplete-eval, «healing / prefill» round on 54 fragments, E2B)
+
+    /// Token healing: the half-typed word is cut off the prompt and a GBNF grammar makes the reply start with it
+    /// (`AutocompleteHealing`). Endings in mid-word 0 → 9 of 15 right. false = old behaviour.
+    nonisolated(unsafe) static var useHealing = true
+    /// Chat-template prompt with the typed text as the START OF THE MODEL'S REPLY (assistant prefill): rules, examples and
+    /// conversation sit in the user turn, so only the typed tail changes between keystrokes and the whole template stays in
+    /// the KV cache (1–6 tokens re-evaluated per request). Used only when the model has a Gemma 4 chat template
+    /// (`CompletionClient.probeFormat`); other models keep the raw prompt. false = raw prompt for everyone.
+    nonisolated(unsafe) static var useChatPrefill = true
+    /// Set by `CompletionClient.probeFormat()` once the server is up.
+    nonisolated(unsafe) static var chatTemplateAvailable = false
+    /// Letters the reply must start with (healing); `CompletionClient` reads it right after `prompt(...)`.
+    nonisolated(unsafe) static var lastHealLiteral: String?
 
     private static let maxContextChars = 1500
     private static let maxWords = 6
@@ -38,14 +54,39 @@ enum AutocompletePrompt {
             if let sp = text.firstIndex(where: { $0 == " " || $0 == "\n" }) { text = String(text[text.index(after: sp)...]) }
         }
         // No trailing spaces/tabs: the model then supplies its own leading space (see `clean`).
-        while let last = text.last, last == " " || last == "\t" || last == "\u{00A0}" { text.removeLast() }
+        // With healing the unfinished last word is cut off too and forced back through the grammar.
+        if useHealing {
+            let plan = AutocompleteHealing.plan(textBefore: text)
+            text = plan.head
+            lastHealLiteral = plan.literal
+        } else {
+            while let last = text.last, last == " " || last == "\t" || last == "\u{00A0}" { text.removeLast() }
+            lastHealLiteral = nil
+        }
         let ctx = (context ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if useChatPrefill && chatTemplateAvailable { return chatPrompt(typed: text, appName: appName, context: ctx, extras: extras) }
         // Instructions / clipboard / examples go FIRST (before the conversation): they change rarely, so the prefix
         // stays byte-stable and llama-server's KV cache keeps it while the user types.
         let pre = fewShot + extrasPrefix(extras)
         guard !ctx.isEmpty else { return pre + header(for: appName) + text }
         return pre + "Conversation in \(place(for: appName)):\n\(ctx)\n\nMy next message in this conversation:\n" + text
     }
+
+    /// Gemma 4 chat template; the typed text is the beginning of the model turn (no thought block: with it the
+    /// abliterated models answered less often, 18 of 54 shown vs 40). The user turn is byte-stable except for the
+    /// conversation, which is why it goes last.
+    static func chatPrompt(typed: String, appName: String?, context ctx: String, extras: PromptExtras) -> String {
+        let pl = place(for: appName)
+        var body = chatRules + extrasPrefix(extras)
+        if !ctx.isEmpty { body += "Conversation in \(pl):\n\(ctx)\n\n" }
+        body += "Write the user's next message in \(pl)."
+        return "<|turn>user\n" + body + "<turn|>\n<|turn>model\n" + typed
+    }
+
+    static let chatRules = "You are the user's typing assistant. Your reply is the message the user is writing right now: it already begins with the words typed so far, and you continue it from exactly where it stops. "
+        + "Write only the next few words, in the user's language and tone, no quotes, no markdown. If the text stops in the middle of a word, finish that word first. "
+        + "Never invent numbers, names or facts that are not in the conversation.\n\n"
+        + "Examples of finished messages:\n- Привет! Ты уже посмотрел логи по вчерашней кампании?\n- Can you check the feed and send me the report today?\n- Спасибо, получилось запустить, завтра скину результаты.\n\n"
 
     /// "Writing notes / Copied text / My earlier messages" blocks, each followed by a blank line; "" when there are none.
     static func extrasPrefix(_ e: PromptExtras) -> String {

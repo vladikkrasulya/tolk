@@ -23,8 +23,13 @@ public enum SelfTest {
         incremental(check)
         autocompleteSafety(check)
         autocompleteServer(check)
+        acStats(check)
+        autocompleteHealing(check)
+        screenContextRefresh(check)
         refineGuard(check)
         bigWindow(check)
+        resultCache(check)
+        engineReview(check)
         return (check.total, check.failures)
     }
 

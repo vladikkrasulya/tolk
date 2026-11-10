@@ -349,8 +349,11 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         showMessage("Перевожу…", color: .tertiaryLabelColor)
         showsPlaceholder = true
         statusLine.waiting(provider: "…")
-        runner.start(TranslationRequest(text: sourceText, source: requestedSource,
-                                        target: requestedTarget, tone: effectiveTone))
+        var request = TranslationRequest(text: sourceText, source: requestedSource,
+                                         target: requestedTarget, tone: effectiveTone)
+        // Short replies from the same chat get the previous lines as context (pronouns), never translated.
+        request.threadContext = ThreadMemory.shared.context(for: sourceText, app: frontApp)
+        runner.start(request)
     }
 
     /// Manual tone wins; "Авто" picks the tone configured for the app the text came from (Slack → chat, Mail → formal).
@@ -395,6 +398,9 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         case .finished:
             spinner.stopAnimation(nil)
             mainFinished = true
+            if !translation.isEmpty, let f = detectedSource, let t = detectedTarget {
+                ThreadMemory.shared.record(source: sourceText, translation: translation, from: f, to: t, app: frontApp)
+            }
             if translation.isEmpty { showMessage("Пустой перевод.", color: .secondaryLabelColor) }
             else {
                 refineButton.isEnabled = true

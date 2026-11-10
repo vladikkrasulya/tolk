@@ -3,16 +3,18 @@
 import Foundation
 
 enum RefinePrompt {
-    static func system(from: Language, to: Language, tone: Tone, rules: String) -> String {
+    static func system(from: Language, to: Language, tone: Tone, rules: String, calques: [CalqueDetector.Hit] = []) -> String {
         var s = """
         You are a careful native-speaking editor of \(to.englishName). You get a SOURCE text in \(from.englishName) and a DRAFT translation of it into \(to.englishName).
         Return ONLY the improved translation: no comments, quotes or explanations.
+        \(calques.isEmpty ? "If there is nothing to fix, reply with exactly: OK" : "")
         Keep exactly: the meaning, all facts, numbers, dates, names, links, e-mails, IDs, emoji, formatting and the glossary terms below. Do not add or drop information, and do not change the speaker's stance or the type of sentence (a statement stays a statement, a question stays a question, a request stays a request and never becomes an order).
         Keep greetings, sign-offs and forms of address as the draft has them: do not swap one greeting for another ("Hello" stays "Hello", not "Good afternoon"), and do not make them more or less formal.
         Improve the wording: remove calques and word-for-word renderings, fix unnatural word order, unnatural collocations, wrong prepositions, articles, gender and case agreement; use the idiom a native speaker would use in this situation.
         \(Prompt.antiCalque(for: to))
-        If the draft is already natural and correct, return it unchanged, character for character.
+        \(calques.isEmpty ? "If the draft is already natural and correct, reply with exactly the two letters OK and nothing else (do not repeat the text). Change the draft only for a real error or a clear calque, never for style or taste." : "If the draft is already natural and correct, return it unchanged, character for character.")
         """
+        if !calques.isEmpty { s += "\n\n" + CalqueDetector.promptHint(for: calques) }
         if !rules.isEmpty { s += "\n\n# Extra translation rules and glossary (follow strictly)\n" + rules }
         s += "\n\n# Tone\n" + Prompt.tone(tone)
         s += "\n\n# Output language\nWrite in \(to.englishName)."
@@ -55,6 +57,12 @@ enum RefineGuard {
         return t.hasSuffix("?")
     }
 
+    /// The editor's «nothing to fix» answer.
+    static func isOK(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".!\"'«»`")))
+        return t.caseInsensitiveCompare("OK") == .orderedSame
+    }
+
     static func accepts(draft: String, edited: String) -> Bool {
         if edited.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
         if endsWithQuestion(draft) && !endsWithQuestion(edited) { return false }
@@ -71,7 +79,8 @@ extension DefaultTranslationEngine {
             return AsyncThrowingStream { c in c.yield(translation); c.finish() }
         }
         let rulesBlock = rules.promptBlock(for: source, target: to)
-        let system = RefinePrompt.system(from: from, to: to, tone: tone, rules: rulesBlock)
+        let calques = CalqueDetector.detect(in: translation, language: to)
+        let system = RefinePrompt.system(from: from, to: to, tone: tone, rules: rulesBlock, calques: calques)
         let user = RefinePrompt.user(source: source, translation: translation)
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -93,6 +102,7 @@ extension DefaultTranslationEngine {
                         edited += chunk
                     }
                     produced = true
+                    if RefineGuard.isOK(edited) { continuation.yield(translation); continuation.finish(); return }
                     continuation.yield(RefineGuard.accepts(draft: translation, edited: edited) ? edited : translation)
                     continuation.finish()
                 } catch {

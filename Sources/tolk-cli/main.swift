@@ -1,6 +1,6 @@
 // Dev tool for the engine.
 // swift run tolk-cli [--from CODE] [--to CODE]  (CODE: en ru uk de fr es it pt pl cs nl ro bg tr kk ka he ar zh ja ko hi id vi) [--tone auto|chat|formal]
-//                    [--provider auto|ollama|google] [--show-rules] [--warm] [--rules PATH] [--refine]
+//                    [--provider auto|ollama|google] [--show-rules] [--warm] [--rules PATH] [--refine] [--twice]
 //                    [--context-source TEXT --context-translation TEXT] [--self-test] "text"
 // Translation goes to stdout, service info to stderr. Text can also come from stdin.
 import Foundation
@@ -22,6 +22,8 @@ var contextSource: String?, contextTranslation: String?
 var checkOnly: String?
 var cancelAfter: Double?, addTerm: String?
 var pairsTranslation: String?, variantsCurrent: String?, rewriteMode: RewriteMode?, rewriteTranslation: String?, wantExplain = false
+var maskShow: String?, maskEval: String?, maskFormats = "brackets,section,square", noMask = false, maskFormat: String?
+var prevTurns: [String] = [], calquesText: String?, tzText: String?, tzLocal: String?, tzNow: String?, showFingerprint = false
 var words: [String] = []
 // Dev: `tolk-cli --ac-spawn CMD ARGS…` launches CMD the way Tolk launches llama-server (dies with this process), then waits.
 if CommandLine.arguments.dropFirst().first == "--ac-spawn" {
@@ -32,6 +34,14 @@ if CommandLine.arguments.dropFirst().first == "--ac-spawn" {
     print("wrapper pid \(p.processIdentifier)")
     fflush(stdout)
     while true { sleep(1000) }
+}
+var twice = false
+// `tolk-cli --ac-stats [JSON_PATH [LOG_PATH]]` prints the autocomplete statistics (JSON, else the log). Read-only.
+if CommandLine.arguments.dropFirst().first == "--ac-stats" {
+    let a = Array(CommandLine.arguments.dropFirst(2))
+    let data = ACStats.loadReadOnly(path: a.first ?? ACStats.defaultPath, logPath: a.dropFirst().first ?? ACStats.defaultLogPath)
+    print(ACStats.report(data))
+    exit(0)
 }
 var args = CommandLine.arguments.dropFirst().makeIterator()
 while let a = args.next() {
@@ -62,6 +72,7 @@ while let a = args.next() {
     case "--context-source": contextSource = value()         // already translated beginning (source side)
     case "--context-translation": contextTranslation = value()
     case "--check": checkOnly = value()                      // run only the automatic check: text = source, value = translation
+    case "--twice": twice = true                             // translate the text twice in one process: shows the result cache
     case "--self-test": selfTest = true                      // engine checks without model or network
     case "--warm": warmOnly = true                          // load the model on vkbox and report the time
     case "--pairs": pairsTranslation = value()               // text = source; value = translation: sentence pairs (no model)
@@ -70,6 +81,17 @@ while let a = args.next() {
         guard let m = RewriteMode(rawValue: value()) else { fail("--rewrite: " + RewriteMode.allCases.map(\.rawValue).joined(separator: "|") + " TRANSLATION") }
         rewriteMode = m; rewriteTranslation = value()
     case "--explain": wantExplain = true                     // text = incoming message: what did they mean
+    case "--mask": maskShow = value()                        // show the masked text and the entities (no model)
+    case "--mask-eval": maskEval = value()                   // JSON file [{id,text,tone?}]: baseline vs masked, per format (model!)
+    case "--mask-formats": maskFormats = value()             // comma list of: brackets,section,square,tag,word
+    case "--mask-format": maskFormat = value()               // format used by the engine for this run
+    case "--mask-on": noMask = true                          // protect links/macros with placeholders (off by default)
+    case "--prev": prevTurns.append(value())                 // thread context line "source => translation" (repeatable)
+    case "--calques": calquesText = value()                  // list calques in this text (use --to for the language)
+    case "--tz": tzText = value()                            // time zones in this text -> local time
+    case "--tz-local": tzLocal = value()                     // zone id for --tz (default: this Mac)
+    case "--tz-now": tzNow = value()                         // ISO8601 "now" for --tz
+    case "--fingerprint": showFingerprint = true             // print the rules fingerprint of the active profile
     case "--add-term": addTerm = value()                    // "source => translation"
     case "-h", "--help":
         err("usage: tolk-cli [--from L] [--to L] [--tone auto|chat|formal] [--provider auto|ollama|google] [--show-rules] [--cancel-after SEC] text\n       tolk-cli --add-term 'source => translation'")
@@ -83,6 +105,39 @@ if selfTest {
     err("self-test: \(total - failures.count)/\(total) passed")
     exit(failures.isEmpty ? 0 : 1)
 }
+if let calquesText {
+    let l = target ?? LanguageDetector.detect(calquesText)
+    let hits = CalqueDetector.detect(in: calquesText, language: l)
+    for h in hits { print("калька [\(h.id)] «\(h.found)» → «\(h.suggestion)»") }
+    if hits.isEmpty { print("(калек нет)") }
+    exit(0)
+}
+if let tzText {
+    var now = Date()
+    if let tzNow { guard let d = ISO8601DateFormatter().date(from: tzNow) else { fail("--tz-now: ISO8601") }; now = d }
+    let z = tzLocal.flatMap { TimeZone(identifier: $0) } ?? .current
+    err("местное время: \(z.identifier)")
+    let rs = TimezoneConverter.convert(in: tzText, now: now, localZone: z)
+    for r in rs { print(r.display) }
+    if rs.isEmpty { print("(времён с поясом нет)") }
+    exit(0)
+}
+if showFingerprint {
+    let c = TolkConfig.load()
+    print("\(c.activeProfileID) \(c.effectiveRulesPath) \(RulesFingerprint.of(path: c.effectiveRulesPath))")
+    exit(0)
+}
+if let maskShow {
+    let f = maskFormat.flatMap { EntityMasker.Format(rawValue: $0) }
+    let m = EntityMasker.mask(maskShow, format: f)
+    print(m.text)
+    for e in m.entities { print("  \(e.token)  [\(e.kind.rawValue)]  \(e.original)") }
+    print(m.restore(m.text) == maskShow ? "restore: ok" : "restore: MISMATCH")
+    exit(0)
+}
+if noMask { EntityMasking.enabled = true }
+if let maskFormat { guard let f = EntityMasker.Format(rawValue: maskFormat) else { fail("--mask-format: brackets|section|square|tag|word") }; EntityMasker.defaultFormat = f }
+EngineLog.sink = { err("[log] " + $0) }
 if let addTerm {
     let parts = addTerm.components(separatedBy: "=>").map { $0.trimmingCharacters(in: .whitespaces) }
     guard parts.count == 2 else { fail("--add-term 'source => translation'") }
@@ -147,6 +202,59 @@ func timed(_ label: String, _ body: @escaping @Sendable () async throws -> Void)
 }
 let lsrc = source ?? LanguageDetector.detect(text)
 let ldst = target ?? LanguageDetector.defaultTarget(for: lsrc, config: config)
+if let maskEval {
+    guard let data = FileManager.default.contents(atPath: (maskEval as NSString).expandingTildeInPath),
+          let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { fail("--mask-eval: JSON [{id,text,tone?}]") }
+    let formats = maskFormats.split(separator: ",").compactMap { EntityMasker.Format(rawValue: String($0)) }
+    timed("mask-eval") {
+        func run(_ r: ResolvedRequest) async throws -> String {
+            var out = ""
+            for try await c in engine.primary.translate(r) { out += c }
+            return out
+        }
+        var tot: [String: (warn: Int, fail: Int, chars: Int, secs: Double)] = [:]
+        var lostTot: [String: Int] = [:]
+        var n = 0
+        for it in items {
+            guard let t = it["text"] as? String, let id = it["id"] as? String else { continue }
+            let tn = (it["tone"] as? String).flatMap { Tone(rawValue: $0) } ?? .auto
+            let req = TranslationRequest(text: t, source: source, target: target, tone: tn)
+            let base = LanguageDetector.resolve(req, config: engine.config)
+            let ents = EntityMasker.mask(t, format: formats.first).entities.count
+            if ents == 0 { err("\(id): сущностей нет, пропуск"); continue }
+            n += 1
+            func rec(_ k: String, _ w: Int, _ f: Int, _ ch: Int, _ s: Double) { let o = tot[k] ?? (0, 0, 0, 0); tot[k] = (o.warn + w, o.fail + f, o.chars + ch, o.secs + s) }
+            let t0 = Date()
+            let plain = try await run(base)
+            let wb = TranslationCheck.warnings(source: t, translation: plain, from: base.source, to: base.target)
+            rec("без маскировки", wb.count, 0, t.count + engine.debugSystemPrompt(for: req).count, Date().timeIntervalSince(t0))
+            let lostBase = EntityMasker.mask(t, format: formats.first).entities.filter { !plain.contains($0.original) }
+            lostTot["без маскировки", default: 0] += lostBase.count
+            print("[\(id)] сущностей \(ents), дословно не сохранилось без маскировки: \(lostBase.count) \(lostBase.map(\.original))\n  БЕЗ: \(wb.isEmpty ? "ок" : wb.joined(separator: "; "))\n      \(plain.replacingOccurrences(of: "\n", with: " ").prefix(2000))")
+            for f in formats {
+                let m = EntityMasker.mask(t, format: f)
+                var mr = base; mr.text = m.text; mr.protectedExample = f.token(1)
+                var qr = req; qr.text = m.text
+                let t1 = Date()
+                let out = try await run(mr)
+                let dt = Date().timeIntervalSince(t1)
+                let sysLen = engine.debugSystemPrompt(for: qr).count + EntityMasker.promptNote(example: f.token(1)).count
+                if let restored = m.restore(out) {
+                    let w = TranslationCheck.warnings(source: t, translation: restored, from: base.source, to: base.target)
+                    rec(f.rawValue, w.count, 0, m.text.count + sysLen, dt)
+                    print("  \(f.rawValue): \(w.isEmpty ? "ок" : w.joined(separator: "; "))\n      \(restored.replacingOccurrences(of: "\n", with: " ").prefix(2000))")
+                } else {
+                    rec(f.rawValue, wb.count, 1, m.text.count + sysLen, dt)
+                    print("  \(f.rawValue): ПОТЕРЯ/ДУБЛЬ ЗАГЛУШКИ → запасной путь\n      \(out.replacingOccurrences(of: "\n", with: " ").prefix(220))")
+                }
+            }
+        }
+        print("\n=== итого по \(n) текстам с сущностями ===")
+        for (k, v) in tot.sorted(by: { $0.key < $1.key }) {
+            print("\(k.padding(toLength: 16, withPad: " ", startingAt: 0)) предупреждений проверки: \(v.warn)  сбоев заглушек: \(v.fail)  символов промпта (всего): \(v.chars)  дословно потеряно сущностей: \(lostTot[k] ?? 0)  время: \(String(format: "%.0f", v.secs)) с")
+        }
+    }
+}
 if let variantsCurrent {
     timed("variants") {
         let vs = try await engine.sentenceVariants(sentence: text, current: variantsCurrent, fullSource: contextSource ?? text,
@@ -175,6 +283,7 @@ var context: TranslationContext?
 if let contextSource, let contextTranslation { context = TranslationContext(source: contextSource, translation: contextTranslation) }
 else if contextSource != nil || contextTranslation != nil { fail("--context-source and --context-translation go together") }
 var request = TranslationRequest(text: text, source: source, target: target, tone: tone, mode: mode, replyTo: replyTo, context: context)
+if !prevTurns.isEmpty { request.threadContext = prevTurns.map { $0.replacingOccurrences(of: " => ", with: " ⇒ ") }.joined(separator: "\n") }
 // A reply answers the partner: the target is the language of THEIR message unless --to is given.
 if let replyTo, target == nil, mode == .translate {
     let r = engine.replyRequest(message: replyTo, reply: text, tone: tone)
@@ -202,6 +311,19 @@ func direct(_ p: TranslationProvider) -> AsyncThrowingStream<TranslationEvent, E
     }
 }
 
+if twice {
+    timed("twice") {
+        for n in 1...2 {
+            let t0 = Date()
+            var out = "", cached = false
+            for try await e in engine.translate(request) {
+                if case let .delta(d) = e { out += d }
+                if case let .stats(st) = e { cached = st.fromCache }
+            }
+            err("[перевод \(n): \(String(format: "%.3f", Date().timeIntervalSince(t0))) с\(cached ? " · из кеша" : "")] \(out)")
+        }
+    }
+}
 let stream: AsyncThrowingStream<TranslationEvent, Error>
 switch providerName {
 case "auto": stream = engine.translate(request)

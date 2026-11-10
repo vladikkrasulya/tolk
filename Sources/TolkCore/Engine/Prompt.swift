@@ -13,9 +13,11 @@ enum Prompt {
         \(antiCalque(for: r.target))
         \(consistency(for: r))
         """
+        if let ex = r.protectedExample { s += "\n\n# Protected placeholders\n" + EntityMasker.promptNote(example: ex) }
         if !rules.isEmpty {
             s += "\n\n# Extra translation rules and glossary (follow strictly)\n" + rules
         }
+        if let t = r.threadContext, !t.isEmpty { s += "\n\n" + ThreadMemory.promptSection(t) }
         if let reply = r.replyTo?.trimmingCharacters(in: .whitespacesAndNewlines), !reply.isEmpty {
             s += """
 

@@ -87,6 +87,8 @@ final class HintCard: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    func setTitle(_ t: String) { titleLabel.stringValue = t }
+
     func setCount(_ n: Int?) { countBadge.text = n.map(String.init) ?? "" }
 
     private func toggle() {
@@ -127,6 +129,10 @@ final class TranslationHintsPanel: NSView {
     var onReplace: ((NSRange, String) -> Void)?
     /// «Вернуть» in the editor card.
     var onRevertEdit: (() -> Void)?
+    /// Asked before every button-started request: the server has two slots, the page counts them all.
+    var canStartRequest: (() -> Bool)?
+    /// The text «Что он имел в виду» is about (the original; in reply mode the partner's message). nil/empty = no button.
+    var explainSource: (() -> String?)?
     /// Pause in typing (after a finished translation) before any request goes out.
     var pause: Duration = .milliseconds(1500)
 
@@ -144,6 +150,9 @@ final class TranslationHintsPanel: NSView {
     private let back = BackTranslationJob()
     private let notesJob = HintTask()
     private let altJob = HintTask()
+    private let variantsJob = HintTask()
+    private let explainJob = HintTask()
+    private var explainedText: String?
     private var altWork: DispatchWorkItem?
     private var flashWork: DispatchWorkItem?
     private var pendingNotes = false
@@ -162,11 +171,15 @@ final class TranslationHintsPanel: NSView {
     private let warnBody = NSStackView()
     private let backCaption = UIFactory.label("", size: 11, color: .tertiaryLabelColor)
     private let backText = UIFactory.flexibleLabel("", size: 12.5, color: .secondaryLabelColor)
-    private let backLegend = UIFactory.label("Подсвечены слова, которых нет в оригинале", size: 10.5, color: .tertiaryLabelColor)
+    private let backLegend = UIFactory.flexibleLabel("", size: 10.5, color: .tertiaryLabelColor, selectable: false)
     private let notesBody = NSStackView()
     private let altBody = NSStackView()
     private let editBefore = UIFactory.flexibleLabel("", size: 12.5, color: .secondaryLabelColor)
     private let editAfter = UIFactory.flexibleLabel("", size: 12.5, color: .labelColor)
+    private let variantsBody = NSStackView()
+    private let explainBody = NSStackView()
+    private let explainButton = NSButton(title: "Что он имел в виду", target: nil, action: nil)
+    private let explainSpinner = NSProgressIndicator()
     private let glossary = GlossaryFormView(stacked: true, showsTitle: false)
 
     private var warnCard: HintCard!
@@ -174,6 +187,12 @@ final class TranslationHintsPanel: NSView {
     private var notesCard: HintCard!
     private var altCard: HintCard!
     private var editCard: HintCard!
+    private var scrollTopPlain: NSLayoutConstraint!
+    private var scrollTopExplain: NSLayoutConstraint!
+    private var variantsCancel: NSButton!
+    private var explainRow: NSStackView!
+    private var variantsCard: HintCard!
+    private var explainCard: HintCard!
     private var glossaryCard: HintCard!
     private var backRefresh: NSButton!
 
@@ -196,8 +215,24 @@ final class TranslationHintsPanel: NSView {
         pendingNotes = false
         requestsStarted = false
         backShown = false
-        clearNotes(); clearAlternatives()
+        clearNotes(); clearAlternatives(); clearVariants()
+        // The explanation belongs to the text it was made for: it stays while that text stays (reply mode: typing the answer).
+        if explainedText != nil, explainedText != currentExplainText() { clearExplanation() }
         refreshAll()
+    }
+
+    /// Requests running now that count against the server's two slots.
+    var busyCount: Int { [back.isRunning, notesJob.isRunning, altJob.isRunning, variantsJob.isRunning, explainJob.isRunning].filter { $0 }.count }
+
+    /// A button request needs the slot: the automatic hints (back-translation, footnotes) give way.
+    func cancelBackground() {
+        back.cancel(); notesJob.cancel(); altJob.cancel(); altWork?.cancel(); pendingNotes = false
+        refreshAll()
+    }
+
+    private func currentExplainText() -> String? {
+        let t = explainSource?()?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (t?.isEmpty ?? true) ? nil : t
     }
 
     /// Nothing to hint about (empty input, a new translation starts).
@@ -247,13 +282,14 @@ final class TranslationHintsPanel: NSView {
         c.stale = true
         ctx = c
         warnings = TranslationCheck.warnings(source: c.source, translation: translation, from: c.from, to: c.to)
-        clearAlternatives()
+        clearAlternatives(); clearVariants()
         refreshAll()
     }
 
-    /// Editor pass result for the before/after card (nil, nil = hide).
-    func setEditorChange(before: String?, after: String?) {
+    /// Editor / rewrite result for the before/after card (nil, nil = hide). `title`: «Правка · Короче».
+    func setEditorChange(before: String?, after: String?, title: String = "Правка") {
         if let before, let after {
+            editCard.setTitle(title)
             let (b, a) = Self.diff(old: before, new: after)
             editBefore.attributedStringValue = b
             editAfter.attributedStringValue = a
@@ -284,6 +320,9 @@ final class TranslationHintsPanel: NSView {
     }
 
     var hasContext: Bool { ctx != nil }
+
+    /// The text behind «Что он имел в виду» changed (or appeared): refresh the button.
+    func refresh() { refreshAll() }
 
     // MARK: - Requests
 
@@ -318,8 +357,10 @@ final class TranslationHintsPanel: NSView {
             if text.isEmpty {
                 backText.stringValue = "—"; backText.textColor = .tertiaryLabelColor
             } else {
-                backText.attributedStringValue = Self.highlight(text, against: c.source)
-                backLegend.isHidden = backText.attributedStringValue.string.isEmpty || !Self.hasHighlight(backText.attributedStringValue)
+                let diff = BackDiff.compare(source: c.source, back: text, glossary: engine.glossaryHits(in: c.source, target: c.to))
+                backText.attributedStringValue = Self.highlight(text, diff: diff)
+                backLegend.stringValue = Self.legend(diff)
+                backLegend.isHidden = diff.isClean
             }
             if var cc = ctx { cc.stale = false; ctx = cc }
             startPendingNotes()
@@ -434,6 +475,154 @@ final class TranslationHintsPanel: NSView {
         altCard.isHidden = true
     }
 
+    // MARK: - Sentence variants
+
+    /// Click on a sentence of the translation: 2–3 other renderings (one request, on demand). `range` = the sentence in the
+    /// translation; a chosen variant goes through `onReplace(range, text)`.
+    func requestVariants(sentence: String, current: String, range: NSRange, tone: Tone) {
+        guard let c = ctx else { return }
+        if UIText.isFallbackProvider(c.provider) {
+            flash("Варианты предложений делает домашняя модель — сейчас перевод от запасного сервиса.", color: .systemOrange)
+            return
+        }
+        variantsJob.cancel()
+        guard canStartRequest?() ?? true else {
+            flash("Сервер занят двумя запросами — подождите или отмените один.", color: .systemOrange)
+            return
+        }
+        showVariants(current: current, range: range, result: nil)
+        let engine = self.engine, fullSource = c.source, fullTranslation = c.translation, from = c.from, to = c.to
+        variantsJob.run({ () async -> Result<[SentenceVariant], Error> in
+            do {
+                return .success(try await engine.sentenceVariants(sentence: sentence, current: current, fullSource: fullSource,
+                                                                  fullTranslation: fullTranslation, from: from, to: to, tone: tone))
+            } catch { return .failure(error) }
+        }) { [weak self] result in
+            self?.showVariants(current: current, range: range, result: result)
+        }
+    }
+
+    private func showVariants(current: String, range: NSRange, result: Result<[SentenceVariant], Error>?) {
+        variantsBody.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let now = UIFactory.flexibleLabel("Сейчас: «\(current)»", size: 11.5, color: .secondaryLabelColor, selectable: false)
+        now.maximumNumberOfLines = 3
+        now.cell?.truncatesLastVisibleLine = true
+        addFull(now, to: variantsBody)
+        variantsCancel.isHidden = result != nil
+        switch result {
+        case nil:
+            addFull(UIFactory.label("подбираю варианты…", size: 12, color: .tertiaryLabelColor), to: variantsBody)
+            variantsCard.setCount(nil)
+        case let .failure(error)?:
+            addFull(UIFactory.flexibleLabel(UIText.errorMessage(error), size: 12, color: .systemRed, selectable: false), to: variantsBody)
+            variantsCard.setCount(nil)
+        case let .success(list)?:
+            if list.isEmpty { addFull(UIFactory.label("других вариантов нет", size: 12, color: .tertiaryLabelColor), to: variantsBody) }
+            for v in list {
+                let row = VariantRowView(label: v.label, text: v.text)
+                row.onClick = { [weak self] in
+                    self?.onReplace?(range, v.text)
+                    self?.flash("Предложение заменено", color: .systemGreen)
+                }
+                addFull(row, to: variantsBody)
+            }
+            variantsCard.setCount(list.isEmpty ? nil : list.count)
+        }
+        variantsCard.isHidden = false
+        refreshEmpty()
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.variantsCard.isHidden else { return }
+                self.variantsCard.superview?.layoutSubtreeIfNeeded()
+                self.variantsCard.scrollToVisible(self.variantsCard.bounds)
+            }
+        }
+    }
+
+    private func clearVariants() {
+        variantsJob.cancel()
+        variantsBody.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        variantsCard.isHidden = true
+    }
+
+    @objc private func cancelVariants() { clearVariants(); refreshEmpty() }
+
+    // MARK: - «Что он имел в виду»
+
+    @objc func explainClicked() {
+        if explainJob.isRunning { clearExplanation(); refreshAll(); return }
+        guard let text = currentExplainText() else { NSSound.beep(); return }
+        if let c = ctx, UIText.isFallbackProvider(c.provider) {
+            flash("Разбор смысла делает домашняя модель — сейчас перевод от запасного сервиса.", color: .systemOrange)
+            return
+        }
+        guard canStartRequest?() ?? true else {
+            flash("Сервер занят двумя запросами — подождите или отмените один.", color: .systemOrange)
+            return
+        }
+        explainedText = text
+        showExplanation(nil, error: nil)
+        let engine = self.engine
+        explainJob.run({ () async -> Result<MessageExplanation, Error> in
+            do { return .success(try await engine.explain(message: text)) } catch { return .failure(error) }
+        }) { [weak self] result in
+            guard let self, self.explainedText == text else { return }
+            switch result {
+            case let .success(e): self.showExplanation(e, error: nil)
+            case let .failure(e): self.showExplanation(nil, error: UIText.errorMessage(e))
+            }
+        }
+    }
+
+    private func showExplanation(_ e: MessageExplanation?, error: String?) {
+        explainBody.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        explainCard.setCount(nil)
+        if let e {
+            let badge = UIFactory.badge()
+            badge.text = e.tone
+            badge.tint = UIText.toneColor(e.tone)
+            let toneRow = NSStackView(views: [UIFactory.label("Тон", size: 11, weight: .semibold, color: .tertiaryLabelColor), badge, UIFactory.spacer()])
+            toneRow.orientation = .horizontal
+            toneRow.spacing = 6
+            addFull(toneRow, to: explainBody)
+            addFull(UIFactory.flexibleLabel(e.meaning, size: 12.5, color: .labelColor), to: explainBody)
+            if !e.terms.isEmpty {
+                addFull(UIFactory.label("Термины", size: 11, weight: .semibold, color: .tertiaryLabelColor), to: explainBody)
+                for t in e.terms {
+                    let text = NSMutableAttributedString(string: t.term, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.labelColor])
+                    text.append(NSAttributedString(string: " — " + t.meaning, attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor]))
+                    let l = WrapLabel(wrappingLabelWithString: "")
+                    l.attributedStringValue = text
+                    l.isSelectable = true
+                    l.maximumNumberOfLines = 0
+                    l.setContentCompressionResistancePriority(.init(250), for: .horizontal)
+                    addFull(l, to: explainBody)
+                }
+                explainCard.setCount(e.terms.count)
+            }
+        } else if let error {
+            addFull(UIFactory.flexibleLabel(error, size: 12, color: .systemRed, selectable: false), to: explainBody)
+        } else {
+            addFull(UIFactory.label("разбираю смысл…", size: 12, color: .tertiaryLabelColor), to: explainBody)
+        }
+        explainCard.isHidden = false
+        refreshAll()
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.explainCard.isHidden else { return }
+                self.explainCard.superview?.layoutSubtreeIfNeeded()
+                self.explainCard.scrollToVisible(self.explainCard.bounds)
+            }
+        }
+    }
+
+    private func clearExplanation() {
+        explainJob.cancel()
+        explainedText = nil
+        explainBody.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        explainCard.isHidden = true
+    }
+
     // MARK: - Toggles / actions
 
     @objc private func notesToggled() {
@@ -498,12 +687,20 @@ final class TranslationHintsPanel: NSView {
         backCard.isHidden = !(HintsSettings.backEnabled && ctx != nil && backShown)
         backRefresh.isHidden = !(ctx?.stale ?? false)
         glossaryCard.isHidden = ctx == nil
+        let canExplain = currentExplainText() != nil
+        explainButton.isHidden = !canExplain
+        explainButton.title = explainJob.isRunning ? "Отмена" : "Что он имел в виду"
+        explainButton.image = NSImage(systemSymbolName: explainJob.isRunning ? "xmark" : "questionmark.bubble", accessibilityDescription: nil)
+        if explainJob.isRunning { explainSpinner.startAnimation(nil) } else { explainSpinner.stopAnimation(nil) }
+        explainRow.isHidden = !canExplain
+        scrollTopPlain.isActive = !canExplain
+        scrollTopExplain.isActive = canExplain
         if let c = ctx, c.stale, backShown { backCaption.stringValue = "Перевод изменён — обратный перевод устарел" }
         refreshEmpty()
     }
 
     private func refreshEmpty() {
-        let visible = [warnCard, backCard, notesCard, altCard, editCard].contains { $0?.isHidden == false }
+        let visible = [explainCard, warnCard, variantsCard, backCard, notesCard, altCard, editCard].contains { $0?.isHidden == false }
         emptyLabel.isHidden = visible
         let anyEnabled = HintsSettings.backEnabled || HintsSettings.notesEnabled
         if ctx == nil {
@@ -515,7 +712,7 @@ final class TranslationHintsPanel: NSView {
         } else if !anyEnabled {
             emptyLabel.stringValue = "Предупреждений нет. Сноски и обратный перевод выключены — включите их вверху."
         } else {
-            emptyLabel.stringValue = "Спорных мест не найдено. Выделите слово в переводе — предложу варианты."
+            emptyLabel.stringValue = "Спорных мест не найдено. Щёлкните по предложению в переводе — предложу варианты, выделите слово — подберу замену."
         }
     }
 
@@ -534,18 +731,22 @@ final class TranslationHintsPanel: NSView {
         return out
     }
 
-    /// Back-translated text with the words that the original does not contain marked (a quick visual diff).
-    static func highlight(_ back: String, against source: String) -> NSAttributedString {
-        let known = Set(words(source).map(\.0))
-        let stems = Set(known.filter { $0.count >= 5 }.map { String($0.prefix(5)) })
+    /// Back-translated text with only the differences in MEANING marked (numbers, negations, names, glossary terms);
+    /// synonyms are not highlighted.
+    static func highlight(_ back: String, diff: BackDiff.Result) -> NSAttributedString {
         let out = NSMutableAttributedString(string: back, attributes: [
             .font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: NSColor.secondaryLabelColor])
-        for (w, r) in words(back) where w.count >= 4 {
-            if known.contains(w) { continue }
-            if w.count >= 5, stems.contains(String(w.prefix(5))) { continue }
-            out.addAttribute(.backgroundColor, value: NSColor.systemOrange.withAlphaComponent(0.2), range: r)
+        for r in diff.marks where NSMaxRange(r) <= out.length {
+            out.addAttribute(.backgroundColor, value: NSColor.systemOrange.withAlphaComponent(0.28), range: r)
         }
         return out
+    }
+
+    static func legend(_ diff: BackDiff.Result) -> String {
+        var parts: [String] = []
+        if !diff.marks.isEmpty { parts.append("Подсвечено то, чего нет в оригинале: число, имя или отрицание.") }
+        if !diff.missing.isEmpty { parts.append("Не дошло до обратного перевода: " + diff.missing.map { "«\($0)»" }.joined(separator: ", ") + ".") }
+        return parts.joined(separator: " ")
     }
 
     /// Word-level before/after: removed words marked in the old text, added words in the new one.
@@ -566,14 +767,6 @@ final class TranslationHintsPanel: NSView {
         return (oldOut, newOut)
     }
 
-    private static func hasHighlight(_ a: NSAttributedString) -> Bool {
-        var found = false
-        a.enumerateAttribute(.backgroundColor, in: NSRange(location: 0, length: a.length)) { v, _, stop in
-            if v != nil { found = true; stop.pointee = true }
-        }
-        return found
-    }
-
     // MARK: - Building
 
     private func build() {
@@ -592,8 +785,24 @@ final class TranslationHintsPanel: NSView {
         header.spacing = 10
         header.translatesAutoresizingMaskIntoConstraints = false
 
+        explainButton.target = self
+        explainButton.action = #selector(explainClicked)
+        explainButton.bezelStyle = .push
+        explainButton.controlSize = .small
+        explainButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        explainButton.imagePosition = .imageLeading
+        explainButton.toolTip = "Смысл сообщения, тон и пояснения терминов — один запрос к модели"
+        explainSpinner.style = .spinning
+        explainSpinner.controlSize = .small
+        explainSpinner.isDisplayedWhenStopped = false
+        explainRow = NSStackView(views: [explainButton, explainSpinner, UIFactory.spacer()])
+        explainRow.orientation = .horizontal
+        explainRow.spacing = 6
+        explainRow.translatesAutoresizingMaskIntoConstraints = false
+        explainRow.isHidden = true
+
         // Card bodies
-        for s in [warnBody, notesBody, altBody] {
+        for s in [warnBody, notesBody, altBody, variantsBody, explainBody] {
             s.orientation = .vertical
             s.alignment = .leading
             s.spacing = 8
@@ -604,6 +813,7 @@ final class TranslationHintsPanel: NSView {
         backBody.alignment = .leading
         backBody.spacing = 6
         backText.widthAnchor.constraint(equalTo: backBody.widthAnchor).isActive = true
+        backLegend.widthAnchor.constraint(equalTo: backBody.widthAnchor).isActive = true
         let editBody = NSStackView(views: [
             UIFactory.label("Было", size: 11, weight: .semibold, color: .tertiaryLabelColor), editBefore,
             UIFactory.label("Стало", size: 11, weight: .semibold, color: .tertiaryLabelColor), editAfter,
@@ -630,7 +840,11 @@ final class TranslationHintsPanel: NSView {
         notesCard = HintCard(id: "notes", title: "Сноски", symbol: "lightbulb", body: notesBody)
         backCard = HintCard(id: "back", title: "Обратный перевод", symbol: "arrow.uturn.backward", body: backBody)
         altCard = HintCard(id: "alternatives", title: "Варианты слова", symbol: "text.word.spacing", body: altBody)
-        editCard = HintCard(id: "editor", title: "Правка редактора", symbol: "wand.and.stars", body: editBody)
+        editCard = HintCard(id: "editor", title: "Правка", symbol: "wand.and.stars", body: editBody)
+        variantsCard = HintCard(id: "variants", title: "Варианты предложения", symbol: "text.quote", body: variantsBody)
+        explainCard = HintCard(id: "explain", title: "Что он имел в виду", symbol: "questionmark.bubble", body: explainBody, tint: .systemBlue)
+        variantsCancel = UIFactory.symbolButton("xmark.circle", tooltip: "Отменить запрос", target: self, action: #selector(cancelVariants))
+        variantsCard.accessory.addArrangedSubview(variantsCancel)
         glossaryCard = HintCard(id: "glossary", title: "В глоссарий", symbol: "book", body: glossary, collapsedByDefault: true)
 
         backRefresh = UIFactory.symbolButton("arrow.clockwise", tooltip: "Перевести обратно заново", target: self,
@@ -646,11 +860,11 @@ final class TranslationHintsPanel: NSView {
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
         emptyLabel.maximumNumberOfLines = 0
-        let cards = [warnCard!, notesCard!, backCard!, altCard!, editCard!, glossaryCard!]
+        let cards = [explainCard!, warnCard!, variantsCard!, notesCard!, backCard!, altCard!, editCard!, glossaryCard!]
         for v in [emptyLabel] + cards { stack.addArrangedSubview(v) }
         for v in [emptyLabel] + cards { v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: v === emptyLabel ? -8 : 0).isActive = true }
         emptyLabel.setContentCompressionResistancePriority(.init(250), for: .horizontal)
-        for c in [warnCard!, notesCard!, backCard!, altCard!, editCard!] { c.isHidden = true }
+        for c in [explainCard!, warnCard!, variantsCard!, notesCard!, backCard!, altCard!, editCard!] { c.isHidden = true }
 
         let doc = FlippedView()
         doc.translatesAutoresizingMaskIntoConstraints = false
@@ -677,14 +891,20 @@ final class TranslationHintsPanel: NSView {
         feedback.isHidden = true
         scrollBottom = scroll.bottomAnchor.constraint(equalTo: bottomAnchor)
         feedback.translatesAutoresizingMaskIntoConstraints = false
-        for v in [header, scroll, feedback] { addSubview(v) }
+        for v in [header, explainRow!, scroll, feedback] { addSubview(v) }
+        scrollTopPlain = scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10)
+        scrollTopExplain = scroll.topAnchor.constraint(equalTo: explainRow.bottomAnchor, constant: 8)
+        scrollTopExplain.isActive = false
+        scrollTopPlain.isActive = true
         NSLayoutConstraint.activate([
             scrollBottom,
             header.topAnchor.constraint(equalTo: topAnchor),
             header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             header.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             header.heightAnchor.constraint(equalToConstant: 28),
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
+            explainRow.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 6),
+            explainRow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            explainRow.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             scroll.leadingAnchor.constraint(equalTo: leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: trailingAnchor),
             feedback.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),

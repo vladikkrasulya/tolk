@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var termSources: [DispatchSourceSignal] = []
     private var acItem: NSMenuItem!
     private var acStatusItem: NSMenuItem!
+    private var acStatsItem: NSMenuItem!
     private var acRetryItem: NSMenuItem!
     private var acAppItem: NSMenuItem!
     private var acFlagItems: [(item: NSMenuItem, keyPath: WritableKeyPath<TolkConfig, Bool>)] = []
@@ -51,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
+        if ProcessInfo.processInfo.environment["TOLK_AC_STATS_SHOT"] != nil { ACStatsDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_HINTS_SHOT"] != nil { TranslateHintsDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_MAIN_DEMO"] != nil { MainWindowDemo.runIfRequested(); return }
         // Dev: TOLK_TEST_OLLAMA=http://127.0.0.1:11999 points this run at a fake server (cold-model / down tests); not saved.
@@ -77,6 +79,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                           history: historyPage,
                                           glossary: glossaryPage,
                                           settings: settingsVC)
+
+        let openDocument: (URL) -> Void = { [weak self] url in
+            self?.mainWindow.show(.documents)
+            self?.documentsPage.open(url: url)
+        }
+        translatePage.history = history
+        translatePage.onOpenDocument = openDocument
+        inputWindow.page.history = history
+        inputWindow.page.onOpenDocument = openDocument
 
         popup.onExpand = { [weak self] text in
             self?.mainWindow.show(.translate)
@@ -233,6 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         acController?.stop()
+        ACStatsStore.shared.flush()
         acServer?.stop() // the llama-server child must not outlive Tolk
         Diagnostics.markCleanExit()
     }
@@ -278,6 +290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupAutocomplete() {
         acServer = LocalModelServer(modelPath: config.autocompleteModel)
         acController = AutocompleteController(server: acServer)
+        acController?.onStatsChanged = { [weak self] in self?.refreshStatsMenuLine() }
         acServer.onStateChange = { [weak self] _ in self?.serverStateChanged() }
         settingsVC.model.onRetryAutocomplete = { [weak self] in self?.acServer.retry() }
         // SIGTERM/SIGINT/SIGHUP end Tolk normally (applicationWillTerminate stops the server). After kill -9 the
@@ -353,8 +366,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshAutocompleteMenu()
     }
 
+    private func refreshStatsMenuLine() {
+        guard acStatsItem != nil else { return }
+        let line = ACStats.menuLine(ACStatsStore.shared.data)
+        acStatsItem.title = line ?? ""
+        acStatsItem.isHidden = line == nil || !config.autocomplete
+    }
+
     private func refreshAutocompleteMenu() {
         guard acItem != nil else { return }
+        refreshStatsMenuLine()
         acItem.state = config.autocomplete ? .on : .off
         acStatusItem.isHidden = !config.autocomplete
         for f in acFlagItems { f.item.state = config[keyPath: f.keyPath] ? .on : .off }
@@ -481,6 +502,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         acStatusItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         acStatusItem.isEnabled = false
         acMenu.addItem(acStatusItem)
+        acStatsItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        acStatsItem.isEnabled = false
+        acMenu.addItem(acStatsItem)
         acRetryItem = item("Повторить запуск модели", #selector(retryAutocompleteServer))
         acRetryItem.isHidden = true
         acMenu.addItem(acRetryItem)

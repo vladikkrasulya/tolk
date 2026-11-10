@@ -7,6 +7,9 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
     public let rules: RulesStore
     public let primary: TranslationProvider
     public let fallback: TranslationProvider?
+    /// Finished translations of the main model (memory only, never on disk).
+    let cache: ResultCache<CachedTranslation>
+    let notesCache: ResultCache<[TranslationNote]>
 
     public convenience init(config: TolkConfig) {
         // Fresh install: the «Дом» file does not exist yet — built-in neutral rules are used in memory.
@@ -25,11 +28,40 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
 
     public init(config: TolkConfig, rules: RulesStore, primary: TranslationProvider, fallback: TranslationProvider?) {
         self.config = config; self.rules = rules; self.primary = primary; self.fallback = fallback
+        self.cache = ResultCache(); self.notesCache = ResultCache()
+    }
+
+    /// Test hook: engine with its own caches (small limits, fake clock).
+    init(config: TolkConfig, rules: RulesStore, primary: TranslationProvider, fallback: TranslationProvider?,
+         cache: ResultCache<CachedTranslation>, notesCache: ResultCache<[TranslationNote]>) {
+        self.config = config; self.rules = rules; self.primary = primary; self.fallback = fallback
+        self.cache = cache; self.notesCache = notesCache
+    }
+
+    /// Which model answers: part of every cache key.
+    var cacheIdentity: String { (primary as? OllamaProvider).map { "ollama:" + $0.model } ?? "provider:" + primary.name }
+
+    func systemPrompt(for r: ResolvedRequest) -> String {
+        let selector = [r.text, r.replyTo, r.context?.source].compactMap { $0 }.joined(separator: "\n")
+        return Prompt.system(for: r, rules: rules.promptBlock(for: selector, target: r.target))
     }
 
     public func translate(_ request: TranslationRequest) -> AsyncThrowingStream<TranslationEvent, Error> {
         let resolved = LanguageDetector.resolve(request, config: config)
         let primary = self.primary, fallback = self.fallback
+        let cache = self.cache
+        let key = TranslationCacheKey.translation(resolved, systemPrompt: systemPrompt(for: resolved), identity: cacheIdentity)
+        let isEmpty = resolved.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if !request.bypassCache, !isEmpty, let hit = cache.get(key) {
+            return AsyncThrowingStream { c in
+                c.yield(.started(provider: hit.provider, source: resolved.source, target: resolved.target))
+                c.yield(.delta(hit.text))
+                var st = TranslationStats(provider: hit.provider, route: hit.route, firstChunk: 0, total: 0,
+                                          outputTokens: hit.outputTokens, tokensExact: false, fallbackReason: nil)
+                st.warnings = hit.warnings; st.fromCache = true
+                c.yield(.stats(st)); c.yield(.finished); c.finish()
+            }
+        }
         return AsyncThrowingStream { continuation in
             let task = Task {
                 let t0 = Date()
@@ -54,6 +86,7 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                     if resolved.mode == .translate {
                         st.warnings = TranslationCheck.warnings(source: resolved.text, translation: produced,
                                                                 from: resolved.source, to: resolved.target)
+                        st.warnings += CalqueDetector.warnings(in: produced, language: resolved.target)
                     }
                     return st
                 }
@@ -75,7 +108,7 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                         }
                         if coldFailure == nil { do {
                             try await UsageBox.$current.withValue(usage) {
-                                for try await chunk in primary.translate(resolved) {
+                                for try await chunk in EntityMasking.stream(resolved, provider: primary) {
                                     try Task.checkCancellation()
                                     if firstAt == nil { firstAt = Date() }
                                     chunks += 1
@@ -84,7 +117,15 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                                     continuation.yield(.delta(chunk))
                                 }
                             }
-                            continuation.yield(.stats(stats(primary, reason: nil)))
+                            // Only a fully finished translation of the main model is kept.
+                            try Task.checkCancellation()
+                            let st = stats(primary, reason: nil)
+                            if !produced.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                cache.set(key, CachedTranslation(text: produced, provider: primary.name, route: st.route,
+                                                                 warnings: st.warnings, outputTokens: st.outputTokens),
+                                          cost: produced.utf8.count)
+                            }
+                            continuation.yield(.stats(st))
                             continuation.yield(.finished); continuation.finish(); return
                         } catch {
                             // Mid-stream failure or cancellation: nothing sensible to fall back to.
@@ -131,8 +172,14 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
 
     public func notes(source: String, translation: String, from: Language, to: Language) async -> [TranslationNote] {
         // Only if the model is already in memory: an optional footnote must never trigger a 30 s cold load.
+        let key = TranslationCacheKey.notes(source: source, translation: translation, from: from, to: to,
+                                            rules: rules.promptBlock(for: source), identity: cacheIdentity)
+        if let hit = notesCache.get(key) { return hit }
         guard let ollama = primary as? OllamaProvider, await ollama.isModelLoaded() == true else { return [] }
-        return await ollama.notes(source: source, translation: translation, from: from, to: to)
+        let result = await ollama.notes(source: source, translation: translation, from: from, to: to)
+        // An empty list is also what a failed request returns, so only real answers are kept.
+        if !result.isEmpty { notesCache.set(key, result, cost: result.reduce(0) { $0 + $1.note.utf8.count + $1.term.utf8.count + 64 }) }
+        return result
     }
 
     public func alternatives(for fragment: String, in translation: String, source: String, from: Language, to: Language) async -> [String] {
@@ -143,8 +190,11 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
     /// Dev: the exact system prompt a request would get (CLI --show-prompt).
     public func debugSystemPrompt(for request: TranslationRequest) -> String {
         let r = LanguageDetector.resolve(request, config: config)
-        let selector = [r.text, r.replyTo, r.context?.source].compactMap { $0 }.joined(separator: "\n")
-        return Prompt.system(for: r, rules: rules.promptBlock(for: selector, target: r.target))
+        return systemPrompt(for: r)
+    }
+
+    public func glossaryHits(in text: String, target: Language) -> [GlossaryHit] {
+        rules.glossaryHits(in: text, target: target)
     }
 
     public func addGlossaryTerm(source: String, translation: String) throws {

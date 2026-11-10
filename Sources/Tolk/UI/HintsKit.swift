@@ -252,3 +252,63 @@ final class GlossaryFormView: NSStackView, NSTextFieldDelegate {
         return false
     }
 }
+
+// MARK: - Sentence variants, tone
+
+/// One variant of a sentence: a small label above, the text below; the whole row is a button.
+@MainActor
+final class VariantRowView: NSView {
+    var onClick: (() -> Void)?
+    private var hovering = false { didSet { needsDisplay = true } }
+
+    init(label: String, text: String) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        let tag = UIFactory.label(label, size: 10.5, weight: .semibold, color: .tertiaryLabelColor)
+        let body = UIFactory.flexibleLabel(text, size: 12.5, color: .labelColor, selectable: false)
+        let stack = NSStackView(views: [tag, body])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 2
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            body.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ])
+        toolTip = "Подставить вместо предложения"
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
+        (hovering ? NSColor.controlAccentColor.withAlphaComponent(0.14) : NSColor.labelColor.withAlphaComponent(0.045)).setFill()
+        path.fill()
+        NSColor.separatorColor.setStroke()
+        path.lineWidth = 0.5
+        path.stroke()
+    }
+}
+
+extension UIText {
+    /// Colour of the tone badge in «Что он имел в виду»: warm words red/orange, friendly green, formal blue.
+    static func toneColor(_ tone: String) -> NSColor {
+        let t = tone.lowercased()
+        func has(_ keys: [String]) -> Bool { keys.contains { t.contains($0) } }
+        if has(["раздраж", "недовол", "резк", "жёстк", "жестк", "агресс", "угроз", "претенз", "злой", "зол", "сердит"]) { return .systemRed }
+        if has(["срочн", "давлен", "настойч", "требоват", "напряж", "нетерпел", "тревож", "отказ"]) { return .systemOrange }
+        if has(["ирон", "сарказ", "насмеш"]) { return .systemPurple }
+        if has(["дружел", "тепл", "вежлив", "благодар", "радост", "позитив", "любез", "заботл"]) { return .systemGreen }
+        if has(["формал", "официал", "делов", "сдержан"]) { return .systemBlue }
+        return .secondaryLabelColor
+    }
+}

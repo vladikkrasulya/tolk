@@ -186,7 +186,9 @@ final class LocalModelServer {
 
     /// First request compiles Metal kernels; do it now, not on the user's first keystroke.
     private func warmUp() async {
-        _ = try? await CompletionClient(baseURL: baseURL).complete(prompt: "Hello, how are", maxTokens: 2)
+        let client = CompletionClient(baseURL: baseURL)
+        await client.probeFormat()
+        _ = try? await client.complete(prompt: "Hello, how are", maxTokens: 2, healLiteral: nil)
     }
 }
 
@@ -199,12 +201,25 @@ struct CompletionClient {
 
     struct Result { let text: String; let ms: Int }
 
-    func complete(prompt: String, maxTokens: Int) async throws -> Result {
+    /// Does this model have a Gemma 4 chat template (`<|turn>`)? Decides between the chat-prefill and the raw prompt.
+    func probeFormat() async {
+        var req = URLRequest(url: baseURL.appendingPathComponent("props"))
+        req.timeoutInterval = 3
+        var gemma4 = false
+        if let (data, _) = try? await URLSession.shared.data(for: req),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let tpl = json["chat_template"] as? String { gemma4 = tpl.contains("<|turn>") }
+        AutocompletePrompt.chatTemplateAvailable = gemma4
+    }
+
+    /// `healLiteral`: the cut-off word the grammar forces at the start of the reply (see `AutocompleteHealing`); it is
+    /// read when the call is made, right after `AutocompletePrompt.prompt(...)`.
+    func complete(prompt: String, maxTokens: Int, healLiteral: String? = AutocompletePrompt.lastHealLiteral) async throws -> Result {
         var req = URLRequest(url: baseURL.appendingPathComponent("completion"))
         req.httpMethod = "POST"
         req.timeoutInterval = 5
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "prompt": prompt,
             "n_predict": maxTokens,
             "temperature": 0,
@@ -213,18 +228,34 @@ struct CompletionClient {
             "cache_prompt": true,
             "n_probs": 1,   // per-token probabilities → AutocompletePrompt.confidentPrefix
         ]
+        if let lit = healLiteral, !lit.isEmpty {
+            body["grammar"] = AutocompleteHealing.grammar(forLiteral: lit)
+            body["n_probs"] = 20   // alternatives for the first free token (renormalised in AutocompleteHealing.strip)
+        }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let t0 = Date()
         let (data, response) = try await URLSession.shared.data(for: req)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { throw HTTPStatusError(status: http.statusCode) }
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         var text = json?["content"] as? String ?? ""
-        if AutocompletePrompt.useConfidence, let probs = json?["completion_probabilities"] as? [[String: Any]], !probs.isEmpty {
-            let toks: [(text: String, prob: Double)] = probs.compactMap {
-                guard let t = $0["token"] as? String, let lp = $0["logprob"] as? Double else { return nil }
-                return (t, exp(lp))
+        let probs = json?["completion_probabilities"] as? [[String: Any]] ?? []
+        var tokens: [AutocompleteHealing.Token] = probs.compactMap {
+            guard let t = $0["token"] as? String, let lp = $0["logprob"] as? Double else { return nil }
+            let top = ($0["top_logprobs"] as? [[String: Any]] ?? []).compactMap { e -> (text: String, prob: Double)? in
+                guard let tt = e["token"] as? String, let l = e["logprob"] as? Double else { return nil }
+                return (tt, exp(l))
             }
-            if toks.count == probs.count { text = AutocompletePrompt.confidentPrefix(toks, textBefore: AutocompletePrompt.lastTextBefore) }
+            return AutocompleteHealing.Token(text: t, prob: exp(lp), top: top)
+        }
+        if tokens.count != probs.count { tokens = [] }
+        if let lit = healLiteral, !lit.isEmpty {
+            // The reply begins with the forced letters of the word being typed: drop them, keep the continuation.
+            let stripped = AutocompleteHealing.strip(literal: lit, content: text, tokens: tokens)
+            text = stripped.content
+            tokens = stripped.tokens
+        }
+        if AutocompletePrompt.useConfidence, !tokens.isEmpty {
+            text = AutocompletePrompt.confidentPrefix(tokens.map { ($0.text, $0.prob) }, textBefore: AutocompletePrompt.lastTextBefore)
         }
         return Result(text: text, ms: Int(Date().timeIntervalSince(t0) * 1000))
     }

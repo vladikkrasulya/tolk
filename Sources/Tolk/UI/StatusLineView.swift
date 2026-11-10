@@ -17,6 +17,8 @@ final class StatusLineView: NSView {
     private var slowHint: Timer?
     private var waitStart = Date()
     private var fallbackReason: String?
+    /// The page shows the warnings in the «Проверка» card: here only a «⚠ 2» badge, so the line stays short.
+    var compactWarnings = false
 
     init(fontSize: CGFloat = 11) {
         super.init(frame: .zero)
@@ -107,6 +109,12 @@ final class StatusLineView: NSView {
         stopHint()
         isHidden = false
         var parts = [st.routeTitle]
+        if st.fromCache {
+            // Same text and settings as a recent translation: shown from memory, the model was not asked.
+            parts.append("из кеша")
+            set(parts.joined(separator: " · "), color: .systemGreen, text: .secondaryLabelColor)
+            return
+        }
         if let f = st.firstChunk, st.route == .home || st.route == .remote {
             parts.append("первое слово \(Self.seconds(f))")
         }
@@ -123,7 +131,7 @@ final class StatusLineView: NSView {
             ?? (st.tokensExact ? "Скорость по данным сервера" : "Скорость примерная")
         if !st.warnings.isEmpty {
             // The warning goes first so that tail truncation never hides it; full text in the tooltip.
-            let warn = "⚠ " + st.warnings.joined(separator: "; ")
+            let warn = compactWarnings ? "⚠ \(st.warnings.count)" : "⚠ " + st.warnings.joined(separator: "; ")
             let rest = label.stringValue
             let attr = NSMutableAttributedString(string: warn, attributes: [
                 .font: label.font as Any, .foregroundColor: NSColor.systemOrange])
@@ -133,7 +141,7 @@ final class StatusLineView: NSView {
             para.lineBreakMode = .byTruncatingTail
             attr.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: attr.length))
             label.attributedStringValue = attr
-            tip = warn + "\n" + tip
+            tip = "⚠ " + st.warnings.joined(separator: "; ") + "\n" + tip
         }
         toolTip = tip
     }

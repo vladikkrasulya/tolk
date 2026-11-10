@@ -160,7 +160,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   the greeting, or is empty. The edited text is buffered and shown at once (no streaming).
 - Self-test: 197 checks.
 
-## v0.6.4 (in progress) — big translate window
+## v0.6.4 — big translate window, caches, autocomplete healing, review follow-ups
 - Translate page hints panel (`UI/TranslationHintsPanel.swift`): 3rd column ≥1000 pt wide, below the translation when
   narrower. Cards: check warnings, footnotes, back-translation, word alternatives, add to glossary, editor diff.
   Shared with the popup via `UI/HintsKit.swift` (`HintsSettings`, `HintTask`, `BackTranslationJob`, `NoteRow`,
@@ -172,4 +172,43 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   `SentencePairing.pairs` (no model), `sentenceVariants`, `rewrite` (shorter/softer/firmer/simpler/formal/informal,
   guarded by `TranslationCheck`, question/greeting and pronoun checks), `translateReply` (detects the partner's
   language), `explain` (meaning, tone, ≤5 terms). CLI: `--pairs`, `--variants`, `--rewrite`, `--reply-to`, `--explain`.
-- Self-test: 233 checks.
+- Big-window UI (page «Перевод»): sentence pairs (hover highlights the pair in both panes, unsure pairs paler; no model),
+  click / context menu on a translated sentence → «Варианты предложения» card; rewrite row (Короче/Мягче/Твёрже/Проще,
+  ты|Вы; folds into a menu when narrow) with «Правка» before/after card and «Вернуть»; reply mode («Перевод | Ответ»:
+  partner's message + its translation on top, my answer, reply translated via `replyRequest`); «Что он имел в виду» card
+  (meaning, tone badge, terms); glossary terms underlined in the translation (`RulesStore.glossaryHits` + `marks`);
+  back-translation highlights only meaning differences (`BackDiff`: numbers, negations, names, glossary terms);
+  «Последние» popover from `HistoryStore` (no request); a file dropped on the page opens «Документы».
+  All model requests are button-started with a cancel; at most two at once (`slotAvailable`, background hints give way).
+  `TranslationEngine` got the extras as protocol requirements (defaults throw; `HistoryRecordingEngine` forwards).
+  Offscreen render: `TOLK_HINTS_SHOT=<dir>` writes translate-{wide,narrow}-{light,dark}-{1-hints,2-pair-hover,3-variants,
+  4-rewrite,4b-rewrite-rejected,5-reply,6-explain}.png and recent-{light,dark}.png.
+
+## Autocomplete: healing, prefill, OCR economy
+- Token healing (`TolkCore/AutocompleteHealing.swift`, switch `AutocompletePrompt.useHealing`): the half-typed word is cut
+  off the prompt and `CompletionClient` sends a GBNF `grammar` forcing the reply to start with it; the forced letters are
+  stripped again and the first free token's probability is renormalised over grammar-consistent alternatives. Mid-word
+  endings: 0 → 9 of 15 right (E2B). Cost ≈ +50 ms per request (grammar sampling).
+- Chat prefill (switch `AutocompletePrompt.useChatPrefill`, only when `/props` shows a Gemma 4 template, see
+  `CompletionClient.probeFormat`): rules, examples and conversation in the user turn, the typed text is the start of the
+  model turn, no thought block. Per keystroke llama-server re-evaluates 1–6 tokens. Other models keep the raw prompt.
+- Screen context (`ScreenContext`, `TolkCore/ContextRefresh.swift`, switch `ScreenContext.smartRefresh`): the OCR'd region
+  (without the input field) is shrunk to a 32×32 grayscale signature; Vision runs only if ≥ 0.4 % of cells changed.
+  The screen is looked at on events (other window, field emptied = sent, scroll) after 1.5 s, otherwise every 15 s.
+- Numbers and the NSSpellChecker comparison: side-session notes `ac-healing-report.md`.
+
+## v0.6.4 integration notes
+- Translation cache (`Engine/TranslationCache.swift`): in-memory LRU (200 entries / 2 MB / 24 h) keyed by SHA-256 of the
+  final system prompt + text + model, so rules, glossary, tone, thread context and profile changes miss automatically;
+  only finished main-model translations are stored; `TranslationRequest.bypassCache`; `TranslationStats.fromCache` →
+  status line «из кеша». Notes have their own cache. Variants/rewrite/explain are never cached.
+- Thread memory (`Engine/ThreadMemory.swift`) is wired into the popup: short texts (≤20 words) from the same app within
+  5 min get the last ≤3 turns as context; the same text is never its own context (keeps the cache key stable).
+- Calques (`Engine/CalqueDetector.swift`, 48 entries) go to warnings as «калька: …»; the editor answers `OK` when
+  nothing needs fixing. Entity masking (`Engine/EntityMasker.swift`) exists but is OFF: Gemma kept every URL/macro on 24
+  adtech texts by itself and masking hurt phrasing. Time zones without the model: `Engine/TimezoneConverter.swift`.
+- `RulesFingerprint` is part of the live-typing sentence cache key (`UI/LiveTranslation.swift`).
+- Autocomplete statistics (`autocomplete-stats.json`, numbers only): Settings → Автодополнение and the menu bar;
+  `tolk-cli --ac-stats`.
+- Measured on vkbox (2026-11-10): num_ctx 8192 vs 32768 — generation ≈26 vs ≈22 tok/s, first token the same (~1.1 s).
+  Ollama reloads the model (~30 s) whenever a request asks for another num_ctx, so change it only in the Modelfile.

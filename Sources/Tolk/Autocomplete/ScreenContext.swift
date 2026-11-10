@@ -10,6 +10,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import TolkCore
 
 @MainActor
 final class ScreenContext {
@@ -21,12 +22,19 @@ final class ScreenContext {
         let source: Source
         let ms: Int
         let at: Date
+        /// 32×32 grayscale signature of the OCR'd region: the next snapshot is compared with it (`FrameChange`).
+        var signature: FrameChange.Signature?
     }
 
     nonisolated static let maxChars = 700
     /// Below this many characters the AX result counts as "empty" and OCR is tried.
     static let minAXChars = 80
+    /// How often an Accessibility-sourced context is re-read. OCR contexts follow `ContextRefreshPolicy` instead:
+    /// the screen is looked at on events (another window, a sent message, scrolling) or every 15 s, and Vision runs
+    /// only when the picture changed (autocomplete-eval, «OCR» round: one cycle = ~0.47 s median, it used to run every 4 s).
     static let refreshInterval: TimeInterval = 4
+    /// Master switch for the pixel comparison / event logic; false = the old behaviour (OCR every 4 s).
+    static var smartRefresh = true
     private static let probeInterval: TimeInterval = 1
 
     /// False while the model server is not ready: no point reading the screen for suggestions that cannot be made.
@@ -38,6 +46,16 @@ final class ScreenContext {
     private(set) var snapshot: Snapshot?
     private var inflight: Task<Void, Never>?
     private var lastProbe = Date.distantPast
+    private var lastScroll: Date?
+    private var lastFieldLength: Int?
+    private var scrollMonitor: Any?
+
+    init() {
+        // Mouse wheel / trackpad scrolling anywhere: the visible conversation may have moved. (No permission needed.)
+        scrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] _ in
+            MainActor.assumeIsolated { self?.lastScroll = Date() }
+        }
+    }
     /// Last context returned from the request path; kept so that an unchanged screen yields byte-identical
     /// text (stable prompt prefix, llama-server KV cache is reused).
     var onUpdate: ((Source, Int, Int) -> Void)?
@@ -54,17 +72,34 @@ final class ScreenContext {
             let t0 = Date()
             let target = await Task.detached(priority: .utility) { Target.read(pid: pid) }.value
             guard let target else { self?.inflight = nil; return }
-            if let c = cached, c.key == target.key, Date().timeIntervalSince(c.at) < Self.refreshInterval {
-                self?.inflight = nil
-                return
-            }
-            let (text, source) = await Self.collect(target)
-            let ms = Int(Date().timeIntervalSince(t0) * 1000)
             guard let self else { return }
-            self.snapshot = Snapshot(key: target.key, text: text, source: source, ms: ms, at: Date())
+            let same = cached.map { $0.key == target.key } ?? false
+            let event = self.event(cached: same ? cached : nil, target: target)
+            self.lastFieldLength = target.fieldLength
+            if let c = cached, same {
+                let due: Bool
+                if c.source == .ocr, Self.smartRefresh {
+                    due = ContextRefreshPolicy.mayCheck(now: Date(), lastCheck: c.at, event: event)
+                } else {
+                    due = Date().timeIntervalSince(c.at) >= Self.refreshInterval
+                }
+                if !due { self.inflight = nil; return }
+            }
+            let (text, source, signature, unchanged) = await Self.collect(target, previous: same ? cached : nil)
+            let ms = Int(Date().timeIntervalSince(t0) * 1000)
+            self.snapshot = Snapshot(key: target.key, text: text, source: source, ms: ms, at: Date(), signature: signature)
             self.inflight = nil
+            if unchanged { Diagnostics.log("autocomplete: context screen unchanged, OCR skipped ms=\(ms)") }
             self.onUpdate?(source, text.count, ms)
         }
+    }
+
+    /// What happened since the last look at this window: a sent message (the field was emptied) or scrolling.
+    private func event(cached: Snapshot?, target: Target) -> ContextRefreshPolicy.Event {
+        guard let c = cached else { return .windowChanged }
+        if let before = lastFieldLength, let now = target.fieldLength, before >= 4, now <= 2 { return .sent }
+        if let s = lastScroll, s > c.at, Date().timeIntervalSince(s) >= 0.6 { return .scrolled }
+        return .none
     }
 
     /// Context for the current field if it is ready (or becomes ready within `limit`); nil otherwise.
@@ -90,6 +125,8 @@ final class ScreenContext {
         let key: String
         let window: AXUIElement
         let focused: AXUIElement
+        /// Characters in the input field (nil: the app does not expose its value).
+        let fieldLength: Int?
         let windowFrame: CGRect
         let fieldFrame: CGRect
 
@@ -107,19 +144,22 @@ final class ScreenContext {
             let title: String = AX.attr(window, kAXTitleAttribute) ?? ""
             // Key: window + field identity. The title is hashed (chat switch in Telegram changes it), never stored as text.
             let key = "\(pid)|\(CFHash(window))|\(CFHash(focused))|\(title.hashValue)"
-            return Target(key: key, window: window, focused: focused, windowFrame: wf, fieldFrame: ff)
+            let value: String? = AX.attr(focused, kAXValueAttribute)
+            return Target(key: key, window: window, focused: focused, fieldLength: value?.count, windowFrame: wf, fieldFrame: ff)
         }
     }
 
     // MARK: - Collecting
 
-    private static func collect(_ t: Target) async -> (String, Source) {
+    /// `unchanged`: the screen looked the same as at the last OCR, so `previous.text` is returned as it was.
+    private static func collect(_ t: Target, previous: Snapshot?) async -> (text: String, source: Source, signature: FrameChange.Signature?, unchanged: Bool) {
         let ax = await Task.detached(priority: .utility) { axText(t) }.value
-        if ax.count >= minAXChars { return (ax, .ax) }
-        guard ocrAllowed, CGPreflightScreenCaptureAccess() else { return (ax, ax.isEmpty ? .none : .ax) }
-        let ocr = await ocrText(t)
-        if ocr.count > ax.count { return (ocr, .ocr) }
-        return (ax, ax.isEmpty ? .none : .ax)
+        if ax.count >= minAXChars { return (ax, .ax, nil, false) }
+        guard ocrAllowed, CGPreflightScreenCaptureAccess() else { return (ax, ax.isEmpty ? .none : .ax, nil, false) }
+        let prev = (smartRefresh && previous?.source == .ocr) ? previous : nil
+        let r = await ocrText(t, previous: prev)
+        if r.text.count > ax.count { return (r.text, .ocr, r.signature, r.unchanged) }
+        return (ax, ax.isEmpty ? .none : .ax, nil, false)
     }
 
     // MARK: Accessibility
@@ -163,23 +203,44 @@ final class ScreenContext {
 
     // MARK: OCR
 
-    private static func ocrText(_ t: Target) async -> String {
+    private static func ocrText(_ t: Target, previous: Snapshot?) async -> (text: String, signature: FrameChange.Signature?, unchanged: Bool) {
         let w = t.windowFrame, f = t.fieldFrame
         // The window area above the input field, in the field's column.
         var x0 = max(w.minX, f.minX - 8), x1 = min(w.maxX, f.maxX + 8)
         if x1 - x0 < 250 { x0 = w.minX; x1 = w.maxX }
         let y0 = w.minY, y1 = min(w.maxY, f.minY)
-        guard y1 - y0 > 80, x1 - x0 > 120 else { return "" }
+        guard y1 - y0 > 80, x1 - x0 > 120 else { return ("", nil, false) }
         let axRect = CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
-        guard let mainH = NSScreen.screens.first?.frame.height else { return "" }
+        guard let mainH = NSScreen.screens.first?.frame.height else { return ("", nil, false) }
         let cocoa = NSRect(x: axRect.minX, y: mainH - axRect.maxY, width: axRect.width, height: axRect.height)
-        guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(cocoa) }) else { return "" }
+        guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(cocoa) }) else { return ("", nil, false) }
         let clipped = cocoa.intersection(screen.frame)
-        guard let image = try? await ScreenCaptureController.snapshot(clipped, on: screen),
-              let result = try? await ImageOCR.recognize(image) else { return "" }
+        guard let image = try? await ScreenCaptureController.snapshot(clipped, on: screen) else { return ("", nil, false) }
+        // Same picture as at the last OCR (the region excludes the input field, so typing does not change it)?
+        let sig = smartRefresh ? await Task.detached(priority: .utility) { ScreenContext.signature(of: image) }.value : nil
+        if let sig, let prev = previous, let old = prev.signature, !FrameChange.isChanged(old: old, new: sig) {
+            return (prev.text, sig, true)
+        }
+        guard let result = try? await ImageOCR.recognize(image) else { return ("", nil, false) }
         // Paragraphs come in reading order, top to bottom; the newest messages are at the bottom.
         let lines = result.paragraphs.map(\.text)
-        return tail(lines)
+        return (tail(lines), sig, false)
+    }
+
+    /// 128×128 grayscale redraw of the snapshot → 32×32 signature (`FrameChange`). ~0.1 ms.
+    nonisolated private static func signature(of image: CGImage) -> FrameChange.Signature? {
+        let side = 128
+        var px = [UInt8](repeating: 0, count: side * side)
+        let ok: Bool = px.withUnsafeMutableBytes { raw in
+            guard let c = CGContext(data: raw.baseAddress, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side,
+                                    space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return false }
+            c.interpolationQuality = .high
+            c.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return true
+        }
+        guard ok, let sig = FrameChange.signature(luma: px, width: side, height: side) else { return nil }
+        // Keep the region's real size in the signature: another size (the field grew) counts as a change.
+        return FrameChange.Signature(cells: sig.cells, width: image.width, height: image.height)
     }
 
     // MARK: Text cleanup

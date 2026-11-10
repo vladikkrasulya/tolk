@@ -23,6 +23,7 @@ final class SettingsViewController: NSViewController {
     override func viewWillAppear() {
         super.viewWillAppear()
         model.refreshStatus()
+        model.refreshStats()
     }
 
     override func viewWillDisappear() {
@@ -80,6 +81,19 @@ final class SettingsModel: ObservableObject {
     /// Why the autocomplete model is not running (nil = fine); set by AppDelegate. «Повторить» calls `onRetryAutocomplete`.
     @Published var acError: String?
     var onRetryAutocomplete: (() -> Void)?
+    /// Autocomplete statistics for the «Статистика» block (numbers only).
+    @Published var acStats = ACStatsData()
+
+    func refreshStats() {
+        guard tab == .autocomplete else { return }
+        let d = ACStatsSource.provider()
+        if d != acStats { acStats = d }
+    }
+
+    func resetStats() {
+        ACStatsSource.reset()
+        acStats = ACStatsData()
+    }
 
     private let path: String
     private var saveTask: Task<Void, Never>?
@@ -423,6 +437,7 @@ struct SettingsView: View {
                     copySection
                 case .autocomplete:
                     autocompleteSection
+                    ACStatsSection(model: model)
                     acInstructionsSection
                     acContextSection
                     acTypingSection
@@ -438,7 +453,8 @@ struct SettingsView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .safeAreaInset(edge: .bottom) { footer }
-        .onReceive(timer) { _ in model.refreshStatus() }
+        .onReceive(timer) { _ in model.refreshStatus(); model.refreshStats() }
+        .onChange(of: model.tab) { _, _ in model.refreshStats() }
     }
 
     /// Short explanation under a setting.

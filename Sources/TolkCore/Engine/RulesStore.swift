@@ -2,6 +2,39 @@ import Foundation
 
 /// Reads `rules.md` (style section + glossary lines `- term → перевод`), re-reading on mtime change,
 /// and picks only the glossary lines relevant to a given text.
+/// A glossary entry that fired for a text: `source` as found in the original, `targets` the accepted renderings.
+public struct GlossaryHit: Sendable, Equatable {
+    public let source: String
+    public let targets: [String]
+    public init(source: String, targets: [String]) { self.source = source; self.targets = targets }
+    /// «floor price → минимальная цена»
+    public var title: String { "\(source) → \(targets.joined(separator: " / "))" }
+}
+
+/// A glossary rendering located in a translation.
+public struct GlossaryMark: Sendable, Equatable {
+    public let hit: GlossaryHit
+    public let range: NSRange
+}
+
+public extension RulesStore {
+    /// Where the glossary renderings of `hits` stand in `translation` (first accepted form that occurs; no overlaps).
+    static func marks(of hits: [GlossaryHit], in translation: String) -> [GlossaryMark] {
+        let full = NSRange(translation.startIndex..., in: translation)
+        var out: [GlossaryMark] = []
+        for h in hits {
+            for t in h.targets {
+                guard let re = pattern(for: t) else { continue }
+                for m in re.matches(in: translation, range: full)
+                where !out.contains(where: { NSIntersectionRange($0.range, m.range).length > 0 }) {
+                    out.append(GlossaryMark(hit: h, range: m.range))
+                }
+            }
+        }
+        return out.sorted { $0.range.location < $1.range.location }
+    }
+}
+
 public final class RulesStore: @unchecked Sendable {
     public let path: String
     private let lock = NSLock()
@@ -49,6 +82,36 @@ public final class RulesStore: @unchecked Sendable {
             }
         }
         return parts.joined(separator: "\n\n")
+    }
+
+    /// Glossary pairs that fire for `text` (the same lines `promptBlock` sends to the model), oriented INTO `target`.
+    /// `source` is the form found in `text`, `target` the way the glossary wants it written (variants joined by « / »).
+    public func glossaryHits(in text: String, target: Language) -> [GlossaryHit] {
+        let p = current()
+        let toCyrillic = target == .russian || target == .ukrainian || target == .bulgarian || target == .kazakh
+        let range = NSRange(text.startIndex..., in: text)
+        var out: [GlossaryHit] = []
+        for line in p.glossary where line.patterns.contains(where: { $0.firstMatch(in: text, range: range) != nil }) {
+            var body = Self.orient(line.text, toCyrillic: toCyrillic)
+            if body.hasPrefix("- ") { body.removeFirst(2) }
+            for pair in body.components(separatedBy: ";") {
+                let sides = pair.components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }
+                guard sides.count == 2 else { continue }
+                let from = Self.variants(sides[0]), to = Self.variants(sides[1])
+                guard let hit = from.first(where: { v in Self.pattern(for: v).map { $0.firstMatch(in: text, range: range) != nil } ?? false }),
+                      !to.isEmpty else { continue }
+                let h = GlossaryHit(source: hit, targets: to)
+                if !out.contains(h) { out.append(h) }
+            }
+        }
+        return out
+    }
+
+    /// "cap / daily cap (капа)" -> ["cap", "daily cap"]: alternatives split by « / » and «,», comments in brackets dropped.
+    static func variants(_ side: String) -> [String] {
+        let clean = side.replacingOccurrences(of: "\\([^)]*\\)", with: " ", options: .regularExpression)
+        return clean.components(separatedBy: CharacterSet(charactersIn: "/,"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { $0.count >= 2 }
     }
 
     /// "- без жести → nothing explicit; a → b" turned so that each pair points into the target script.
