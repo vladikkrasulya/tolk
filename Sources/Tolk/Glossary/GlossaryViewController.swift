@@ -144,10 +144,10 @@ final class GlossaryViewController: NSViewController {
 
         let box = NSBox()
         box.boxType = .custom
-        box.cornerRadius = 8
+        box.cornerRadius = TolkStyle.cardRadius
         box.borderColor = .separatorColor
-        box.borderWidth = 1
-        box.fillColor = .controlBackgroundColor
+        box.borderWidth = 0.5
+        box.fillColor = TolkStyle.nsCard
         box.contentViewMargins = .zero
         box.contentView = scroll
 
@@ -248,10 +248,10 @@ final class GlossaryViewController: NSViewController {
         scroll.borderType = .noBorder
         let box = NSBox()
         box.boxType = .custom
-        box.cornerRadius = 8
+        box.cornerRadius = TolkStyle.cardRadius
         box.borderColor = .separatorColor
-        box.borderWidth = 1
-        box.fillColor = .textBackgroundColor
+        box.borderWidth = 0.5
+        box.fillColor = TolkStyle.nsCard
         box.contentViewMargins = .zero
         box.contentView = scroll
 

@@ -262,7 +262,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         let left = NSView()
         left.wantsLayer = true
         left.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.06).cgColor
-        left.layer?.cornerRadius = 10
+        left.layer?.cornerRadius = TolkStyle.cardRadius
         preview = ImagePreviewView()
         preview.translatesAutoresizingMaskIntoConstraints = false
         preview.onClickBox = { [weak self] i in self?.selectParagraph(i) }
@@ -428,8 +428,8 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         scroll.drawsBackground = true
         scroll.backgroundColor = .textBackgroundColor
         scroll.wantsLayer = true
-        scroll.layer?.cornerRadius = 8
-        scroll.layer?.borderWidth = 1
+        scroll.layer?.cornerRadius = TolkStyle.cardRadius
+        scroll.layer?.borderWidth = 0.5
         scroll.layer?.borderColor = NSColor.separatorColor.cgColor
         let tv: NSTextView = editable ? SourceTextView() : NSTextView()
         tv.isEditable = editable

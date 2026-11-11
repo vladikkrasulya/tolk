@@ -68,10 +68,27 @@ final class SettingsViewController: NSViewController {
 // MARK: - Tabs
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case translate, autocomplete, general
+    case translate, autocomplete, models, stats, log, general
     var id: String { rawValue }
     var title: String {
-        switch self { case .translate: "Перевод"; case .autocomplete: "Автодополнение"; case .general: "Общие" }
+        switch self {
+        case .translate: "Перевод"
+        case .autocomplete: "Автодополнение"
+        case .models: "Модели"
+        case .stats: "Статистика"
+        case .log: "Журнал"
+        case .general: "Общие"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .translate: "character.bubble"
+        case .autocomplete: "text.cursor"
+        case .models: "cpu"
+        case .stats: "chart.bar"
+        case .log: "list.bullet.rectangle"
+        case .general: "gearshape"
+        }
     }
     static let key = "settingsTab"
     static var saved: SettingsTab {
@@ -117,15 +134,148 @@ final class SettingsModel: ObservableObject {
     /// Autocomplete statistics for the «Статистика» block (numbers only).
     @Published var acStats = ACStatsData()
 
+    /// Translator usage for the «Статистика» tab (numbers only).
+    @Published var usage = UsageData()
+    /// «Статистика»: period in days (nil = all time).
+    @Published var statsPeriod: Int? = 7
+    /// Is the suggestion model loaded and answering (set by AppDelegate)?
+    @Published var acReady = false
+    @Published var hasScreenRecording = CGPreflightScreenCaptureAccess()
+    /// «Журнал» tab.
+    @Published var logLines: [String] = []
+    @Published var logFilter = LogFilter.all
+    @Published var logSearch = ""
+    private var logStamp: Date?
+    /// «Общие → Данные на диске».
+    @Published var storage: [StorageItem] = []
+    let library = ModelLibrary.shared
+    let server = ServerModels()
+
     func refreshStats() {
-        guard tab == .autocomplete else { return }
-        let d = ACStatsSource.provider()
-        if d != acStats { acStats = d }
+        switch tab {
+        case .stats:
+            let d = ACStatsSource.provider()
+            if d != acStats { acStats = d }
+            if !UsageStore.shared.data.importedHistory { UsageStore.shared.importHistoryIfNeeded(HistoryStore().all()) }
+            let u = UsageStore.shared.data
+            if u != usage { usage = u }
+        case .log:
+            refreshLog()
+        case .models:
+            library.refresh()
+        default:
+            break
+        }
     }
 
     func resetStats() {
         ACStatsSource.reset()
         acStats = ACStatsData()
+        UsageStore.shared.reset()
+        usage = UsageStore.shared.data
+    }
+
+    // MARK: Log
+
+    func refreshLog(force: Bool = false) {
+        let stamp = (try? FileManager.default.attributesOfItem(atPath: Diagnostics.logURL.path))?[.modificationDate] as? Date
+        guard force || stamp != logStamp || logLines.isEmpty else { return }
+        logStamp = stamp
+        let lines = Diagnostics.tail(limit: 800)
+        if lines != logLines { logLines = lines }
+    }
+
+    var shownLogLines: [String] {
+        let q = logSearch.trimmingCharacters(in: .whitespaces).lowercased()
+        return logLines.filter { logFilter.matches($0) && (q.isEmpty || $0.lowercased().contains(q)) }
+    }
+
+    func clearLog() {
+        Diagnostics.clearLog()
+        logLines = []
+        logStamp = nil
+        refreshStorage()
+    }
+
+    // MARK: Storage
+
+    func refreshStorage() {
+        let fm = FileManager.default
+        func size(_ path: String) -> Int64 {
+            let p = (path as NSString).expandingTildeInPath
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: p, isDirectory: &isDir) else { return 0 }
+            if !isDir.boolValue { return Int64((try? fm.attributesOfItem(atPath: p)[.size] as? Int) ?? 0) }
+            var total: Int64 = 0
+            if let e = fm.enumerator(at: URL(fileURLWithPath: p), includingPropertiesForKeys: [.fileSizeKey]) {
+                for case let u as URL in e { total += Int64((try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+            }
+            return total
+        }
+        let support = "~/Library/Application Support/Tolk"
+        let items: [(String, String, String)] = [
+            ("Настройки", TolkConfig.defaultPath, "Всё, что на этой странице. Можно скопировать на другой Mac."),
+            ("Глоссарий и правила", config.effectiveRulesPath, "Активный профиль; редактируется в разделе «Глоссарий»."),
+            ("История переводов", HistoryStore.defaultPath, "Только на этом Mac. Выключается и очищается в разделе «История»."),
+            ("Память стиля", support + "/style.db", "Зашифрованные примеры ваших сообщений для подсказок."),
+            ("Статистика", support + "/usage-stats.json", "Только числа — без текста."),
+            ("Модели подсказок", ModelLibrary.folderDisplay, "Файлы .gguf; управление во вкладке «Модели»."),
+            ("Журнал", "~/Library/Logs/Tolk", "События работы программы, без переводимых текстов."),
+        ]
+        let out = items.map { StorageItem(title: $0.0, path: $0.1, note: $0.2, bytes: size($0.1)) }
+        if out != storage { storage = out }
+    }
+
+    func reveal(_ path: String) {
+        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        if FileManager.default.fileExists(atPath: url.path) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        else { NSWorkspace.shared.open(url.deletingLastPathComponent()) }
+    }
+
+    // MARK: Defaults
+
+    /// Back to the measured defaults; instructions, the model and the app lists stay.
+    func resetAutocompleteTuning() {
+        let d = TolkConfig()
+        config.autocompleteFrequency = d.autocompleteFrequency
+        config.autocompleteLength = d.autocompleteLength
+        config.autocompletePatient = d.autocompletePatient
+        config.autocompletePatientDelay = d.autocompletePatientDelay
+        config.autocompleteCaretBubble = d.autocompleteCaretBubble
+        config.autocompleteScreenContext = d.autocompleteScreenContext
+        config.autocompleteUseGlossary = d.autocompleteUseGlossary
+        config.autocompleteEmoji = d.autocompleteEmoji
+        config.autocorrect = d.autocorrect
+        config.autocompleteWordPreference = d.autocompleteWordPreference
+        config.autocompleteBatteryRare = d.autocompleteBatteryRare
+        config.autocompleteBatteryNoScreen = d.autocompleteBatteryNoScreen
+        config.autocompleteBatteryShort = d.autocompleteBatteryShort
+    }
+
+    func resetTranslateTuning() {
+        let d = TolkConfig()
+        config.doubleCopyInterval = d.doubleCopyInterval
+        config.keepWarmMinutes = d.keepWarmMinutes
+        config.toneByApp = TolkConfig.defaultToneByApp
+    }
+
+    // MARK: Server models
+
+    /// Address the «Модели» tab talks to: the home one, or the outside one (with its headers) when home is empty.
+    func configureServer() {
+        let lan = config.ollamaURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if lan.isEmpty { server.configure(base: config.remoteURL, headers: config.remoteHeaders) }
+        else { server.configure(base: lan, headers: [:]) }
+    }
+
+    func requestScreenRecording() {
+        if !CGRequestScreenCaptureAccess(), let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func addOffApp(_ id: String) {
+        if !config.autocompleteOffApps.contains(id) { config.autocompleteOffApps.append(id) }
     }
 
     private let path: String
@@ -193,6 +343,8 @@ final class SettingsModel: ObservableObject {
         if access != hasAccessibility { hasAccessibility = access }
         let login = LaunchAgent.isEnabled
         if login != launchAtLogin { launchAtLogin = login }
+        let screen = CGPreflightScreenCaptureAccess()
+        if screen != hasScreenRecording { hasScreenRecording = screen }
     }
 
     func openAccessibilitySettings() {
@@ -448,572 +600,44 @@ enum LaunchAgent {
     }
 }
 
-// MARK: - View
+// MARK: - Small models of the page
 
-struct SettingsView: View {
-    @ObservedObject var model: SettingsModel
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $model.tab) {
-                ForEach(SettingsTab.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 22)
-            .padding(.top, 12)
-            .padding(.bottom, 4)
-            .frame(maxWidth: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
-            Form {
-                switch model.tab {
-                case .translate:
-                    serverSection
-                    fallbackSection
-                    remoteSection
-                    languageSection
-                    rulesSection
-                    toneSection
-                    copySection
-                case .autocomplete:
-                    autocompleteSection
-                    ACStatsSection(model: model)
-                    acInstructionsSection
-                    acContextSection
-                    acTypingSection
-                    typeTranslateSection
-                    acStyleSection
-                    acOffAppsSection
-                case .general:
-                    launchSection
-                    HotKeysSection()
-                    accessSection
-                    aboutSection
-                }
-            }
-            .formStyle(.grouped)
-        }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .safeAreaInset(edge: .bottom) { footer }
-        .onChange(of: model.tab) { _, _ in model.refreshStats() }
-    }
-
-    /// Short explanation under a setting.
-    private func hint(_ text: String) -> some View {
-        Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-    }
-
-    // MARK: Перевод
-
-    private var serverSection: some View {
-        Section {
-            TextField("Адрес в домашней сети", text: $model.config.ollamaURL, prompt: Text("http://192.168.1.13:11434"))
-            hint("Где работает Ollama с моделью перевода. Сначала Tolk пробует этот адрес, затем адрес вне дома.")
-            ModelPicker(title: "Модель перевода", selection: $model.config.model, models: model.translateModels)
-            hint("Какая модель переводит. Для профиля глоссария можно выбрать свою (см. «Профили глоссария»).")
-            HStack(alignment: .firstTextBaseline) {
-                Button("Проверить соединение") { model.checkConnection() }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    CheckLabel(title: "Дома", state: model.lanCheck)
-                    if !model.config.remoteURL.trimmingCharacters(in: .whitespaces).isEmpty {
-                        CheckLabel(title: "Вне дома", state: model.remoteCheck)
-                    }
-                }
-            }
-        } header: {
-            Text("Сервер и модель перевода")
-                .onAppear { if model.availableModels.isEmpty { model.checkConnection() } }
-        }
-    }
-
-    private var fallbackSection: some View {
-        Section {
-            Picker("Если сервер недоступен", selection: $model.config.fallback) {
-                ForEach(FallbackProvider.allCases, id: \.self) { f in
-                    Text(f.title).tag(f)
-                        .disabled(f == .apple && !AppleTranslationProvider.isSupportedOnThisMac)
-                }
-            }
-            hint(fallbackHint(model.config.fallback))
-        } header: {
-            Text("Запасной перевод")
-        }
-    }
-
-    private var remoteSection: some View {
-        Section {
-            TextField("Адрес вне дома", text: $model.config.remoteURL, prompt: Text("https://tolk.example.com"))
-            hint("Необязательно. Например, адрес Cloudflare Tunnel. Пустой адрес — только домашняя сеть.")
-            ForEach($model.headers) { $row in
-                HStack(spacing: 8) {
-                    TextField("", text: $row.key, prompt: Text("Заголовок"))
-                        .labelsHidden()
-                        .frame(maxWidth: 220)
-                    SecureField("", text: $row.value, prompt: Text("Значение"))
-                        .labelsHidden()
-                    Button {
-                        model.headers.removeAll { $0.id == row.id }
-                    } label: {
-                        Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Удалить заголовок")
-                }
-            }
-            Button {
-                model.headers.append(HeaderRow(key: "", value: ""))
-            } label: {
-                Label("Добавить заголовок доступа", systemImage: "plus")
-            }
-            .buttonStyle(.borderless)
-            hint("Заголовки для адреса вне дома, например CF-Access-Client-Id и CF-Access-Client-Secret.")
-        } header: {
-            Text("Доступ из дома")
-        }
-    }
-
-    private var languageSection: some View {
-        Section {
-            languagePicker("Основной язык", selection: $model.config.primaryLanguage)
-            languagePicker("Второй язык", selection: $model.config.secondaryLanguage)
-            hint("Текст на основном языке (и на украинском) переводится на второй, всё остальное — на основной.")
-        } header: {
-            Text("Языки по умолчанию")
-        }
-    }
-
-    private func languagePicker(_ title: String, selection: Binding<Language>) -> some View {
-        Picker(title, selection: selection) {
-            ForEach(Language.allCases, id: \.self) { Text("\($0.flag)  \(UIText.capitalized($0))").tag($0) }
-        }
-    }
-
-    private var copySection: some View {
-        Section {
-            LabeledContent("Двойное ⌘C") {
-                HStack {
-                    Slider(value: $model.config.doubleCopyInterval, in: 0.2...0.8, step: 0.05)
-                        .frame(maxWidth: 220)
-                    Text(String(format: "%.2f с", model.config.doubleCopyInterval))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .frame(width: 52, alignment: .trailing)
-                }
-            }
-            hint("Сколько секунд может пройти между двумя нажатиями ⌘C, чтобы Tolk показал перевод выделенного.")
-        } header: {
-            Text("Двойной ⌘C")
-        }
-    }
-
-    // MARK: Общие
-
-    private var launchSection: some View {
-        Section {
-            Toggle("Запускать при входе в систему", isOn: Binding(
-                get: { model.launchAtLogin },
-                set: { model.setLaunchAtLogin($0) }))
-            .disabled(!LaunchAgent.canEnable && !model.launchAtLogin)
-            hint("Tolk сам запустится в строке меню после входа в систему.")
-            if let err = model.launchError {
-                Text(err).font(.callout).foregroundStyle(.red)
-            }
-        } header: {
-            Text("Запуск")
-        }
-    }
-
-    // MARK: Автодополнение
-
-    @ViewBuilder private var autocompleteSection: some View {
-        Section {
-            Toggle("Автодополнение (Tab)", isOn: $model.config.autocomplete)
-            if model.config.autocomplete, let err = model.acError {
-                HStack {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text("Модель не работает: \(err)").font(.callout).foregroundStyle(.red)
-                    Spacer()
-                    Button("Повторить") { model.onRetryAutocomplete?() }
-                }
-            }
-            hint("Серый текст у курсора в любой программе: Tab принимает слово, → всё, Esc скрывает. Модель работает локально на этом Mac.")
-            HStack {
-                Picker("Модель", selection: $model.config.autocompleteModel) {
-                    ForEach(model.ggufModels(), id: \.self) { path in
-                        Text((path as NSString).lastPathComponent).tag(path)
-                    }
-                }
-                Button("Показать в Finder") { model.revealAutocompleteModel() }
-            }
-            hint("Файлы .gguf из папки ~/Library/Application Support/Tolk/models.")
-            Picker("Длина подсказки", selection: $model.config.autocompleteLength) {
-                Text("Короткая (до 3 слов)").tag("short")
-                Text("Средняя (до 6)").tag("medium")
-                Text("Длинная (до 12)").tag("long")
-            }
-            hint("Чем длиннее подсказка, тем дольше модель её считает.")
-            Picker("Частота подсказок", selection: $model.config.autocompleteFrequency) {
-                Text("Реже, но точнее").tag("rare")
-                Text("Обычно").tag("normal")
-                Text("Чаще").tag("often")
-            }
-            hint("Реже — подсказка появляется, только когда модель уверена (около 2 из 3 первых слов верные). Чаще — подсказок больше, но больше промахов.")
-            Toggle("Контекст со снимка экрана (распознавание текста)", isOn: $model.config.autocompleteScreenContext)
-            hint("Если текст окна не читается напрямую (Slack, Telegram, Teams), Tolk распознаёт его на снимке экрана. Нужно разрешение «Запись экрана».")
-        } header: {
-            Text("Основное")
-        }
-        Section {
-            Toggle("Подсказывать реже", isOn: $model.config.autocompleteBatteryRare)
-            Toggle("Без снимков экрана", isOn: $model.config.autocompleteBatteryNoScreen)
-            Toggle("Короткие подсказки", isOn: $model.config.autocompleteBatteryShort)
-            hint("Действует, пока Mac работает от батареи: меньше нагрузка, тише вентилятор.")
-        } header: {
-            Text("На батарее")
-        }
-    }
-
-    private var acInstructionsSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Общие инструкции").font(.callout)
-                TextEditor(text: $model.config.autocompleteInstructions)
-                    .font(.body).frame(minHeight: 54, maxHeight: 90)
-                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.3)))
-                hint("Например: «пиши коротко», «на Вы», «без эмодзи». Действуют везде.")
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Инструкции по программам").font(.callout)
-                    Spacer()
-                    Menu("Добавить программу") {
-                        ForEach(SettingsModel.runningApps(), id: \.id) { app in
-                            Button(app.name) { model.addAppInstruction(app.id) }
-                                .disabled(model.config.autocompleteAppInstructions[app.id] != nil)
-                        }
-                    }
-                    .fixedSize()
-                }
-                if model.config.autocompleteAppInstructions.isEmpty {
-                    hint("Нет. Выберите запущенную программу, чтобы задать ей свои инструкции.")
-                }
-                ForEach(model.config.autocompleteAppInstructions.keys.sorted(), id: \.self) { id in
-                    HStack {
-                        Text(SettingsModel.appName(id)).frame(width: 120, alignment: .leading).lineLimit(1)
-                        TextField("Инструкции для этой программы", text: Binding(
-                            get: { model.config.autocompleteAppInstructions[id] ?? "" },
-                            set: { model.config.autocompleteAppInstructions[id] = $0 }))
-                        Button(role: .destructive) {
-                            model.config.autocompleteAppInstructions[id] = nil
-                        } label: { Image(systemName: "minus.circle") }
-                        .buttonStyle(.borderless)
-                    }
-                }
-            }
-        } header: {
-            Text("Инструкции")
-        }
-    }
-
-    private var acContextSection: some View {
-        Section {
-            Toggle("Глоссарий и тон", isOn: $model.config.autocompleteUseGlossary)
-            hint("Подсказки используют термины активного профиля глоссария и тон программы (см. вкладку «Перевод»).")
-            Toggle("Буфер обмена", isOn: $model.config.autocompleteClipboard)
-            hint("Недавно скопированный короткий текст попадает в подсказку. Пароли и ключи отбрасываются.")
-        } header: {
-            Text("Что учитывать")
-        }
-    }
-
-    private var acTypingSection: some View {
-        Section {
-            Toggle("Эмодзи (:fire → 🔥)", isOn: $model.config.autocompleteEmoji)
-            hint("Набрали двоеточие и слово, например :fire или :спасибо, — Tab вставит эмодзи.")
-            Toggle("Исправлять опечатки", isOn: $model.config.autocorrect)
-            hint("Опечатка в последнем слове показывается серым исправлением, Tab применяет.")
-        } header: {
-            Text("Помощь при наборе")
-        }
-    }
-
-    private var typeTranslateSection: some View {
-        let names = model.config.typeTranslateApps.filter(\.value).keys.sorted()
-        return Section {
-            Toggle("Включать автоматически, если собеседник пишет на другом языке", isOn: $model.config.typeTranslateAuto)
-            hint("Пишете по-русски — под полем появляется перевод на язык собеседника, Tab вставляет его вместо вашего текста, Esc оставляет ваш. Tolk сам ничего не отправляет. Включить или выключить для текущего приложения: горячая клавиша (по умолчанию ⌃⌥R, меняется во вкладке «Общие») или пункт в меню строки меню.")
-            if !names.isEmpty {
-                HStack {
-                    Text("Включено в: " + names.joined(separator: ", ")).font(.callout).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Выключить везде") { model.config.typeTranslateApps = [:] }
-                }
-            }
-        } header: {
-            Text("Перевод при наборе")
-        }
-    }
-
-    private var acStyleSection: some View {
-        Section {
-            Toggle("Учиться на моих сообщениях", isOn: $model.config.autocompleteLearnStyle)
-            hint("Запоминаются только на этом Mac: сообщения, в которых вы приняли подсказку, и сами принятые фразы. Они подсказывают модели ваш стиль и слова.")
-            Toggle("Запоминать все отправленные сообщения", isOn: $model.config.autocompleteRecordAll)
-            hint("По умолчанию выключено: в память попадают только сообщения с принятой подсказкой.")
-            Picker("Выбор слов", selection: $model.config.autocompleteWordPreference) {
-                Text("Выключен").tag("off")
-                Text("Средний").tag("medium")
-                Text("Сильный").tag("strong")
-            }
-            hint("Модель охотнее предлагает слова, которые вы часто пишете сами. Работает, только пока включено «Учиться на моих сообщениях».")
-            Button("Удалить выученное…", role: .destructive) { model.confirmDeleteLearned() }
-        } header: {
-            Text("Ваш стиль")
-        }
-    }
-
-    private var acOffAppsSection: some View {
-        Section {
-            if model.config.autocompleteOffApps.isEmpty {
-                Text("Выключенных программ нет.").font(.callout).foregroundStyle(.secondary)
-            } else {
-                ForEach(model.config.autocompleteOffApps, id: \.self) { id in
-                    HStack {
-                        Text(SettingsModel.appName(id))
-                        Text(id).font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button(role: .destructive) {
-                            model.config.autocompleteOffApps.removeAll { $0 == id }
-                        } label: { Image(systemName: "minus.circle") }
-                        .buttonStyle(.borderless)
-                    }
-                }
-            }
-            hint("В этих программах автодополнение молчит (терминалы, редакторы кода). Быстро выключить в текущей — в меню Tolk.")
-        } header: {
-            Text("Выключено в программах")
-        }
-    }
-
-    // Тон по программам
-
-    private var toneSection: some View {
-        Section {
-            if model.config.toneByApp.isEmpty {
-                Text("Нет. Тон выбирается автоматически по тексту.").font(.callout).foregroundStyle(.secondary)
-            }
-            ForEach(model.config.toneByApp.keys.sorted(), id: \.self) { id in
-                HStack {
-                    Text(SettingsModel.appName(id))
-                    Text(id).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    Spacer()
-                    Picker("", selection: Binding(
-                        get: { model.config.toneByApp[id] ?? .auto },
-                        set: { model.config.toneByApp[id] = $0 })) {
-                        Text("Авто").tag(Tone.auto)
-                        Text("Чат").tag(Tone.chat)
-                        Text("Письмо").tag(Tone.formal)
-                    }
-                    .labelsHidden().fixedSize()
-                    Button(role: .destructive) { model.config.toneByApp[id] = nil } label: { Image(systemName: "minus.circle") }
-                        .buttonStyle(.borderless)
-                }
-            }
-            Menu("Добавить программу") {
-                ForEach(SettingsModel.runningApps(), id: \.id) { app in
-                    Button(app.name) { model.addToneApp(app.id) }
-                        .disabled(model.config.toneByApp[app.id] != nil)
-                }
-            }
-            .fixedSize()
-        } header: {
-            Text("Тон по программам")
-        } footer: {
-            Text("Общее для перевода и подсказок автодополнения. Какой тон использовать, когда активна эта программа: Чат — разговорно, Официально — вежливо.")
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    // Правила
-
-    private var rulesSection: some View {
-        Section {
-            Picker("Активный профиль", selection: $model.config.activeProfileID) {
-                ForEach(model.config.profiles) { p in Text(p.name).tag(p.id) }
-            }
-            .pickerStyle(.segmented)
-            ForEach($model.config.profiles) { $p in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        TextField("Название", text: $p.name).frame(maxWidth: 160)
-                        if p.id == model.config.activeProfileID {
-                            Text("активный").font(.caption).foregroundStyle(.green)
-                        }
-                        Spacer()
-                        if model.config.profiles.count > 1 {
-                            Button(role: .destructive) { model.removeProfile(p.id) } label: { Image(systemName: "minus.circle") }
-                                .buttonStyle(.borderless).help("Удалить профиль (файл глоссария останется)")
-                        }
-                    }
-                    HStack {
-                        Text(p.rulesPath).font(.callout).foregroundStyle(.secondary)
-                            .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                        Spacer()
-                        Button("Файл…") { model.chooseRulesFile(forProfile: p.id) }
-                    }
-                    ModelPicker(title: "Модель профиля", selection: Binding(
-                        get: { p.model ?? "" }, set: { p.model = $0.isEmpty ? nil : $0 }),
-                        models: model.translateModels, allowDefault: true)
-                }
-                .padding(.vertical, 2)
-            }
-            Button { model.addProfile() } label: { Label("Добавить профиль", systemImage: "plus") }
-                .buttonStyle(.borderless)
-        } header: {
-            Text("Профили глоссария")
-        } footer: {
-            Text("У каждого профиля свой глоссарий и стиль — например, «Работа» со сленгом adtech и «Дом» для книг и документов. Переключать можно и из меню Tolk. Редактировать глоссарий активного профиля — в разделе «Глоссарий».")
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private func fallbackHint(_ f: FallbackProvider) -> String {
-        switch f {
-        case .google:
-            return "Быстро и бесплатно, но текст уходит в Google. Без глоссария, тона и «причесать»."
-        case .apple:
-            return AppleTranslationProvider.isSupportedOnThisMac
-                ? "Прямо на этом Mac, без интернета, текст никуда не уходит. Качество проще Google. Нужны скачанные языки: Системные настройки → Основные → Язык и регион → Языки перевода."
-                : "Нужна macOS 26 или новее."
-        case .none:
-            return "Без домашнего сервера Tolk покажет ошибку — ничего не уходит в интернет."
-        }
-    }
-
-    // Доступ
-
-    private var accessSection: some View {
-        Section {
-            HStack {
-                Image(systemName: model.hasAccessibility ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .foregroundStyle(model.hasAccessibility ? .green : .orange)
-                    .font(.title3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Универсальный доступ")
-                    Text(model.hasAccessibility ? "Есть — двойное ⌘C работает в любых приложениях"
-                                                : "Нет — без него двойное ⌘C не сработает")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if !model.hasAccessibility {
-                    Button("Открыть настройки…") { model.openAccessibilitySettings() }
-                }
-            }
-        } header: {
-            Text("Разрешения")
-        }
-    }
-
-    // О программе
-
-    private var aboutSection: some View {
-        Section {
-            HStack {
-                if let icon = NSApp.applicationIconImage {
-                    Image(nsImage: icon).resizable().frame(width: 36, height: 36)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Tolk \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev")")
-                    Text(Diagnostics.version)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-                Spacer()
-                Button("Сообщить о проблеме…") { Diagnostics.copyProblemReport() }
-            }
-        } header: {
-            Text("О программе")
-        }
-    }
-
-    private var footer: some View {
-        HStack(spacing: 6) {
-            if !model.saveStatus.isEmpty {
-                Image(systemName: model.saveFailed ? "xmark.octagon.fill" : "checkmark.circle")
-                    .foregroundStyle(model.saveFailed ? .red : .secondary)
-            }
-            Text(model.saveStatus.isEmpty ? "Изменения сохраняются автоматически" : model.saveStatus)
-                .foregroundStyle(model.saveFailed ? .red : .secondary)
-            Spacer()
-            Text((TolkConfig.defaultPath as NSString).abbreviatingWithTildeInPath)
-                .foregroundStyle(.tertiary)
-                .textSelection(.enabled)
-        }
-        .font(.callout)
-        .padding(.horizontal, 22)
-        .padding(.vertical, 8)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .overlay(alignment: .top) { Divider() }
-    }
+struct StorageItem: Identifiable, Equatable {
+    var id: String { title }
+    let title: String
+    let path: String
+    let note: String
+    let bytes: Int64
 }
 
-private struct CheckLabel: View {
-    let title: String
-    let state: CheckState
-
-    var body: some View {
-        HStack(spacing: 5) {
-            switch state {
-            case .idle:
-                EmptyView()
-            case .checking:
-                ProgressView().controlSize(.small)
-                Text("\(title): проверяю…").foregroundStyle(.secondary)
-            case let .ok(text):
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text("\(title): \(text)").foregroundStyle(.secondary)
-            case let .failed(text):
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
-                Text("\(title): \(text)").foregroundStyle(.secondary)
-            }
+enum LogFilter: String, CaseIterable, Identifiable {
+    case all, problems, translate, autocomplete, capture, models
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .all: "Всё"
+        case .problems: "Проблемы"
+        case .translate: "Перевод"
+        case .autocomplete: "Подсказки"
+        case .capture: "Снимки экрана"
+        case .models: "Модели"
         }
-        .font(.callout)
-        .lineLimit(2)
-    }
-}
-
-/// Picker of translation models with human descriptions; «Другая…» reveals a free text field.
-struct ModelPicker: View {
-    let title: String
-    @Binding var selection: String
-    let models: [String]
-    var allowDefault = false
-    @State private var custom = false
-
-    static func describe(_ id: String) -> String {
-        let m = id.lowercased()
-        if m.contains("qwen") { return "Qwen 35B — чуть быстрее, но хуже на рабочем жаргоне (290 против 313 из 321 на корпусе)" }
-        if m.contains("gemma") { return "Gemma 26B — основная: точнее термины, меньше калек, живее русский и украинский" }
-        return id
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Picker(title, selection: Binding(
-                get: { custom ? "__custom" : selection },
-                set: { v in if v == "__custom" { custom = true } else { custom = false; selection = v } })) {
-                if allowDefault { Text("Как по умолчанию").tag("") }
-                ForEach(models, id: \.self) { m in Text(Self.describe(m)).tag(m) }
-                Divider()
-                Text("Другая…").tag("__custom")
-            }
-            if custom || (!selection.isEmpty && !models.contains(selection)) {
-                TextField("Имя модели на сервере", text: $selection, prompt: Text("qwen-translate"))
-                    .font(.callout)
-            }
+    static func isProblem(_ line: String) -> Bool {
+        let l = line.lowercased()
+        return ["failed", "error", "unavailable", "crash", "exception", "остановилась", "не запустился", "не загрузилась", "занят",
+                "no effect", "refused", "not created", "exhausted", "taken", "not readable"].contains { l.contains($0) }
+    }
+
+    func matches(_ line: String) -> Bool {
+        switch self {
+        case .all: true
+        case .problems: Self.isProblem(line)
+        case .translate: ["translate:", "double cmd+c", "reply", "quick ", "vkbox", "incremental:", "type-translate:", "mask:"].contains { line.lowercased().contains($0) }
+        case .autocomplete: line.contains("autocomplete:") || line.contains("style:")
+        case .capture: line.contains("capture")
+        case .models: line.contains("models:") || line.contains("llama-server") || line.contains("model ready") || line.contains("vkbox")
         }
     }
 }

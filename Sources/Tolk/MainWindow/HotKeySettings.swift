@@ -4,14 +4,10 @@ import SwiftUI
 import TolkCore
 
 /// Settings section «Горячие клавиши»: one recorder row per global shortcut (quick actions + «Перевод при наборе»).
-struct HotKeysSection: View {
+struct HotKeysList: View {
     var body: some View {
-        Section {
+        VStack(alignment: .leading, spacing: 8) {
             ForEach(HotKeyEntry.all) { HotKeyRecorderRow(entry: $0) }
-            Text("Нужен ⌃ или ⌥ в сочетании. Esc во время записи — отмена, ⌫ — выключить сочетание. Снимок экрана (⌥⇧S) задан отдельно.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        } header: {
-            Text("Горячие клавиши")
         }
     }
 }

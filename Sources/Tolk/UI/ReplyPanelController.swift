@@ -721,10 +721,10 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
     private static func roundedBox(_ content: NSView, fill: NSColor, border: NSColor?) -> NSBox {
         let box = NSBox()
         box.boxType = .custom
-        box.cornerRadius = 8
+        box.cornerRadius = TolkStyle.cardRadius
         box.fillColor = fill
         box.borderColor = border ?? .clear
-        box.borderWidth = border == nil ? 0 : 1
+        box.borderWidth = border == nil ? 0 : 0.5
         box.contentViewMargins = .zero
         box.titlePosition = .noTitle
         content.translatesAutoresizingMaskIntoConstraints = false

@@ -1267,8 +1267,8 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
     private func card(_ content: NSView, bottom: NSView, tinted: Bool, top: NSView? = nil) -> NSView {
         let box = NSBox()
         box.boxType = .custom
-        box.cornerRadius = 12
-        box.borderWidth = 1
+        box.cornerRadius = TolkStyle.cardRadius
+        box.borderWidth = 0.5
         box.borderColor = .separatorColor
         // Dynamic: resolved at draw time, so the card follows the window's appearance (not the one at creation).
         box.fillColor = tinted

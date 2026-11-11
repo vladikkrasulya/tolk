@@ -127,10 +127,10 @@ final class HistoryViewController: NSViewController {
 
     private func roundedBox(_ box: NSBox) {
         box.boxType = .custom
-        box.cornerRadius = 8
+        box.cornerRadius = TolkStyle.cardRadius
         box.borderColor = .separatorColor
-        box.borderWidth = 1
-        box.fillColor = .controlBackgroundColor
+        box.borderWidth = 0.5
+        box.fillColor = TolkStyle.nsCard
         box.contentViewMargins = .zero
         box.titlePosition = .noTitle
     }

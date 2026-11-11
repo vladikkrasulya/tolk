@@ -122,8 +122,8 @@ struct HelpCard<Anim: View>: View {
             Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(hovering ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08)))
+        .background(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).stroke(hovering ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08)))
         .onHover { hovering = $0 }
     }
 }
@@ -294,8 +294,8 @@ private extension View {
     func infoCardStyle() -> some View {
         padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 14).fill(Color(nsColor: .controlBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.08)))
+            .background(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).stroke(Color.primary.opacity(0.08)))
     }
 }
 

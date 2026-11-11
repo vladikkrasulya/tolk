@@ -600,10 +600,16 @@ final class AutocompleteController {
     /// Why a request for a suggestion ended without one (these exits used to be silent, so «подсказок мало» could not be
     /// explained from the log). One line per reason at most every 2 s; no text of the user is written.
     private var lastSkipAt: [String: TimeInterval] = [:]
+    /// From settings (AutocompleteFeatures.configure): the pause before the less sure suggestion, and whether the
+    /// caret is looked for on a snapshot in fields that do not report it.
+    static var patientDelayMs = AutocompleteTuning.patientDelayMs
+    static var caretBubble = true
     private func skip(_ reason: String) {
         let now = ProcessInfo.processInfo.systemUptime
-        if let last = lastSkipAt[reason], now - last < 2 { return }
-        lastSkipAt[reason] = now
+        let key = UsageText.missKey(forSkipReason: reason)
+        if let last = lastSkipAt[key], now - last < 2 { return }
+        lastSkipAt[key] = now
+        UsageStore.shared.recordMiss(key)
         Diagnostics.log("autocomplete: no request — \(reason)")
     }
 
@@ -653,7 +659,7 @@ final class AutocompleteController {
         guard server.state == .ready else { skip("model not ready (\(server.state))"); return }
         if let why = field.skipReason {
             let key = "\(field.bundleID ?? "?"):\(why)"
-            if key != lastSkipLog { lastSkipLog = key; Diagnostics.log("autocomplete: small/search field skipped (\(why)) app=\(field.bundleID ?? "?") role=\(field.role) sub=\(field.subrole)") }
+            if key != lastSkipLog { lastSkipLog = key; UsageStore.shared.recordMiss("small-field"); Diagnostics.log("autocomplete: small/search field skipped (\(why)) app=\(field.bundleID ?? "?") role=\(field.role) sub=\(field.subrole)") }
             return
         }
         wordBias.refreshIfNeeded(baseURL: server.baseURL, model: server.modelPath, mode: wordBiasMode, texts: wordBiasTexts)
@@ -669,7 +675,7 @@ final class AutocompleteController {
         let client = CompletionClient(baseURL: server.baseURL)
         // The app does not say where the caret is: look for the typed text on screen while the model thinks.
         var locate: Task<NSRect?, Never>?
-        if field.caretApprox, ScreenContext.ocrAllowed, CGPreflightScreenCaptureAccess(), let el = field.element, let frame = FocusedField.frame(of: el) {
+        if field.caretApprox, Self.caretBubble, ScreenContext.ocrAllowed, CGPreflightScreenCaptureAccess(), let el = field.element, let frame = FocusedField.frame(of: el) {
             let typed = field.textBefore
             locate = Task { await CaretLocator.locate(field: frame, textBefore: typed) }
         }
@@ -722,8 +728,8 @@ final class AutocompleteController {
                 relaxed = AutocompletePrompt.clean(kept, textBefore: field.textBefore, maxWords: extras.maxWords, sure: sure) ?? ""
             }
             Diagnostics.log("autocomplete: empty suggestion ms=\(result.ms) raw=\(result.rawChars) kept=\(result.text.count) p1=\(p1) need=\(AutocompletePrompt.firstTokenProb) midword=\(midWord) patient=\(relaxed.count)")
-            guard !relaxed.isEmpty else { return }
-            try? await Task.sleep(for: .milliseconds(AutocompleteTuning.patientDelayMs))
+            guard !relaxed.isEmpty else { UsageStore.shared.recordMiss(result.rawChars == 0 ? "nothing" : "unsure"); return }
+            try? await Task.sleep(for: .milliseconds(Self.patientDelayMs))
             guard !Task.isCancelled, gen == generation, suggestion == nil, instant == nil, !IsSecureEventInputEnabled(),
                   let later = await FocusedField.readAsync(), !Task.isCancelled, gen == generation,
                   later.pid == field.pid, later.textBefore == field.textBefore, AutocompleteSafety.isBlankTail(later.restOfLine), !isOff(later.bundleID) else { return }

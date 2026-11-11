@@ -34,8 +34,8 @@ final class HintCard: NSView {
         translatesAutoresizingMaskIntoConstraints = false
 
         box.boxType = .custom
-        box.cornerRadius = 10
-        box.borderWidth = 1
+        box.cornerRadius = TolkStyle.cardRadius
+        box.borderWidth = 0.5
         box.borderColor = .separatorColor
         box.fillColor = Self.fill(tint)
         box.contentViewMargins = .zero

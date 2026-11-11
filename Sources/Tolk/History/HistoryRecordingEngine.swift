@@ -30,14 +30,16 @@ final class HistoryRecordingEngine: TranslationEngine, @unchecked Sendable {
 
     func translate(_ request: TranslationRequest) -> AsyncThrowingStream<TranslationEvent, Error> {
         let inner = base.translate(request)
-        guard store.isEnabled else { return inner }
+        let keepHistory = store.isEnabled
         let app = appProvider()
         let requestedAt = Date()
         let origin = self.origin, store = self.store, mode = request.mode
+        let chars = request.text.count
         return AsyncThrowingStream { continuation in
             let task = Task {
                 var provider = "", source = Language.english, target = Language.english
                 var started = false, text = ""
+                var stats: TranslationStats?
                 do {
                     for try await event in inner {
                         continuation.yield(event)
@@ -48,10 +50,22 @@ final class HistoryRecordingEngine: TranslationEngine, @unchecked Sendable {
                             text += chunk
                         case .fellBack:
                             text = ""
-                        case .stats:
-                            break
+                        case let .stats(s):
+                            stats = s
                         case .finished:
                             guard started, !Task.isCancelled else { break }
+                            // Numbers for «Статистика» and one line for the log — never the text itself.
+                            let ms = stats.map { Int($0.total * 1000) }
+                            let first = stats?.firstChunk.map { Int($0 * 1000) }
+                            let cached = stats?.fromCache ?? false, fallback = stats?.fallbackReason != nil
+                            UsageStore.shared.record(UsageEvent(
+                                origin: origin, pair: "\(source.rawValue)→\(target.rawValue)", provider: stats?.provider ?? provider,
+                                app: app?.name, chars: chars, totalMs: ms, firstChunkMs: first, cached: cached, fallback: fallback))
+                            Diagnostics.log("translate: \(origin) \(source.rawValue)→\(target.rawValue) in=\(chars) out=\(text.count) "
+                                + "provider=\(stats?.provider ?? provider) route=\(stats?.route.rawValue ?? "?") ms=\(ms.map(String.init) ?? "?")"
+                                + (cached ? " cache" : "") + (stats?.fallbackReason.map { " fallback(\($0))" } ?? "")
+                                + ((stats?.warnings.isEmpty ?? true) ? "" : " warnings=\(stats!.warnings.count)"))
+                            guard keepHistory else { break }
                             // Live typing sends only the changed tail; history keeps the whole message.
                             let ctx = request.context
                             store.record(HistoryEntry(origin: origin, app: app?.name,
@@ -64,6 +78,10 @@ final class HistoryRecordingEngine: TranslationEngine, @unchecked Sendable {
                     }
                     continuation.finish()
                 } catch {
+                    if !(error is CancellationError), !Task.isCancelled {
+                        UsageStore.shared.record(UsageEvent(origin: origin, failed: true))
+                        Diagnostics.log("translate: \(origin) FAILED in=\(chars) after \(Int(Date().timeIntervalSince(requestedAt) * 1000)) ms: \(error.localizedDescription)")
+                    }
                     continuation.finish(throwing: error)
                 }
             }

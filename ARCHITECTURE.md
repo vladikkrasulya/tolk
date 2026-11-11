@@ -476,3 +476,37 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   found (or screen recording is not allowed) it stays in the field's corner. Checked on the stand in `<textarea>`
   (also on a wrapped second line) and in plain `contenteditable`. Log: `ax=ocr markers fieldCorner …`.
 
+
+## v0.8.0 — settings you can run the app from, one look for every screen
+
+- **Settings page rebuilt** (`Sources/Tolk/Settings/`): six tabs — Перевод, Автодополнение, Модели, Статистика, Журнал,
+  Общие. Cards in a `MasonryLayout` (1–3 columns by window width, `minColumn` 340 pt) instead of the fixed-width
+  grouped `Form`. Every control has a hint that says what happens in the current position (`SToggle.offHint`,
+  `SChoice.Option.effect`) and, where it helps, an example tile (`SExample`). The header shows only what is wrong
+  (server, suggestion model, Accessibility, Screen Recording) or one green «Всё работает».
+- **Shared look** (`TolkStyle` in `SettingsKit.swift`): card radius 12, control radius 8, 0.5 pt hairline, card fill
+  `nsCard`, grey tiles, capsule pills. Applied to the popup (the translation now sits on a card), reply panel, hints
+  panel, history, glossary, documents, image page, help.
+- **New settings** (`TolkConfig`): `autocompletePatient` + `autocompletePatientDelay` (was a constant 650 ms),
+  `autocompleteCaretBubble`, `verboseLog`, `keepWarmMinutes` (was a constant 15). Plus: add an app to «Где не
+  подсказывать», instruction presets (chips), Screen Recording permission row, «Данные на диске» (paths and sizes),
+  «Вернуть как было» (reset tuning to measured defaults).
+- **Models without a terminal** (`Models/ModelLibrary.swift`):
+  - `ModelLibrary` — suggestion models (GGUF): catalogue of the three measured models with their Hugging Face links
+    and exact sizes, download with progress / resume / cancel, checks (HTTP status, `GGUF` magic, exact size, free
+    disk), download by link, import from a file, delete to the Trash. Checked with `TOLK_DL_TEST=<url>` against a local
+    server (good file, wrong size, not a model, 404).
+  - `ServerModels` — Ollama server: list (`/api/tags`), pull with progress (`/api/pull`), «Подготовить» builds
+    `<base>-translate` = base + translator system prompt + temperature 0.3, num_ctx 8192, num_predict 8192
+    (`/api/create`, the recipe of `gemma-translate`), delete (`/api/delete`). Create and delete were checked on vkbox.
+- **Statistics** (`TolkCore/UsageStats.swift`, `usage-stats.json`, numbers only, one year): translations per day,
+  characters, median time and time to the first words, cache share, fallback share, errors, by origin / language pair
+  / app / provider; and why a suggestion did not appear (`acMisses`: unsure, nothing, short, unread, moved, esc,
+  type-translate, not-ready, secure, small-field) with advice. Recorded in `HistoryRecordingEngine` (independent of
+  the history switch) and in `AutocompleteController.skip`. Existing history is counted in once.
+- **Log**: local time instead of UTC; `Diagnostics.debug` for per-key detail (only with «Подробный журнал») — the
+  `style: examples` line alone was 85 % of the log; rotation at 1 MB; one `translate:` line per translation (origin,
+  pair, lengths, provider, route, ms, cache / fallback — never the text) and `translate: … FAILED`; `llama-server`
+  runs with `-lv 2` unless the detailed log is on (its log grew by megabytes per hour); a viewer with filters and
+  search in Настройки → Журнал.
+- Self-test: 853 checks (`usageStats`).

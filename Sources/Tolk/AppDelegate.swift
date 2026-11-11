@@ -69,9 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["TOLK_IDLE_TICKS"] != nil { IdleTicksDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_TYPE_TRANSLATE_SHOT"] != nil { TypeTranslateDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_MAIN_DEMO"] != nil { MainWindowDemo.runIfRequested(); return }
+        if ModelLibrary.runDownloadTestIfRequested() { return }
         // Dev: TOLK_TEST_OLLAMA=http://127.0.0.1:11999 points this run at a fake server (cold-model / down tests); not saved.
         if let url = ProcessInfo.processInfo.environment["TOLK_TEST_OLLAMA"] { config.ollamaURL = url; config.autocomplete = false }
         #endif
+        Diagnostics.verbose = config.verboseLog
         // A second Tolk would fight the first for the model server, the event taps and the hotkeys: hand over and quit.
         let running = NSWorkspace.shared.runningApplications.map {
             SingleInstance.Proc(pid: $0.processIdentifier, bundleID: $0.bundleIdentifier, executable: $0.executableURL?.lastPathComponent)
@@ -243,6 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         acController?.stop()
         ACStatsStore.shared.flush()
+        UsageStore.shared.flush()
         acServer?.stop() // the llama-server child must not outlive Tolk
         Diagnostics.markCleanExit()
     }
@@ -264,6 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func configChanged() {
         config = TolkConfig.load()
+        Diagnostics.verbose = config.verboseLog
         Diagnostics.log("settings changed: profile=\(config.activeProfileID) model=\(config.effectiveModel) fallback=\(config.fallback.rawValue)")
         engine = DefaultTranslationEngine(config: config)
         popup.replaceEngine(withHistory("popup"))
@@ -335,6 +339,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Server state → menu, settings tab, and the gate for screen reading (no snapshots while the model is not ready).
     private func serverStateChanged() {
         ScreenContext.serverReady = acServer.state == .ready
+        settingsVC.model.acReady = acServer.state == .ready
         if case .failed(let e) = acServer.state {
             var text = e
             if let at = acServer.nextRetryAt { text += " — повтор через \(max(1, Int(at.timeIntervalSinceNow.rounded()))) с" }
@@ -498,7 +503,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // so the next translation is not a 35+ s cold start — but only if the user translated in the last
             // 15 minutes. Otherwise vkbox may be busy with something else (games): an unloaded model stays unloaded,
             // and the first translation loads it.
-            if ok, ModelUsage.usedRecently(), let ollama = primary as? OllamaProvider { await ollama.warmUpIfNeeded() }
+            let warmFor = TimeInterval((self?.config.keepWarmMinutes ?? 15) * 60)
+            if ok, warmFor > 0, ModelUsage.usedRecently(within: warmFor), let ollama = primary as? OllamaProvider { await ollama.warmUpIfNeeded() }
         }
     }
 

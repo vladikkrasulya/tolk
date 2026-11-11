@@ -66,10 +66,12 @@ enum MainWindowDemo {
         // Every settings tab, full height, in an off-screen borderless window (the main window is clamped to the screen).
         do {
             let vc = SettingsViewController(config: TolkConfig.load())
-            let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 2300), styleMask: [.borderless],
+            let env = ProcessInfo.processInfo.environment
+            let w = Double(env["TOLK_SHOT_WIDTH"] ?? "") ?? 860, h = Double(env["TOLK_SHOT_HEIGHT"] ?? "") ?? 2300
+            let win = NSWindow(contentRect: NSRect(x: 0, y: 0, width: w, height: h), styleMask: [.borderless],
                                backing: .buffered, defer: false)
             win.contentViewController = vc
-            win.setContentSize(NSSize(width: 860, height: 2300))
+            win.setContentSize(NSSize(width: w, height: h))
             win.appearance = forced
             for tab in SettingsTab.allCases {
                 vc.model.tab = tab
@@ -79,7 +81,7 @@ enum MainWindowDemo {
                 if let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
                     v.cacheDisplay(in: v.bounds, to: rep)
                     if let data = rep.representation(using: .png, properties: [:]) {
-                        try? data.write(to: URL(fileURLWithPath: "\(dir)/settings-\(tab.rawValue)-\(suffix).png"))
+                        try? data.write(to: URL(fileURLWithPath: "\(dir)/settings-\(tab.rawValue)-\(Int(w))-\(suffix).png"))
                         print("[main-demo] wrote \(dir)/settings-\(tab.rawValue)-\(suffix).png")
                     }
                 }

@@ -244,7 +244,7 @@ final class StyleMemory {
         for i in recent where picked.count < limit && !picked.contains(i) { picked.append(i) }
         let out = picked.map { Self.snippet(entries[$0].rec.t) }
         let ms = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000
-        Diagnostics.log("style: examples n=\(out.count) pool=\(entries.count) ms=\(String(format: "%.1f", ms))")
+        Diagnostics.debug("style: examples n=\(out.count) pool=\(entries.count) ms=\(String(format: "%.1f", ms))")
         return out
     }
 

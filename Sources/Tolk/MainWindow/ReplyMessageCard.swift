@@ -17,10 +17,10 @@ final class ReplyMessageCard: NSView {
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
         box.boxType = .custom
-        box.cornerRadius = 12
-        box.borderWidth = 1
+        box.cornerRadius = TolkStyle.cardRadius
+        box.borderWidth = 0.5
         box.borderColor = .separatorColor
-        box.fillColor = .textBackgroundColor
+        box.fillColor = TolkStyle.nsCard
         box.contentViewMargins = .zero
         box.titlePosition = .noTitle
         box.translatesAutoresizingMaskIntoConstraints = false

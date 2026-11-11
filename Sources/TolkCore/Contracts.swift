@@ -376,6 +376,17 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public var typeTranslateApps: [String: Bool] = [:]
     /// Turn the mode on by itself where the partner's last message is in another language (apps without an explicit switch).
     public var typeTranslateAuto: Bool = false
+    /// «Patient second look»: after an empty answer and a pause, show the continuation the model was less sure about.
+    public var autocompletePatient: Bool = true
+    /// The pause (seconds) before that second look.
+    public var autocompletePatientDelay: Double = 0.65
+    /// Fields that do not report the caret (web text areas): find it on a snapshot of the field and put the bubble there.
+    public var autocompleteCaretBubble: Bool = true
+    /// Detailed log: every autocomplete decision is written (default: only events that explain a problem).
+    public var verboseLog: Bool = false
+    /// Minutes after the last translation during which a model that fell out of the server's memory is reloaded
+    /// in the background (0 = never: the first translation after a pause waits for the load).
+    public var keepWarmMinutes: Int = 15
 
     public static let defaultAutocompleteOffApps: [String] = [
         "com.apple.Terminal", "com.googlecode.iterm2", "com.apple.dt.Xcode",
@@ -392,6 +403,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         case autocompleteLength, autocompleteInstructions, autocompleteAppInstructions, autocompleteUseGlossary
         case autocompleteClipboard, autocompleteEmoji, autocorrect, autocompleteLearnStyle, autocompleteFrequency, autocompleteRecordAll, autocompleteWordPreference
         case autocompleteScreenContext, autocompleteBatteryRare, autocompleteBatteryNoScreen, autocompleteBatteryShort, typeTranslateApps, typeTranslateAuto
+        case autocompletePatient, autocompletePatientDelay, autocompleteCaretBubble, verboseLog, keepWarmMinutes
     }
 
     /// Every key is optional: `{"model": "x"}` keeps all other defaults.
@@ -438,6 +450,11 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         autocompleteBatteryShort = c.lenient(Bool.self, forKey: .autocompleteBatteryShort) ?? d.autocompleteBatteryShort
         typeTranslateApps = c.lenient([String: Bool].self, forKey: .typeTranslateApps) ?? d.typeTranslateApps
         typeTranslateAuto = c.lenient(Bool.self, forKey: .typeTranslateAuto) ?? d.typeTranslateAuto
+        autocompletePatient = c.lenient(Bool.self, forKey: .autocompletePatient) ?? d.autocompletePatient
+        autocompletePatientDelay = min(3, max(0.3, c.lenient(Double.self, forKey: .autocompletePatientDelay) ?? d.autocompletePatientDelay))
+        autocompleteCaretBubble = c.lenient(Bool.self, forKey: .autocompleteCaretBubble) ?? d.autocompleteCaretBubble
+        verboseLog = c.lenient(Bool.self, forKey: .verboseLog) ?? d.verboseLog
+        keepWarmMinutes = max(0, c.lenient(Int.self, forKey: .keepWarmMinutes) ?? d.keepWarmMinutes)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -474,6 +491,11 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         try c.encode(autocompleteBatteryShort, forKey: .autocompleteBatteryShort)
         try c.encode(typeTranslateApps, forKey: .typeTranslateApps)
         try c.encode(typeTranslateAuto, forKey: .typeTranslateAuto)
+        try c.encode(autocompletePatient, forKey: .autocompletePatient)
+        try c.encode(autocompletePatientDelay, forKey: .autocompletePatientDelay)
+        try c.encode(autocompleteCaretBubble, forKey: .autocompleteCaretBubble)
+        try c.encode(verboseLog, forKey: .verboseLog)
+        try c.encode(keepWarmMinutes, forKey: .keepWarmMinutes)
     }
 
     /// Tone for an app (bundle id), `.auto` if not configured.

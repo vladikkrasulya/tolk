@@ -70,8 +70,8 @@ final class ComposePanel: NSView, NSTextViewDelegate {
     private func box(tinted: Bool) -> NSBox {
         let b = NSBox()
         b.boxType = .custom
-        b.cornerRadius = 12
-        b.borderWidth = 1
+        b.cornerRadius = TolkStyle.cardRadius
+        b.borderWidth = 0.5
         b.borderColor = .separatorColor
         b.fillColor = tinted
             ? NSColor(name: nil) { appearance in

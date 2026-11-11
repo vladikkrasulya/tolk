@@ -135,7 +135,9 @@ final class LocalModelServer {
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
         let command = [bin, "-m", modelPath, "--host", "127.0.0.1", "--port", "\(port)",
                        "-c", "4096", "-ngl", "99", "-fa", "on", "-np", "1",
-                       "--cache-reuse", "64", "--no-webui"]
+                       "--cache-reuse", "64", "--no-webui",
+                       // 3 = every request with timings (megabytes per hour); 2 = warnings and errors only.
+                       "-lv", Diagnostics.verbose ? "3" : "2"]
         p.arguments = ServerLifecycle.wrapperArguments(command: command) // dies with Tolk even on kill -9
         let logDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Tolk")
         try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)

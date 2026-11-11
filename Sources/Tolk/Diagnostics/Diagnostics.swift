@@ -112,12 +112,29 @@ enum Diagnostics {
     // MARK: - Log
 
     private static let queue = DispatchQueue(label: "tolk.log")
+    static var oldLogURL: URL { dir.appendingPathComponent("tolk.old.log") }
+    /// «Подробный журнал» in settings: `debug` lines are written only while it is on.
+    nonisolated(unsafe) static var verbose = false
+    /// Local time, so a line can be matched with what the user saw on the clock. Used only on `queue`.
+    nonisolated(unsafe) private static let stamp: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return f
+    }()
+
+    /// Detail that only matters while hunting a problem (one line per key press and the like).
+    static func debug(_ message: @autoclosure () -> String) {
+        guard verbose else { return }
+        log(message())
+    }
 
     static func log(_ message: String) {
-        let line = "\(ISO8601DateFormatter().string(from: Date())) \(message)\n"
+        let now = Date()
         queue.async {
-            if let size = try? FileManager.default.attributesOfItem(atPath: logURL.path)[.size] as? Int, size > 512_000 {
-                let old = dir.appendingPathComponent("tolk.old.log")
+            let line = "\(stamp.string(from: now)) \(message)\n"
+            if let size = try? FileManager.default.attributesOfItem(atPath: logURL.path)[.size] as? Int, size > 1_000_000 {
+                let old = oldLogURL
                 try? FileManager.default.removeItem(at: old)
                 try? FileManager.default.moveItem(at: logURL, to: old)
             }
@@ -127,6 +144,32 @@ enum Diagnostics {
                 try? Data(line.utf8).write(to: logURL)
             }
         }
+    }
+
+    /// Last `limit` lines of the log (the previous file is read too when the current one is short). Newest last.
+    static func tail(limit: Int = 600) -> [String] {
+        queue.sync {
+            var lines = ((try? String(contentsOf: logURL, encoding: .utf8)) ?? "").split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+            if lines.count < limit, let old = try? String(contentsOf: oldLogURL, encoding: .utf8) {
+                lines = old.split(separator: "\n", omittingEmptySubsequences: true).suffix(limit - lines.count).map(String.init) + lines
+            }
+            return Array(lines.suffix(limit))
+        }
+    }
+
+    /// Empties the log files (crash records stay).
+    static func clearLog() {
+        queue.sync {
+            try? FileManager.default.removeItem(at: oldLogURL)
+            try? Data().write(to: logURL)
+        }
+        log("log cleared by the user")
+    }
+
+    /// Bytes on disk of everything in the log folder.
+    static func logFolderSize() -> Int64 {
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey])) ?? []
+        return files.reduce(0) { $0 + Int64((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
     }
 
     // MARK: - Report

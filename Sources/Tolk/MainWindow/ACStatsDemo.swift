@@ -29,7 +29,7 @@ enum ACStatsDemo {
             win.appearance = ap
             win.contentViewController = vc
             win.setContentSize(size)
-            vc.model.tab = .autocomplete
+            vc.model.tab = .stats
             vc.model.refreshStats()
             shots.append((name, win, vc))
         }

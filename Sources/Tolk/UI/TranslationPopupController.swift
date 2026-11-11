@@ -21,7 +21,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
     // Layout
     private let width: CGFloat = 460
     private let inset: CGFloat = 16
-    private let minTextHeight: CGFloat = 22
+    private let minTextHeight: CGFloat = 40
     private let maxTextHeight: CGFloat = 340
 
     private var panel: PopupPanel!
@@ -1090,7 +1090,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         textView.isSelectable = true
         textView.isRichText = false
         textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: 0, height: 2)
+        textView.textContainerInset = NSSize(width: 12, height: 10)
         textView.textContainer?.lineFragmentPadding = 0
         textView.font = .systemFont(ofSize: 16)
         textView.setAccessibilityLabel("Перевод")
@@ -1116,7 +1116,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         backBox.spacing = 4
         backBox.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
         backBox.wantsLayer = true
-        backBox.layer?.cornerRadius = 8
+        backBox.layer?.cornerRadius = TolkStyle.controlRadius
         backBox.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05).cgColor
         backBox.isHidden = true
 
@@ -1145,7 +1145,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         notesBox.spacing = 8
         notesBox.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
         notesBox.wantsLayer = true
-        notesBox.layer?.cornerRadius = 8
+        notesBox.layer?.cornerRadius = TolkStyle.controlRadius
         notesBox.layer?.backgroundColor = NSColor.systemYellow.withAlphaComponent(0.08).cgColor
         notesBox.isHidden = true
 
@@ -1218,9 +1218,27 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         root.alignment = .leading
         root.spacing = 8
         root.edgeInsets = NSEdgeInsets(top: 12, left: inset, bottom: 12, right: inset)
+        // The translation sits on a card, like every other text surface of the app (room for the card's padding).
+        root.setCustomSpacing(10, after: header)
+        root.setCustomSpacing(10, after: noticeLabel)
         root.setCustomSpacing(10, after: scrollView)
         root.translatesAutoresizingMaskIntoConstraints = false
+        let card = NSBox()
+        card.boxType = .custom
+        card.titlePosition = .noTitle
+        card.cornerRadius = TolkStyle.cardRadius
+        card.fillColor = TolkStyle.nsCard
+        card.borderColor = .separatorColor
+        card.borderWidth = 0.5
+        card.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(card)
         effect.addSubview(root)
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            card.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            card.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+        ])
         NSLayoutConstraint.activate([
             root.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
             root.trailingAnchor.constraint(equalTo: effect.trailingAnchor),

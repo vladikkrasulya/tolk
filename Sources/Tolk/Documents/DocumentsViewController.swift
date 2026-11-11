@@ -469,8 +469,8 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         scrollView.drawsBackground = true
         scrollView.backgroundColor = .textBackgroundColor
         scrollView.wantsLayer = true
-        scrollView.layer?.cornerRadius = 10
-        scrollView.layer?.borderWidth = 1
+        scrollView.layer?.cornerRadius = TolkStyle.cardRadius
+        scrollView.layer?.borderWidth = 0.5
         scrollView.layer?.borderColor = NSColor.separatorColor.cgColor
         scrollView.updateColors()
         scrollView.onUserScroll = { [weak self] in self?.userScrolled() }
