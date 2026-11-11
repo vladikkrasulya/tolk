@@ -667,6 +667,12 @@ final class AutocompleteController {
         let extras = promptExtras?(field) ?? PromptExtras()
         let prompt = AutocompletePrompt.prompt(textBefore: field.textBefore, appName: appName, context: context, extras: extras)
         let client = CompletionClient(baseURL: server.baseURL)
+        // The app does not say where the caret is: look for the typed text on screen while the model thinks.
+        var locate: Task<NSRect?, Never>?
+        if field.caretApprox, ScreenContext.ocrAllowed, CGPreflightScreenCaptureAccess(), let el = field.element, let frame = FocusedField.frame(of: el) {
+            let typed = field.textBefore
+            locate = Task { await CaretLocator.locate(field: frame, textBefore: typed) }
+        }
         var result: CompletionClient.Result
         do {
             result = try await client.complete(prompt: prompt, maxTokens: AutocompletePrompt.maxTokens)
@@ -727,11 +733,18 @@ final class AutocompleteController {
             patient = true
         }
         anchor = (now.snapshot, now.element)
-        display(text, caret: now.caret, fontSize: now.fontSize, rightLimit: now.rightLimit, approx: now.caretApprox)
+        var caret = now.caret
+        var where_ = now.caretInfo
+        if now.caretApprox, let found = await locate?.value {
+            guard !Task.isCancelled, gen == generation else { return }
+            caret = found
+            where_ = "ocr " + where_
+        }
+        display(text, caret: caret, fontSize: now.fontSize, rightLimit: now.rightLimit, approx: now.caretApprox)
         shownTextBefore = now.textBefore
         shownBundleID = now.bundleID
         let f = panel?.frame ?? .zero
-        Diagnostics.log("autocomplete: shown\(patient ? " (patient)" : "") len=\(text.count) ms=\(result.ms) ctx=\(context?.count ?? 0) app=\(now.bundleID ?? "?") fs=\(now.fontSize.map { String(Int($0 * 10)) } ?? "-")/10 ax=\(now.caretInfo) caret=(\(Int(now.caret.minX)),\(Int(now.caret.minY)) \(Int(now.caret.width))x\(Int(now.caret.height))) panel=(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)))")
+        Diagnostics.log("autocomplete: shown\(patient ? " (patient)" : "") len=\(text.count) ms=\(result.ms) ctx=\(context?.count ?? 0) app=\(now.bundleID ?? "?") fs=\(now.fontSize.map { String(Int($0 * 10)) } ?? "-")/10 ax=\(where_) caret=(\(Int(caret.minX)),\(Int(caret.minY)) \(Int(caret.width))x\(Int(caret.height))) panel=(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)))")
         stats.shown(model: statsModel, app: now.bundleID, text: text, ms: result.ms); onStatsChanged?()
         journal.shown(bundleID: now.bundleID, before: now.textBefore, text: text, ms: result.ms, ctxChars: context?.count ?? 0,
                       ctxSource: lastContextSource.isEmpty ? nil : lastContextSource, caret: now.caret, panel: panel)

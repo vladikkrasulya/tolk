@@ -110,7 +110,8 @@ private final class HintBadge: NSView {
     private func place(_ text: String, caret: NSRect, fontSize: CGFloat? = nil, rightLimit: CGFloat? = nil) -> Bool {
         guard !text.isEmpty else { return false }
 
-        let size = fontSize.map { min(40, max(9, $0)) } ?? Self.fontSize(for: caret)
+        var size = fontSize.map { min(40, max(9, $0)) } ?? Self.fontSize(for: caret)
+        if bubble { size = min(size, 15) }   // the caret height here is an estimate: keep the bubble modest
         let font = NSFont.systemFont(ofSize: size)
         let hintFont = NSFont.systemFont(ofSize: max(9, (size * 0.6).rounded()))
 
@@ -154,7 +155,7 @@ private final class HintBadge: NSView {
         let baselineY = caret.minY + 0.21 * caret.height
         let fieldY = baselineY + font.descender
         let padX: CGFloat = bubble ? 7 : 0, padY: CGFloat = bubble ? 3 : 0
-        let frame = NSRect(x: x0 - padX, y: (fieldY - (height - textH) / 2).rounded() - padY, width: totalW + 2 * padX, height: height + 2 * padY)
+        let frame = NSRect(x: x0 + (bubble ? 4 : -padX), y: (fieldY - (height - textH) / 2).rounded() - padY, width: totalW + 2 * padX, height: height + 2 * padY)
         panel.setFrame(frame, display: true)
         if bubbleBack.superview == nil, let content = panel.contentView { content.addSubview(bubbleBack, positioned: .below, relativeTo: nil) }
         bubbleBack.isHidden = !bubble

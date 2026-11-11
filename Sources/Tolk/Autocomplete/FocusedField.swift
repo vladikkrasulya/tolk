@@ -202,6 +202,9 @@ struct FocusedField {
         return NSRect(x: p.x, y: mainH - p.y - sz.height, width: sz.width, height: sz.height)
     }
 
+    /// The focused field's frame in Cocoa screen coordinates (for `CaretLocator`).
+    static func frame(of el: AXUIElement) -> NSRect? { axFrame(el) }
+
     /// Right edge of the field if it reports a sensible size around the caret, else of its window.
     private static func rightLimit(_ el: AXUIElement, caret: NSRect) -> CGFloat? {
         if let f = axFrame(el), f.width > 40, f.minX - 2 <= caret.minX, f.maxX > caret.minX { return f.maxX }

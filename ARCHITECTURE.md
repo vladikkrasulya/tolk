@@ -469,3 +469,10 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Checked live on a Chromium stand (`~/Translate/test-corpus/live/stand.html`): suggestions 7/7 at pauses, patient
   second look, Tab acceptance; Documents: drag-and-drop from Finder, translation, «Сохранить как…» (docx).
 
+## v0.7.7 — the bubble sits at the caret
+- `CaretLocator`: when the app does not report the caret (`FocusedField.caretApprox`), a snapshot of the field is
+  recognized (Vision, no language correction) while the model thinks, and the lowest line that ends with the last typed
+  characters gives the caret: its right edge. The bubble then appears right after the caret; when the text is not
+  found (or screen recording is not allowed) it stays in the field's corner. Checked on the stand in `<textarea>`
+  (also on a wrapped second line) and in plain `contenteditable`. Log: `ax=ocr markers fieldCorner …`.
+
