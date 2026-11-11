@@ -233,8 +233,14 @@ extension DefaultTranslationEngine {
     /// -> a ready message to the recipient. The language is that of `partnerMessage` if there is one, otherwise `to`.
     /// The text must carry EVERY point and nothing else; numbers/times/dates are verified (warnings), the honest back-translation is a separate
     /// call (`composeBackTranslation`) so that the text appears right after the first answer. Typical time 3-6 s.
+    /// The `TranslationEngine` requirement. Without this exact signature the protocol falls back to its default
+    /// («недоступно для этого движка») — the variant with `neutral:` below does not satisfy the requirement.
+    public func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String?, threadContext: String?) async throws -> ComposeResult {
+        try await compose(points: points, tone: tone, to: to, partnerMessage: partnerMessage, threadContext: threadContext, neutral: nil)
+    }
+
     public func compose(points: String, tone: ComposeTone, to: Language, partnerMessage: String? = nil, threadContext: String? = nil,
-                        neutral: ComposeResult? = nil) async throws -> ComposeResult {
+                        neutral: ComposeResult?) async throws -> ComposeResult {
         // Two passes: the neutral text carries the facts (checked); a non-neutral tone is a style transfer of it.
         // `neutral` = an already composed neutral result of the same points (the window keeps it between tones).
         let base: ComposeResult

@@ -190,6 +190,26 @@ extension SelfTest {
         let r3 = engine.replyRequest(message: "Давай созвонимся завтра в 10, удобно?", reply: "Да, удобно")
         check(r3.target == .russian && r3.source != .russian, "reply: both RU -> source is moved off the partner's language")
 
+        // MARK: the engine really implements the optional tools (0.7.2 shipped with «Сформулировать» silently falling back to
+        // the protocol default — «недоступно для этого движка» — after a parameter was added to the concrete method)
+        do {
+            var deadCfg = TolkConfig()
+            deadCfg.ollamaURL = "http://127.0.0.1:9"
+            let dead: any TranslationEngine = DefaultTranslationEngine(
+                config: deadCfg, rules: RulesStore(path: "/nonexistent/rules.md"),
+                primary: OllamaProvider(config: deadCfg, rules: RulesStore(path: "/nonexistent/rules.md")), fallback: nil)
+            final class Box: @unchecked Sendable { var message = "" }
+            let box = Box()
+            let sem = DispatchSemaphore(value: 0)
+            Task.detached {
+                do { _ = try await dead.compose(points: "ок, подтверждаем", tone: .neutral, to: .english, partnerMessage: "Please confirm.", threadContext: nil) }
+                catch { box.message = "\(error)" }
+                sem.signal()
+            }
+            _ = sem.wait(timeout: .now() + 8)
+            check(!box.message.contains("недоступно для этого движка"), "compose: the engine's own implementation is called through the protocol", box.message)
+        }
+
         // MARK: back-translation diff (meaning only)
         let bsrc = "Hi Max! CTR is up 12%, but fill rate fell to 64%. We did not raise the floor price. Please send ads.txt by Friday."
         var bd = BackDiff.compare(source: bsrc, back: "Hello Max! CTR grew by 12%, but fill rate dropped to 64%. We did not increase the floor price. Please send ads.txt by Friday.")
