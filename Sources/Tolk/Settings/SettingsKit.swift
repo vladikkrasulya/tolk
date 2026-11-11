@@ -36,24 +36,35 @@ struct MasonryLayout: Layout {
     static func span<V: View>(_ v: V) -> some View { v.layoutValue(key: SpanKey.self, value: true) }
 
     private func arrange(width: CGFloat, subviews: Subviews) -> (frames: [CGRect], height: CGFloat) {
-        let n = max(1, min(maxColumns, Int((width + spacing) / (minColumn + spacing))))
-        let colW = (width - spacing * CGFloat(n - 1)) / CGFloat(n)
-        var heights = [CGFloat](repeating: 0, count: n)
-        var frames: [CGRect] = []
-        for s in subviews {
-            if s[SpanKey.self] {
-                let y = heights.max() ?? 0
-                let h = s.sizeThatFits(ProposedViewSize(width: width, height: nil)).height
-                frames.append(CGRect(x: 0, y: y, width: width, height: h))
-                heights = heights.map { _ in y + h + spacing }
-            } else {
-                let i = heights.indices.min { heights[$0] < heights[$1] } ?? 0
-                let h = s.sizeThatFits(ProposedViewSize(width: colW, height: nil)).height
-                frames.append(CGRect(x: CGFloat(i) * (colW + spacing), y: heights[i], width: colW, height: h))
-                heights[i] += h + spacing
+        let maxN = max(1, min(maxColumns, Int((width + spacing) / (minColumn + spacing))))
+        var frames = [CGRect](repeating: .zero, count: subviews.count)
+        var y: CGFloat = 0
+        var i = 0
+        while i < subviews.count {
+            if subviews[i][SpanKey.self] {
+                let h = subviews[i].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+                frames[i] = CGRect(x: 0, y: y, width: width, height: h)
+                y += h + spacing
+                i += 1
+                continue
             }
+            // A group of cards up to the next full-width item: never more columns than cards, so a short group
+            // spreads over the whole width instead of leaving empty columns.
+            var j = i
+            while j < subviews.count, !subviews[j][SpanKey.self] { j += 1 }
+            let n = min(maxN, j - i)
+            let colW = (width - spacing * CGFloat(n - 1)) / CGFloat(n)
+            var heights = [CGFloat](repeating: y, count: n)
+            for k in i..<j {
+                let c = heights.indices.min { heights[$0] < heights[$1] } ?? 0
+                let h = subviews[k].sizeThatFits(ProposedViewSize(width: colW, height: nil)).height
+                frames[k] = CGRect(x: CGFloat(c) * (colW + spacing), y: heights[c], width: colW, height: h)
+                heights[c] += h + spacing
+            }
+            y = heights.max() ?? y
+            i = j
         }
-        return (frames, max(0, (heights.max() ?? 0) - spacing))
+        return (frames, max(0, y - spacing))
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -140,6 +151,22 @@ struct SCard<Content: View, Trailing: View>: View {
 extension SCard where Trailing == EmptyView {
     init(_ title: String, symbol: String, subtitle: String? = nil, @ViewBuilder content: @escaping () -> Content) {
         self.init(title, symbol: symbol, subtitle: subtitle, trailing: { EmptyView() }, content: content)
+    }
+}
+
+/// Heading of a group of cards inside a tab: takes the whole row, the cards under it start a fresh set of columns.
+struct SSection: View {
+    let title: String
+    var subtitle: String?
+    init(_ title: String, _ subtitle: String? = nil) { self.title = title; self.subtitle = subtitle }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.title3.weight(.semibold))
+            if let subtitle { Text(subtitle).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 8).padding(.horizontal, 2)
+        .fullSpan()
     }
 }
 

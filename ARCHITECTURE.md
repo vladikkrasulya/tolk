@@ -510,3 +510,9 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   runs with `-lv 2` unless the detailed log is on (its log grew by megabytes per hour); a viewer with filters and
   search in Настройки → Журнал.
 - Self-test: 853 checks (`usageStats`).
+
+## v0.8.1 — settings grouped into sections
+
+- Every settings tab is split into named groups (`SSection`, a full-width heading): e.g. Автодополнение → «Подсказки»,
+  «Что знает модель», «Помощники при наборе», «Ограничения». `MasonryLayout` lays each group out on its own and never
+  uses more columns than the group has cards, so a short group fills the width.

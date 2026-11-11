@@ -139,13 +139,16 @@ struct TranslateTab: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
+        SSection("Сервер и модель", "Где и чем переводится текст, и что делать, если сервер недоступен.")
         serverCard
         modelCard
         fallbackCard
+        remoteCard
+        SSection("Язык и стиль", "На какой язык переводить, какие термины и какой тон использовать.")
         languageCard
         profilesCard
         toneCard
-        remoteCard
+        SSection("Управление")
         copyCard
     }
 
@@ -351,9 +354,11 @@ struct GeneralTab: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
+        SSection("Система", "Запуск, разрешения macOS и сочетания клавиш.")
         launchCard
         permissionsCard
         hotKeysCard
+        SSection("Данные и обслуживание", "Что лежит на диске, как вернуть стандартные настройки и куда смотреть при сбое.")
         storageCard
         resetCard
         aboutCard

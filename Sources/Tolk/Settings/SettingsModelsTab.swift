@@ -15,9 +15,11 @@ struct ModelsTab: View {
     @State private var deleteServer: String?
 
     var body: some View {
+        SSection("Подсказки — на этом Mac", "Небольшая модель, которая продолжает ваш текст.")
         localCard
-        serverCard
         addCard
+        SSection("Перевод — на сервере", "Большая модель на домашнем сервере.")
+        serverCard
         .confirmationDialog("Удалить модель «\(deleteLocal ?? "")»?", isPresented: Binding(get: { deleteLocal != nil }, set: { if !$0 { deleteLocal = nil } }), titleVisibility: .visible) {
             Button("Переместить в Корзину", role: .destructive) { if let f = deleteLocal { library.delete(f) }; deleteLocal = nil }
             Button("Отмена", role: .cancel) { deleteLocal = nil }
@@ -37,7 +39,7 @@ struct ModelsTab: View {
     // MARK: Local
 
     private var localCard: some View {
-        SCard("Модели подсказок — на этом Mac", symbol: "laptopcomputer",
+        SCard("Доступные модели", symbol: "laptopcomputer",
               subtitle: "Модель для автодополнения работает прямо на Mac. Выберите одну; остальные можно удалить, чтобы не занимали диск.") {
             Text("Свободно \(UsageText.bytes(ModelLibrary.freeDiskBytes))").font(.callout).foregroundStyle(.secondary)
         } content: {
@@ -144,7 +146,7 @@ struct ModelsTab: View {
     // MARK: Add
 
     private var addCard: some View {
-        SCard("Добавить свою модель подсказок", symbol: "plus.circle",
+        SCard("Добавить свою", symbol: "plus.circle",
               subtitle: "Подойдёт любая небольшая модель в формате GGUF (1–6 ГБ). Чем она больше, тем медленнее подсказки.") {
             SRow("По ссылке", hint: "Прямая ссылка на файл .gguf, например со страницы модели на huggingface.co (вкладка Files → нужный файл → Copy download link).", divider: false) {
                 HStack {
@@ -171,7 +173,7 @@ struct ModelsTab: View {
     // MARK: Server
 
     private var serverCard: some View {
-        SCard("Модели перевода — на сервере", symbol: "server.rack",
+        SCard("Модели на сервере", symbol: "server.rack",
               subtitle: "Переводит большая модель на домашнем сервере (Ollama). Здесь видно, что на нём лежит; модель для перевода выбирается из готовых («…-translate»).") {
             Button { model.configureServer(); server.refresh() } label: { Image(systemName: "arrow.clockwise") }
                 .buttonStyle(.borderless).help("Обновить список")

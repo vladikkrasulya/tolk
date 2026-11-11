@@ -15,13 +15,16 @@ struct StatsTab: View {
 
     var body: some View {
         periodCard.fullSpan()
+        SSection("Перевод")
         translateCard
         translateChartCard
         originsCard
+        SSection("Подсказки")
         suggestCard
         suggestChartCard
         missesCard
         suggestTablesCard
+        SSection("Данные")
         privacyCard
     }
 
@@ -233,6 +236,7 @@ struct LogTab: View {
 
     var body: some View {
         viewerCard.fullSpan()
+        SSection("Настройка и справка")
         settingsCard
         legendCard
     }

@@ -13,13 +13,17 @@ struct AutocompleteTab: View {
     static let appChips = ["Коротко и неформально", "Вежливо, на «Вы»", "Без эмодзи", "Пиши по-английски"]
 
     var body: some View {
+        SSection("Подсказки", "Включить и настроить, как часто и какой длины они появляются.")
         mainCard
         frequencyCard
+        SSection("Что знает модель", "Ваши пожелания, контекст разговора и ваша манера письма.")
         instructionsCard
         contextCard
+        styleCard
+        SSection("Помощники при наборе", "Работают отдельно от подсказок.")
         typingCard
         typeTranslateCard
-        styleCard
+        SSection("Ограничения", "Когда и где подсказывать меньше или не подсказывать вовсе.")
         batteryCard
         offAppsCard
     }
