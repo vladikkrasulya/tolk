@@ -458,3 +458,14 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Model check on the same sets (2026-11-11): E2B-abl 28/30 shown, 22 right, 39/40 mid-sentence; E4B-abl 23/30,
   13 right, 36/40 and twice as slow. E2B stays.
 
+## v0.7.6 — live pass in web fields
+- Second attempt for word endings: when the healed answer is not a word («каче» + «р.»), the request is repeated with
+  the fragment left in the prompt as typed. `endings-30`: 28 → 30 shown, 24 right. A healed token with no reported
+  alternative to weigh against is capped at 0.5 (it came out as 1.0 and counted as "sure").
+- Caret unknown: Chrome `<textarea>` and plain `contenteditable` report no character rectangles (checked with an AX
+  probe: `AXBoundsForRange` and the marker variant both return empty rects; lines are hard lines only, no font).
+  `FocusedField.caretApprox` → `GhostTextPanel.bubble`: the suggestion is a readable bubble in the field's bottom-left
+  corner instead of invisible ghost text over the neighbours; plain contenteditable used to get nothing at all.
+- Checked live on a Chromium stand (`~/Translate/test-corpus/live/stand.html`): suggestions 7/7 at pauses, patient
+  second look, Tab acceptance; Documents: drag-and-drop from Finder, translation, «Сохранить как…» (docx).
+
