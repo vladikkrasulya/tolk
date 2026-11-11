@@ -603,3 +603,14 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
     always; popup and the translate page) and gets the same block. It fixes the agreement slip.
   Result on the licence, ru and uk: correct cases, «товарная пригодность / товарна придатність», «деликт / делікт»,
   three separate liability items, translated title. Not covered: the Documents page (chunks go straight to the engine).
+
+## v0.9.2 — suggestion models: what is on disk, what was measured, what fits this Mac
+
+- Models tab, local part: «Скачаны на этот Mac» lists only the files on disk (choose / delete) and names the Mac
+  (`MacHardware`: chip, RAM). «Проверенные модели» is the reference list with the measurements per model (time of one
+  suggestion, right endings, answered mid-sentence stops, RAM) and whether the RAM of this Mac is enough
+  (`MacHardware.fit`: comfortable up to a quarter of RAM, tight up to a half). «Лучшая для этого Mac» is the
+  best-ranked model that fits (`ModelLibrary.recommended`), no longer a fixed flag.
+- «Другая модель» explains how to judge any other GGUF from those reference points (memory ≈ file size, time grows
+  with size, bigger is not better, compare in the statistics) with the numbers of this Mac.
+- A model that is not downloaded says «скачается N ГБ» instead of «N ГБ на диске».

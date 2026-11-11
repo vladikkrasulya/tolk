@@ -3,6 +3,7 @@
 //   ModelLibrary  — suggestion models (GGUF files on this Mac): catalogue, download with progress, import, delete.
 //   ServerModels  — translation models on the Ollama server: list, download («pull»), prepare for translation, delete.
 import AppKit
+import Darwin
 import TolkCore
 
 // MARK: - Suggestion models (local GGUF)
@@ -14,8 +15,51 @@ struct CatalogModel: Identifiable, Equatable {
     let url: String
     let bytes: Int64
     let summary: String     // what to expect, in plain words
-    let memory: String      // RAM while running
-    var recommended = false
+    /// RAM while running, GB.
+    let memoryGB: Double
+    /// Measured on the project's test sets (M1 Max): time of one warm suggestion, right word endings, mid-sentence stops answered.
+    let speed: String
+    let endings: String
+    let continuations: String
+    /// Place by the measurements: 1 = best.
+    let rank: Int
+
+    var memory: String { "около " + String(format: "%.1f", memoryGB).replacingOccurrences(of: ".", with: ",").replacingOccurrences(of: ",0", with: "") + " ГБ памяти" }
+}
+
+/// This Mac, as far as choosing a model goes.
+enum MacHardware {
+    static let memoryGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+
+    static let chip: String = {
+        var size = 0
+        sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0)
+        guard size > 0 else { return "Mac" }
+        var buf = [CChar](repeating: 0, count: size)
+        sysctlbyname("machdep.cpu.brand_string", &buf, &size, nil, 0)
+        return String(cString: buf)
+    }()
+
+    static var summary: String { "\(chip) · \(Int(memoryGB.rounded())) ГБ памяти" }
+
+    enum Fit { case comfortable, tight, no
+        var text: String {
+            switch self {
+            case .comfortable: "памяти хватает с запасом"
+            case .tight: "поместится, но будет тесно: закройте лишние программы"
+            case .no: "на этом Mac памяти не хватит"
+            }
+        }
+    }
+
+    /// The model shares memory with everything else: comfortable when it takes at most a quarter of it, tight up to a half.
+    static func fit(modelGB: Double, ramGB: Double = memoryGB) -> Fit {
+        if modelGB <= ramGB * 0.25 { return .comfortable }
+        return modelGB <= ramGB * 0.5 ? .tight : .no
+    }
+
+    /// The largest model file worth trying here (comfortable), GB.
+    static func comfortableFileGB(ramGB: Double = memoryGB) -> Double { (ramGB * 0.25 - 0.3).rounded(.down) }
 }
 
 struct InstalledModel: Identifiable, Equatable {
@@ -46,19 +90,25 @@ final class ModelLibrary: ObservableObject {
         CatalogModel(file: "gemma-4-E2B-abl-Q4_K.gguf", title: "Gemma 4 E2B",
                      url: "https://huggingface.co/huihui-ai/Huihui-gemma-4-E2B-it-qat-q4_0-unquantized-abliterated-GGUF/resolve/main/Huihui-gemma-4-E2B-it-qat-q4_0-unquantized-abliterated-Q4_K.gguf",
                      bytes: 3_416_118_240,
-                     summary: "Основная. Отвечает примерно за 0,1 с и точнее остальных: 28 окончаний слов из 30 и 39 продолжений из 40 на проверочных наборах.",
-                     memory: "около 3,6 ГБ памяти", recommended: true),
+                     summary: "Лучший результат в замерах при самой высокой скорости.",
+                     memoryGB: 3.6, speed: "≈ 0,1 с", endings: "22 из 30", continuations: "39 из 40", rank: 1),
         CatalogModel(file: "gemma-4-E4B-abl-Q4_K.gguf", title: "Gemma 4 E4B",
                      url: "https://huggingface.co/huihui-ai/Huihui-gemma-4-E4B-it-qat-q4_0-unquantized-abliterated-GGUF/resolve/main/Huihui-gemma-4-E4B-it-qat-q4_0-unquantized-abliterated-Q4_K.gguf",
                      bytes: 5_302_272_352,
-                     summary: "Крупнее, но вдвое медленнее (0,16–0,25 с) и на тех же наборах слабее: 23 окончания из 30. Стоит пробовать, только если E2B пишет не в вашем стиле.",
-                     memory: "около 5,5 ГБ памяти"),
+                     summary: "Крупнее, но в замерах слабее E2B и вдвое медленнее. Пример того, что больше — не значит лучше.",
+                     memoryGB: 5.5, speed: "0,16–0,25 с", endings: "13 из 30", continuations: "36 из 40", rank: 2),
         CatalogModel(file: "qwen3.5-4B-abl-Q4_K_M.gguf", title: "Qwen 3.5 4B",
                      url: "https://huggingface.co/mradermacher/Huihui-Qwen3.5-4B-abliterated-GGUF/resolve/main/Huihui-Qwen3.5-4B-abliterated.Q4_K_M.gguf",
                      bytes: 2_707_514_688,
-                     summary: "Самая лёгкая. В сравнении уступила Gemma по русскому языку; вариант для Mac, где мало свободной памяти.",
-                     memory: "около 3 ГБ памяти"),
+                     summary: "Самая лёгкая по памяти. В раннем сравнении уступила Gemma по русскому языку; на новых наборах не замерялась.",
+                     memoryGB: 3.0, speed: "≈ 0,23 с", endings: "—", continuations: "—", rank: 3),
     ]
+
+    /// The best measured model that this Mac can run: the top one that fits, else the lightest.
+    static func recommended(ramGB: Double = MacHardware.memoryGB) -> CatalogModel {
+        let byRank = catalog.sorted { $0.rank < $1.rank }
+        return byRank.first { MacHardware.fit(modelGB: $0.memoryGB, ramGB: ramGB) != .no } ?? catalog.min { $0.memoryGB < $1.memoryGB }!
+    }
 
     @Published private(set) var installed: [InstalledModel] = []
     @Published private(set) var downloads: [String: DownloadState] = [:]

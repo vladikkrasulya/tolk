@@ -18,8 +18,9 @@ struct ModelsTab: View {
         SSections(tab: .models) { section in
             Group {
                 if section == 0 {
-                    localCard
+                    installedCard
                     addCard
+                    testedCard.fullSpan()
                 } else {
                     serverCard
                 }
@@ -43,30 +44,107 @@ struct ModelsTab: View {
 
     // MARK: Local
 
-    private var localCard: some View {
-        SCard("Доступные модели", symbol: "laptopcomputer",
-              subtitle: "Модель для автодополнения работает прямо на Mac. Выберите одну; остальные можно удалить, чтобы не занимали диск.") {
+    /// What is on the disk now: choose or delete.
+    private var installedCard: some View {
+        SCard("Скачаны на этот Mac", symbol: "internaldrive",
+              subtitle: "Модель подсказок работает прямо на Mac. Выберите одну; лишние можно удалить — они переедут в Корзину.") {
             Text("Свободно \(UsageText.bytes(ModelLibrary.freeDiskBytes))").font(.callout).foregroundStyle(.secondary)
         } content: {
+            SExample(label: "Ваш Mac", text: MacHardware.summary)
             if !ModelLibrary.llamaServerInstalled {
                 warning("Не установлена программа llama-server — без неё модели не запускаются. Откройте Терминал и выполните команду:", command: "brew install llama.cpp")
+                    .padding(.top, 8)
             }
-            ForEach(ModelLibrary.catalog) { m in
-                localRow(file: m.file, title: m.title, summary: m.summary, bytes: m.bytes, memory: m.memory, recommended: m.recommended, catalog: m)
+            if library.installed.isEmpty {
+                SHint("Пока ни одной. Скачайте модель из списка проверенных или добавьте свою.").padding(.top, 8)
             }
-            ForEach(library.extraInstalled) { m in
-                localRow(file: m.file, title: ACStats.shortModel(m.file), summary: "Добавлена вами. Замеров для неё нет — оценивайте по вкладке «Статистика».",
-                         bytes: m.bytes, memory: nil, recommended: false, catalog: nil)
+            ForEach(library.installed) { m in
+                let known = ModelLibrary.catalog.first { $0.file == m.file }
+                let selected = m.file == selectedFile
+                VStack(alignment: .leading, spacing: 4) {
+                    Rectangle().fill(TolkStyle.hairline).frame(height: 0.5).padding(.bottom, 4)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(known?.title ?? ACStats.shortModel(m.file)).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+                        if selected { SPill(text: "используется", symbol: "checkmark", role: .ok) }
+                        if known == nil { SPill(text: "ваша") }
+                        Spacer(minLength: 8)
+                        if !selected {
+                            Button("Выбрать") { model.config.autocompleteModel = ModelLibrary.configPath(for: m.file) }
+                                .help("Tolk перезапустит модель подсказок — это займёт несколько секунд")
+                        }
+                        Button(role: .destructive) { deleteLocal = m.file } label: { Image(systemName: "trash") }
+                            .disabled(selected)
+                            .help(selected ? "Эта модель используется. Сначала выберите другую." : "Удалить файл модели (в Корзину)")
+                    }
+                    Text("занимает \(UsageText.bytes(m.bytes)) на диске · \(m.file)").font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                }
+                .padding(.top, 8)
             }
-            // Downloads by link that are not files yet.
-            ForEach(library.downloads.keys.sorted().filter { f in !ModelLibrary.catalog.contains { $0.file == f } && !library.isInstalled(f) }, id: \.self) { f in
-                localRow(file: f, title: ACStats.shortModel(f), summary: "Скачивается по вашей ссылке.", bytes: library.downloads[f]?.total ?? 0, memory: nil, recommended: false, catalog: nil)
-            }
-            if let err = library.lastError {
-                Text(err).font(.callout).foregroundStyle(.red).padding(.top, 4)
-            }
+            if let err = library.lastError { Text(err).font(.callout).foregroundStyle(.red).padding(.top, 6) }
         }
         .onAppear { library.refresh() }
+    }
+
+    /// The models measured on the project's test sets — the reference for judging any other model.
+    private var testedCard: some View {
+        let best = ModelLibrary.recommended()
+        return SCard("Проверенные модели", symbol: "checklist",
+                     subtitle: "Модели, которые мы замеряли на проверочных наборах (Mac с M1 Max). Это не «лучшие в мире», а точки отсчёта: по ним можно прикинуть, чего ждать от другой модели похожего размера.") {
+            ForEach(ModelLibrary.catalog) { m in testedRow(m, best: best.file == m.file) }
+            ForEach(library.downloads.keys.sorted().filter { f in !ModelLibrary.catalog.contains { $0.file == f } && !library.isInstalled(f) }, id: \.self) { f in
+                VStack(alignment: .leading, spacing: 5) {
+                    Rectangle().fill(TolkStyle.hairline).frame(height: 0.5).padding(.bottom, 4)
+                    HStack {
+                        Text(ACStats.shortModel(f)).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+                        SPill(text: "по вашей ссылке")
+                        Spacer()
+                        localButtons(file: f, installed: false, selected: false, state: library.downloads[f], catalog: nil)
+                    }
+                    if let st = library.downloads[f] { downloadState(st) }
+                }
+                .padding(.top, 8)
+            }
+        }
+    }
+
+    private func testedRow(_ m: CatalogModel, best: Bool) -> some View {
+        let installed = library.isInstalled(m.file)
+        let selected = installed && m.file == selectedFile
+        let fit = MacHardware.fit(modelGB: m.memoryGB)
+        return VStack(alignment: .leading, spacing: 6) {
+            Rectangle().fill(TolkStyle.hairline).frame(height: 0.5).padding(.bottom, 2)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(m.title).fontWeight(.medium)
+                if best { SPill(text: "лучшая для этого Mac", symbol: "star", role: .accent) }
+                if selected { SPill(text: "используется", symbol: "checkmark", role: .ok) }
+                else if installed { SPill(text: "скачана") }
+                Spacer(minLength: 8)
+                if installed, !selected {
+                    Button("Выбрать") { model.config.autocompleteModel = ModelLibrary.configPath(for: m.file) }
+                } else if !installed {
+                    localButtons(file: m.file, installed: false, selected: false, state: library.downloads[m.file], catalog: m)
+                }
+            }
+            Text(m.summary).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            STileGrid(minTile: 150) {
+                STile(caption: "Одна подсказка", value: m.speed, note: "чем меньше, тем живее")
+                STile(caption: "Окончания слов", value: m.endings, note: "верных на наборе")
+                STile(caption: "Продолжения", value: m.continuations, note: "показано на наборе")
+                STile(caption: "Память", value: String(format: "%.1f ГБ", m.memoryGB).replacingOccurrences(of: ".", with: ","), note: fit.text)
+            }
+            Text(installed ? "файл \(UsageText.bytes(m.bytes)), уже на диске" : "скачается \(UsageText.bytes(m.bytes))")
+                .font(.caption).foregroundStyle(.tertiary)
+            if let st = library.downloads[m.file] { downloadState(st) }
+        }
+        .padding(.top, 8)
+    }
+
+    @ViewBuilder private func downloadState(_ state: DownloadState) -> some View {
+        if let err = state.error {
+            Label(err, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+        } else {
+            SProgress(fraction: state.fraction, caption: downloadCaption(state))
+        }
     }
 
     private func warning(_ text: String, command: String) -> some View {
@@ -83,34 +161,6 @@ struct ModelsTab: View {
             }
         }
         .padding(.bottom, 10)
-    }
-
-    private func localRow(file: String, title: String, summary: String, bytes: Int64, memory: String?, recommended: Bool, catalog: CatalogModel?) -> some View {
-        let installed = library.isInstalled(file)
-        let selected = installed && file == selectedFile
-        let state = library.downloads[file]
-        return VStack(alignment: .leading, spacing: 5) {
-            Rectangle().fill(TolkStyle.hairline).frame(height: 0.5).padding(.bottom, 4)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(title).fontWeight(.medium)
-                if selected { SPill(text: "используется", symbol: "checkmark", role: .ok) }
-                else if installed { SPill(text: "скачана") }
-                if recommended { SPill(text: "рекомендуем", role: .accent) }
-                Spacer(minLength: 8)
-                localButtons(file: file, installed: installed, selected: selected, state: state, catalog: catalog)
-            }
-            Text(summary).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text([bytes > 0 ? UsageText.bytes(bytes) + " на диске" : nil, memory, file].compactMap { $0 }.joined(separator: " · "))
-                .font(.caption).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
-            if let state {
-                if let err = state.error {
-                    Label(err, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
-                } else {
-                    SProgress(fraction: state.fraction, caption: downloadCaption(state))
-                }
-            }
-        }
-        .padding(.bottom, 8)
     }
 
     @ViewBuilder
@@ -151,8 +201,17 @@ struct ModelsTab: View {
     // MARK: Add
 
     private var addCard: some View {
-        SCard("Добавить свою", symbol: "plus.circle",
-              subtitle: "Подойдёт любая небольшая модель в формате GGUF (1–6 ГБ). Чем она больше, тем медленнее подсказки.") {
+        let roomy = max(2, Int(MacHardware.comfortableFileGB()))
+        return SCard("Другая модель", symbol: "plus.circle",
+              subtitle: "Подойдёт любая модель в формате GGUF. Проверенные модели выше — мерка, по которой её можно оценить заранее.") {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Как прикинуть для своего Mac").font(.callout).fontWeight(.medium)
+                rule("Память", "модели нужно примерно столько же памяти, сколько весит её файл, плюс 0,3–0,5 ГБ. На вашем Mac (\(Int(MacHardware.memoryGB.rounded())) ГБ) без тесноты поместится файл до \(roomy) ГБ.")
+                rule("Скорость", "время растёт вместе с размером: файл 3,4 ГБ даёт подсказку за 0,1 с, 5,3 ГБ — за 0,2 с. Дольше 0,3 с подсказка приходит уже после того, как вы продолжили печатать. На Mac новее и мощнее M1 Max будет быстрее, на слабее — медленнее.")
+                rule("Качество", "крупнее — не обязательно лучше: E4B в замерах проиграла E2B. Для подсказок важнее скорость и то, как модель держит русский язык.")
+                rule("Проверка", "поставьте модель, попользуйтесь день и сравните долю принятых подсказок во вкладке «Статистика» — там есть разбивка по моделям.")
+            }
+            .padding(.bottom, 10)
             SRow("По ссылке", hint: "Прямая ссылка на файл .gguf, например со страницы модели на huggingface.co (вкладка Files → нужный файл → Copy download link).", divider: false) {
                 HStack {
                     TextField("", text: $link, prompt: Text("https://huggingface.co/…/model.gguf")).textFieldStyle(.roundedBorder).frame(minWidth: 180, maxWidth: 300)
@@ -173,6 +232,10 @@ struct ModelsTab: View {
                 }
             }
         }
+    }
+
+    private func rule(_ name: String, _ text: String) -> some View {
+        (Text(name + ": ").fontWeight(.medium) + Text(text)).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: Server
