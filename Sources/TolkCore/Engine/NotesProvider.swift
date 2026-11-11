@@ -4,22 +4,7 @@ import Foundation
 /// "разжать QPS") and explains the choice, so the user can pin the right variant in the glossary.
 enum NotesPrompt {
     static func system(from: Language, to: Language, rules: String) -> String {
-        var s = """
-        You review a \(from.englishName) → \(to.englishName) translation.
-        Find at most 3 terms or phrases in the SOURCE that are specialist jargon, slang, idioms or ambiguous words,
-        where a generic translator often gets it wrong or inconsistent (the field comes from the user's glossary and the text itself).
-        Skip ordinary words, names, IDs and numbers.
-        The user's glossary below is authoritative: never suggest anything that contradicts it, and skip terms it already covers.
-        Suggest only what a native speaker would really write in a chat or email;
-        if you are not sure a variant is better, leave "suggestion" empty — a confirmed correct choice is a useful note too.
-        If nothing is debatable, return an empty list — do not invent notes.
-        For each note:
-        - "term": exact phrase from the source;
-        - "used": how the translation rendered it (exact words from the translation);
-        - "suggestion": a clearly better variant in \(to.englishName), or "";
-        - "note": in Russian, at most 15 words: what it means and why this variant.
-        Answer with JSON only: {"notes":[{"term":"","used":"","suggestion":"","note":""}]}
-        """
+        var s = PromptCatalog.filled("tools.notes", ["from": from.englishName, "to": to.englishName])
         if !rules.isEmpty { s += "\n\n# User's rules and glossary\n" + rules }
         return s
     }

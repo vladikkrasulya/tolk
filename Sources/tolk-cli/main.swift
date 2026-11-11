@@ -80,6 +80,7 @@ while let a = args.next() {
     case "--trap-back": trapBack = true                       // with --trap-corpus: also translate every result back and compare the key elements
     case "--trap-only": trapOnly = value()                   // with --trap-corpus: only ids/traps from this comma list
     case "--twice": twice = true                             // translate the text twice in one process: shows the result cache
+    case "--prompt-digest": print(PromptDigest.lines().joined(separator: "\n")); exit(0)  // fingerprints of the assembled prompts
     case "--log-guide": print(LogGuide.markdown()); exit(0)  // the guide to tolk.log as Markdown (docs/journal.md)
     case "--self-test": selfTest = true                      // engine checks without model or network
     case "--warm": warmOnly = true                          // load the model on the home server and report the time

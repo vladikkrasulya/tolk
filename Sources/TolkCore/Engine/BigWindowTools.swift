@@ -364,38 +364,14 @@ extension OllamaProvider {
 
 enum ExtrasPrompt {
     static func variants(from: Language, to: Language, tone: Tone, rules: String) -> String {
-        var s = """
-        You help a translator. You get a \(from.englishName) text, its \(to.englishName) translation, ONE source sentence and its current translation.
-        Give 2 or 3 OTHER ways to translate that sentence into \(to.englishName), each clearly different from the current one and from each other.
-        Each variant must be a drop-in replacement for the current sentence: same meaning and facts, all numbers, names, links and glossary terms kept,
-        the same form of address and grammatical gender as in the full translation, and it must fit between the neighbouring sentences.
-        Natural native wording only, no calques. Do not repeat the current translation.
-        Every variant has a short label in Russian (1-3 words) saying how it differs, for example: «ближе к тексту», «разговорнее», «короче», «формальнее», «мягче».
-        Answer with JSON only: {"variants":[{"text":"...","label":"..."}]}
-        """
+        var s = PromptCatalog.filled("tools.sentenceVariants", ["from": from.englishName, "to": to.englishName])
         if !rules.isEmpty { s += "\n\n# User's rules and glossary (authoritative)\n" + rules }
         s += "\n\n# Tone of the text\n" + Prompt.tone(tone)
         return s
     }
 
     static func translationVariants(from: Language, to: Language, userLanguage: Language, tone: Tone, rules: String) -> String {
-        var s = """
-        You help a translator. You get a \(from.englishName) SOURCE text and its CURRENT TRANSLATION into \(to.englishName).
-        Give 2 or 3 ALTERNATIVE translations of the WHOLE text into \(to.englishName). The alternatives must really differ from the current one and from each other
-        in style, register, form of address or closeness to the source. Choose the axes that matter for THIS text: a letter to a boss, a chat message to a colleague
-        and a note to a spouse call for different alternatives (e.g. stricter / friendlier / closer to the source / shorter / more colloquial).
-        Never output the current translation again and never output two alternatives that are almost the same.
-        Keep exactly, in every alternative: the meaning and every fact, all numbers, dates, times, prices, links, e-mails, IDs, names, emoji, the glossary terms below,
-        and the type of every sentence (a question stays a question, a request stays a request). Do not add information. Natural native wording, no calques.
-        For each alternative give:
-        - "label": 1-3 words in \(userLanguage.englishName) naming how it differs, for example «Строже», «Дружелюбнее», «Ближе к тексту», «Короче», «Разговорнее».
-        - "reason": ONE short phrase in \(userLanguage.englishName) (at most 12 words) listing the CONCRETE changes you actually made compared with the current translation:
-          form of address, words replaced, word order, what was cut or softened. Describe only real differences you can see in the text; never praise the style in general and never invent changes.
-          Good: «на «Вы», без смайлов, просьба как формальное требование»; «смягчено, разговорный порядок слов»; «почти дословно, сохранены англицизмы».
-          Bad: «более профессиональный стиль, характерный для деловой переписки».
-        If the text is short, still give 2 alternatives that differ in wording, not only in punctuation.
-        Answer with JSON only: {"variants":[{"label":"...","reason":"...","text":"..."}]}
-        """
+        var s = PromptCatalog.filled("tools.variants", ["from": from.englishName, "to": to.englishName, "user": userLanguage.englishName])
         if !rules.isEmpty { s += "\n\n# User's rules and glossary (authoritative)\n" + rules }
         s += "\n\n# Tone of the text\n" + Prompt.tone(tone)
         return s
@@ -421,39 +397,13 @@ enum ExtrasPrompt {
         case .informal:
             what = "Switch the form of address to INFORMAL, friendly chat style (\(informalHint(to))). Change pronouns and the verb forms that go with them everywhere, consistently. Do not add slang or swearing that is not in the original."
         }
-        var s = """
-        You are a native \(to.englishName) editor. You get a SOURCE text in \(from.englishName) and its CURRENT TRANSLATION into \(to.englishName).
-        Rewrite the CURRENT TRANSLATION as follows. \(what)
-        Keep exactly: the meaning, all numbers, dates, times, names, links, e-mails, IDs, emoji, line breaks and the glossary terms below.
-        Write numbers, currencies, times and dates exactly as in the CURRENT TRANSLATION (do not reformat «4,8 $» into «$4.8» or «7 PM» into «19:00»). Keep the letter «ё» if the translation uses it.
-        Do not change the type of a sentence (a question stays a question). Do not add information.
-        Output ONLY the rewritten text in \(to.englishName): no comments, no quotes around it, no alternatives.
-        """
+        var s = PromptCatalog.filled("tools.rewrite", ["from": from.englishName, "to": to.englishName, "what": what])
         if !rules.isEmpty { s += "\n\n# User's rules and glossary (authoritative)\n" + rules }
         return s
     }
 
     static func compose(tone: ComposeTone, pointsLanguage: Language, to: Language, hasPartner: Bool, rules: String) -> String {
-        var s = """
-        You write a ready-to-send message for the user. The user gives POINTS in \(pointsLanguage.englishName): rough notes or an instruction in their own words
-        (for example «пусть отключит весь трафик и ещё раз попробуем» means: the user must ask the recipient to switch traffic off and say they will try again).
-        Turn the points into ONE finished message FROM the user TO the recipient, in natural native \(to.englishName). Address the recipient directly («you»); the user speaks for themselves or their team («we»).
-        Tone: \(tone.promptHint)
-        Example of this tone (other topic, only for the style): «\(tone.promptExample)»
-        Two kinds of points:
-        - FACTS and requests: every one goes into the message.
-        - STYLE INSTRUCTIONS to you about how to write («сильно аккуратно не нужно», «без агрессии», «скажи прямо», «помягче», «без официоза», «сильно не извиняйся»): they only steer the tone. NEVER write them out as sentences: no «we want to be direct», «we don't need to be gentle», «without aggression». A phrase that states a position or a condition is a FACT and must be in the message, once, in the chosen tone: «такая история нам не нравится», «это не обсуждается» (= this is not up for discussion), «мы настаиваем» (= we insist).
-        Hard rules:
-        - Include EVERY fact and request. Do not drop, merge away or weaken any of them.
-        - Add NOTHING of your own: no new promises, deadlines, amounts, reasons, names, offers, apologies, greetings or sign-offs, and no words for things the points do not mention (do not say «integration», «refund», «contract», «deadline», «penalty» unless the points do).
-        - Keep the strength of every opinion: «не нравится» = «we don't like it» / «it doesn't work for us», never «unacceptable»; «не устраивает» is not «outrageous»; do not make a mild opinion strong or a strong one mild.
-        - Keep every number, date, time, currency and name exactly as in the points. Do not invent any.
-        - Slang, swear words and rude words in the points are conveyed by their meaning in neutral wording, never copied as rude language and never made harsher.
-        - Do not turn a condition into a fact or a possibility into a threat: if the points say «if X happens, we do Y», keep the «if». If the points say «require a refund», it is a demand for a refund, not «we will consider».
-        - Plain vocabulary of the points stays: «traffic» stays «traffic», do not rename it.
-        - A short message stays short. No subject line, no signature, no greeting (only if the points ask for one).
-        Output ONLY the message text in \(to.englishName): no comments, no quotes, no alternatives, no translation.
-        """
+        var s = PromptCatalog.filled("tools.compose", ["points": pointsLanguage.englishName, "to": to.englishName, "tone": tone.promptHint, "example": tone.promptExample])
         if hasPartner { s += "\nThe message answers the PARTNER'S MESSAGE: use the form of address (you/Вы/du/Sie) and the terms the partner uses." }
         if !rules.isEmpty { s += "\n\n# User's rules and glossary (authoritative)\n" + rules }
         return s
@@ -533,15 +483,7 @@ enum ExtrasPrompt {
     }
 
     static func explain(userLanguage: Language, rules: String) -> String {
-        var s = """
-        You help the user understand a message they received (in any language). Write ALL your answer in \(userLanguage.englishName).
-        Be brief. Answer with JSON only:
-        {"meaning":"...","tone":"...","terms":[{"term":"...","meaning":"..."}]}
-        - "meaning": 1-2 short sentences: what the sender wants or says, including anything implied between the lines (a polite refusal, a hidden request, a deadline).
-        - "tone": ONE or two words describing how it sounds: for example «нейтрально», «вежливый отказ», «раздражение», «шутка», «срочно», «дружелюбно», «настойчиво», «сарказм» (in \(userLanguage.englishName)).
-        - "terms": up to 5 items — slang, jargon, idioms, abbreviations or cultural references that a non-native reader may not know; "term" is copied exactly from the message, "meaning" is a short explanation (at most 12 words). Skip ordinary words and names. Empty list if there is nothing to explain.
-        Do not translate the whole message, do not give advice, do not add anything else.
-        """
+        var s = PromptCatalog.filled("tools.explain", ["user": userLanguage.englishName])
         if !rules.isEmpty { s += "\n\n# The user's work glossary (helps with jargon)\n" + rules }
         return s
     }

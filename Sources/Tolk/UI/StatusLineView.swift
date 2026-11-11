@@ -51,6 +51,19 @@ final class StatusLineView: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Narrower than this the text would be cut to «Gem…»: the coloured dot alone says more, the text is in the tooltip.
+    private static let minTextWidth: CGFloat = 96
+    private var borrowedTip = false
+
+    override func layout() {
+        super.layout()
+        let tight = bounds.width < Self.minTextWidth
+        if label.isHidden != tight { label.isHidden = tight }
+        // The states set their own tooltip; only a line without one borrows the hidden text.
+        if tight, (toolTip ?? "").isEmpty, !label.stringValue.isEmpty { toolTip = label.stringValue; borrowedTip = true }
+        if !tight, borrowedTip { toolTip = nil; borrowedTip = false }
+    }
+
     // MARK: - States
 
     override func hitTest(_ point: NSPoint) -> NSView? {

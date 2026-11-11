@@ -121,8 +121,21 @@ private final class HintBadge: NSView {
         var maxX = (screen?.frame.maxX ?? caret.maxX + 800) - 4
         if let rightLimit { maxX = min(maxX, rightLimit - 2) }   // never past the field / window edge
 
-        let x0 = caret.minX
-        let avail = maxX - x0
+        var x0 = caret.minX
+        var avail = maxX - x0
+        // A bubble has no need to start exactly at the caret: when the text does not fit to the right of it, the
+        // bubble moves one line down and as far left as it takes (not past the screen's left edge), instead of
+        // being cut to «→ сообще…».
+        var dropLine = false
+        if bubble {
+            let need = Self.measure(text, font).width + 60
+            if need > avail {
+                let minX = (screen?.frame.minX ?? 0) + 8
+                x0 = max(minX, maxX - need)
+                avail = maxX - x0
+                dropLine = true
+            }
+        }
         guard avail > size else { return false }
 
         let hintSize = Self.measure("\u{21E5}", hintFont)
@@ -155,7 +168,8 @@ private final class HintBadge: NSView {
         let baselineY = caret.minY + 0.21 * caret.height
         let fieldY = baselineY + font.descender
         let padX: CGFloat = bubble ? 7 : 0, padY: CGFloat = bubble ? 3 : 0
-        let frame = NSRect(x: x0 + (bubble ? 4 : -padX), y: (fieldY - (height - textH) / 2).rounded() - padY, width: totalW + 2 * padX, height: height + 2 * padY)
+        var frame = NSRect(x: x0 + (bubble ? 4 : -padX), y: (fieldY - (height - textH) / 2).rounded() - padY, width: totalW + 2 * padX, height: height + 2 * padY)
+        if dropLine { frame.origin.y -= max(caret.height, frame.height) + 3 }
         panel.setFrame(frame, display: true)
         if bubbleBack.superview == nil, let content = panel.contentView { content.addSubview(bubbleBack, positioned: .below, relativeTo: nil) }
         bubbleBack.isHidden = !bubble

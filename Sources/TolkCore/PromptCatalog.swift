@@ -4,7 +4,7 @@
 import Foundation
 
 public struct PromptBlock: Sendable, Identifiable {
-    public enum Group: String, Sendable { case translate, tone, editor, phrases, autocomplete }
+    public enum Group: String, Sendable { case translate, tone, editor, phrases, tools, autocomplete }
     public let id: String
     public let group: Group
     /// Name in plain Russian.
@@ -45,7 +45,9 @@ public enum PromptCatalog {
 
     public static func blocks(in group: PromptBlock.Group) -> [PromptBlock] { blocks.filter { $0.group == group } }
 
-    public static let blocks: [PromptBlock] = [
+    public static var blocks: [PromptBlock] { coreBlocks + toolBlocks }
+
+    static let coreBlocks: [PromptBlock] = [
         // MARK: Перевод
         PromptBlock(id: "translate.base", group: .translate, title: "Основная инструкция переводчика",
                     about: "Первое, что видит модель при каждом переводе: кто она, что делать и чего не трогать.",
@@ -165,7 +167,7 @@ extension SelfTest {
         defer { C.overrides = saved }
         C.overrides = [:]
         check(Set(C.blocks.map(\.id)).count == C.blocks.count, "prompts: block ids are unique")
-        check(C.blocks.allSatisfy { b in b.placeholders.allSatisfy { b.defaultText.contains("{\($0)}") } || b.id == "translate.formal" }, "prompts: declared placeholders are in the built-in text")
+        check(C.blocks.allSatisfy { b in b.placeholders.allSatisfy { b.defaultText.contains("{\($0)}") } }, "prompts: declared placeholders are in the built-in text")
         let r = ResolvedRequest(text: "x", source: .english, target: .russian, tone: .auto, mode: .translate)
         let base = Prompt.system(for: r, rules: "")
         check(base.hasPrefix("You are a professional translator. Translate the user's text from English to Russian.\nOutput ONLY") && base.contains("{clickid}")

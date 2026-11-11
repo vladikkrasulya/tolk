@@ -1,60 +1,70 @@
 # Tolk
 
-Tolk — локальный переводчик и системное автодополнение для macOS. Перевод делает ваша собственная языковая модель (Ollama на вашем или домашнем компьютере). Подсказки при наборе делает маленькая модель прямо на Mac. В облако текст может уйти только через запасной переводчик (Google), и его можно заменить переводом на самом Mac или выключить совсем.
+English · [Русский](README.ru.md)
 
-Версия 0.9.0. Интерфейс на русском. Проект личный: сделан под одного человека и его привычки, но код открыт (лицензия MIT) — берите, собирайте, переделывайте.
+Tolk is a local translator and system-wide autocomplete for macOS. Translation is done by your own language model (Ollama on this Mac or on a machine in your home network). Typing suggestions come from a small model that runs on the Mac itself. Text can leave your computer only through the fallback translator (Google), which you can replace with the built-in macOS translation or switch off.
 
-## Что умеет
+Version 1.0.0. The interface is in Russian. This is a personal project built around one person's habits, but the code is open (MIT): take it, build it, change it.
 
-**Перевод**
-- Всплывающее окно рядом с курсором по двойному ⌘C: перевод печатается по мере генерации.
-- Сноски к спорным терминам, обратный перевод, варианты слова и варианты всего перевода, проверка потерянных чисел и ссылок, «Редактор» против калек.
-- Тон по приложению (чат или письмо), 24 языка, автоопределение направления.
-- Глоссарий и профили («Работа», «Дом»): свои правила и свой глоссарий у каждого.
+## What it does
 
-**Переписка**
-- «Ответить»: ответ по-русски переводится на язык собеседника с учётом его сообщения. Готовые ответы одним нажатием.
-- «Перевод при наборе»: пишете на своём языке, под полем появляется перевод, Tab вставляет его.
-- Большое окно: режимы «Перевод», «Ответ» и «Составить», подсказки, варианты, переписывание (короче, мягче, твёрже, проще, по-деловому, прямо, «ты» / «Вы»).
+**Translation**
+- A popup next to the cursor on double ⌘C; the translation streams in as it is generated.
+- Footnotes for debatable terms, back-translation, alternatives for a word and for the whole text, a check for lost numbers and links, an editor pass against word-for-word renderings.
+- Tone per application (chat or letter), 24 languages, automatic direction.
+- Glossary and profiles (for example "Work" and "Home"), each with its own rules and terms.
+- Official and legal texts get the established legal formulas plus an automatic editor and proofreader pass.
 
-**Всё остальное**
-- Быстрые действия в любом приложении: перевести и заменить выделенное (⌃⌥T), причесать текст (⌃⌥P), исправить раскладку (⌃⌥L).
-- Фото и скриншоты: распознавание текста на Mac и перевод (⌥⇧S для области экрана).
-- Документы: PDF, Word, RTF, ODT, HTML, TXT, MD; экспорт в DOCX, RTF, TXT, MD.
-- История переводов с поиском, только на этом Mac.
-- Автодополнение: серый текст у курсора в любом приложении (Tab, →), исправление опечаток, эмодзи.
+**Conversations**
+- "Reply": write in your language, the reply is translated into the other person's language with their message as context. One-click ready replies.
+- "Translate while typing": type in your language, the translation appears under the field, Tab inserts it.
+- The big window: Translate, Reply and Compose modes, hints, variants, rewriting (shorter, softer, firmer, simpler, businesslike, direct, formal / informal address).
 
-**Настройки без кода**
-- Страница настроек из карточек с пояснением к каждому переключателю: что будет в этом положении и что — в другом.
-- Модели скачиваются, выбираются и удаляются из интерфейса — и для подсказок (на Mac), и для перевода (на сервере Ollama).
-- Тонкая настройка: температура, пороги уверенности, размер контекста; встроенная инструкция модели видна и редактируется.
-- Статистика (сколько переведено и откуда, сколько подсказок принято и почему подсказки не было) и журнал с объяснением каждой строки.
+**Everything else**
+- Quick actions in any app: translate and replace the selection (⌃⌥T), polish text (⌃⌥P), fix the keyboard layout (⌃⌥L).
+- Photos and screenshots: on-device text recognition and translation (⌥⇧S for a screen area).
+- Documents: PDF, Word, RTF, ODT, HTML, TXT, MD; export to DOCX, RTF, TXT, MD.
+- Translation history with search, kept only on this Mac.
+- Autocomplete: grey text at the caret in any app (Tab accepts a word, → the whole suggestion), typo fixes, emoji.
 
-## Как выглядит работа
+**Settings without touching code**
+- A settings page made of cards; every switch explains what happens in each position.
+- Models are downloaded, chosen and deleted from the interface, both for suggestions (on the Mac) and for translation (on the Ollama server). Tested models are listed with their measurements and whether this Mac has enough memory.
+- Fine tuning: temperature, confidence thresholds, context size. Every built-in instruction the models get can be read, reworded and reset.
+- Statistics (how much was translated and from where, how many suggestions were accepted, why a suggestion did not appear, how suggestions behave in each app and site) and a log viewer that explains every line.
 
-1. Выделяете текст в любом приложении и дважды нажимаете ⌘C. Рядом с курсором появляется перевод.
-2. Отвечаете собеседнику кнопкой «Ответить» или включаете «Перевод при наборе» (⌃⌥R) и пишете по-русски прямо в чате.
-3. Включаете автодополнение в меню Tolk, и серые подсказки появляются при наборе в любом поле.
+## Requirements
 
-## Требования
+- A Mac with macOS 14 or later, Apple Silicon. Building needs the Command Line Tools with Swift 6.2 (`xcode-select --install`); Xcode is not required.
+- A translation model server: Ollama on any computer (Mac, Windows, Linux) with Gemma 4 26B, about 24 GB of memory in total. See [SETUP.md](SETUP.md) (in Russian).
+- For autocomplete: Homebrew `llama.cpp` and a model file (1.3–3.4 GB; downloaded from the settings).
+- There is no Windows or Linux client. Cloud model APIs are not supported.
 
-- Mac с macOS 14 или новее, Apple Silicon. Для сборки нужны Command Line Tools со Swift 6.2 (`xcode-select --install`), Xcode не нужен.
-- Сервер модели перевода: Ollama на любом компьютере (Mac, Windows, Linux), модель Gemma 4 26B, около 24 ГБ памяти в сумме. Подробности в `SETUP.md`.
-- Для автодополнения: Homebrew `llama.cpp` и файл модели на ~3,4 ГБ.
-- Клиента под Windows и Linux нет. Модель по облачному API пока не поддерживается.
+## Install
 
-## Документы
+Download `Tolk-1.0.0.dmg` from the [Releases](../../releases) page, open it and drag Tolk to Applications. The build is signed with a local certificate, not notarized by Apple: on first launch right-click the app and choose Open.
 
-- [SETUP.md](SETUP.md) — установка и первая настройка.
-- [docs/USER-GUIDE.md](docs/USER-GUIDE.md) — руководство по всем функциям и горячим клавишам.
-- [ARCHITECTURE.md](ARCHITECTURE.md) — устройство, замеры и журнал версий.
-- [docs/journal.md](docs/journal.md) — что значат строки журнала и что с ними делать.
-- [PROJECT-OVERVIEW.md](PROJECT-OVERVIEW.md) — описание проекта для внешнего ревью (состояние на версию 0.7.0).
+Or build from source:
 
-## Приватность
+```bash
+scripts/build-app.sh
+```
 
-Перевод идёт через вашу собственную модель. Если сервер модели недоступен, по умолчанию текст переводит Google — в «Настройки → Перевод → Если сервер недоступен» это меняется на перевод средствами macOS (без интернета) или на «ничего не отправлять». Подсказки считаются на Mac. История, память стиля, статистика и журнал лежат только на вашем диске; в журнале и статистике нет текста — только числа и названия программ.
+```bash
+scripts/install.sh
+```
 
-## Лицензия
+## Documents
 
-[MIT](LICENSE). Модели (Gemma, Qwen и другие) распространяются на своих условиях и в репозиторий не входят.
+- [SETUP.md](SETUP.md) — installation and first setup (Russian).
+- [docs/USER-GUIDE.md](docs/USER-GUIDE.md) — every feature and shortcut (Russian).
+- [docs/journal.md](docs/journal.md) — what the log lines mean and what to do about them (Russian).
+- [ARCHITECTURE.md](ARCHITECTURE.md) — how it is built, the measurements and the version log (English).
+
+## Privacy
+
+Translation goes through your own model. If the model server is unreachable, Google translates by default; in Settings this can be changed to the on-device macOS translation or to "send nothing". Suggestions are computed on the Mac. History, style memory, statistics and the log stay on your disk; the log and the statistics contain no text, only numbers and application names.
+
+## License
+
+[MIT](LICENSE). The models (Gemma, Qwen and others) are distributed under their own terms and are not part of this repository.

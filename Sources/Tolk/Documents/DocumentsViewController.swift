@@ -596,9 +596,15 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         let c = doc.characterCount
         parts.append("\(Self.number(c)) \(Self.plural(c, "знак", "знака", "знаков"))")
         if let lang = doc.dominantLanguage { parts.append(UIText.capitalized(lang)) }
-        parts.append("перевод ≈ \(Self.duration(estimate(doc))) (примерно, ~\(Int(Self.assumedSpeed)) знаков/с)")
+        if translator.isComplete {
+            // Done: the estimate is history, say how long it really took.
+            parts.append("переведено за \(Self.duration(max(1, translator.elapsed)))")
+            statsLabel.toolTip = nil
+        } else {
+            parts.append("перевод ≈ \(Self.duration(estimate(doc))) (примерно, ~\(Int(Self.assumedSpeed)) знаков/с)")
+            statsLabel.toolTip = "Оценка времени приблизительная: домашняя модель переводит около \(Int(Self.assumedSpeed)) знаков в секунду."
+        }
         statsLabel.stringValue = parts.joined(separator: " · ")
-        statsLabel.toolTip = "Оценка времени приблизительная: домашняя модель переводит около \(Int(Self.assumedSpeed)) знаков в секунду."
     }
 
     // MARK: - Target language & tone
@@ -774,6 +780,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
             markCurrent(nil)
             setRunState(.idle)
             updateProgress()
+            updateStats()
             hideNotice()
         case let .failed(message):
             markCurrent(nil)

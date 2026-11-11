@@ -683,3 +683,20 @@ Run on `scripts/stand/editors.html` with the user away: type, wait for the sugge
   hugs its text (Jira-like) and an iframe editor all show the suggestion at the caret (`ax=ocr`), insert the word on
   Tab and keep the rest at the caret; a typo fix appears at the caret and is applied.
 - Not covered by the stand: the real Jira, Slack, Gmail and Google Docs (a canvas — not supported).
+
+## v1.0.0
+
+The user confirmed that suggestions work in Jira, Slack and Telegram, that every settings screen in use was clicked
+through, and that Tab no longer falls through to the app. Closed for 1.0:
+
+- **The rest of the built-in instructions are editable**: footnotes, variants of a sentence and of the whole
+  translation, «Переписать» (shared part), «Составить» and «Что он имел в виду» are `PromptCatalog` blocks
+  (`PromptCatalog+Tools.swift`, group `tools`). The blocks were generated from the original string literals;
+  `tolk-cli --prompt-digest` gave identical fingerprints for all 124 assembled prompts before and after. Not moved:
+  the per-button texts of «Переписать» and the second pass of «Составить» (`toneTransfer`).
+- **Three interface flaws**: the status line under a translation shows the coloured dot alone when there is no room
+  for the text (it used to be cut to «Gem…»; the text is in the tooltip); the Documents line says «переведено за …»
+  after the translation instead of keeping the estimate; a suggestion bubble that does not fit to the right of the
+  caret moves one line down and left instead of being cut.
+- **README in English** (`README.md`), the Russian one is `README.ru.md`.
+- A DMG is attached to the GitHub release.
