@@ -428,7 +428,20 @@ final class AutocompleteController {
             guard let self, !Task.isCancelled, gen == self.generation, let s = self.suggestion else { return }
             if let f = field, f.pid != Self.ownPID, !IsSecureEventInputEnabled(), !self.isOff(f.bundleID),
                self.anchorStillMatches(f) {
-                self.display(s, caret: f.caret, fontSize: f.fontSize, rightLimit: f.rightLimit)
+                // No caret from the app (web fields): find it on a snapshot again, or the rest of the suggestion
+                // would jump under the field after every accepted word.
+                var caret = f.caret
+                if f.caretApprox, Self.caretBubble, ScreenContext.ocrAllowed, CGPreflightScreenCaptureAccess(),
+                   let el = f.element, let frame = FocusedField.frame(of: el) {
+                    // The bubble still on screen sits right after the caret: on the snapshot its text would read as
+                    // part of the typed line. Take it off for the moment of the snapshot.
+                    self.panel?.hide()
+                    try? await Task.sleep(for: .milliseconds(50))
+                    let found = await CaretLocator.locate(field: frame, textBefore: f.textBefore)
+                    guard !Task.isCancelled, gen == self.generation, self.suggestion == s else { return }
+                    if let found { caret = found }
+                }
+                self.display(s, caret: caret, fontSize: f.fontSize, rightLimit: f.rightLimit, approx: f.caretApprox)
             } else {
                 self.hide(reason: "reposition-read-nil")
             }

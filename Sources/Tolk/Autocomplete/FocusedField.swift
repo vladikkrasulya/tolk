@@ -220,8 +220,32 @@ struct FocusedField {
         return nil
     }
 
+    /// Frame in AX coordinates (origin top-left of the main screen), nil when the element has none.
+    private static func rawFrame(_ el: AXUIElement) -> CGRect? {
+        guard let p: AXValue = attr(el, kAXPositionAttribute), let s: AXValue = attr(el, kAXSizeAttribute) else { return nil }
+        var o = CGPoint.zero, sz = CGSize.zero
+        guard AXValueGetValue(p, .cgPoint, &o), AXValueGetValue(s, .cgSize, &sz) else { return nil }
+        let f = CGRect(origin: o, size: sz)
+        return isSaneRect(f) ? f : nil
+    }
+
+    /// The element's frame, or — when it is missing or too small to be a field (under 40×14 pt) — the frame of the
+    /// nearest of its five closest parents.
+    private static func nearestRawFrame(_ el: AXUIElement) -> CGRect? {
+        var cur: AXUIElement? = el
+        for _ in 0..<6 {
+            guard let c = cur else { return nil }
+            if let f = rawFrame(c), f.width > 40, f.height >= 14 { return f }
+            cur = attr(c, kAXParentAttribute)
+        }
+        return nil
+    }
+
     /// The focused field's frame in Cocoa screen coordinates (for `CaretLocator`).
-    static func frame(of el: AXUIElement) -> NSRect? { axFrame(el) }
+    static func frame(of el: AXUIElement) -> NSRect? {
+        guard let f = nearestRawFrame(el), mainScreenHeight > 0 else { return axFrame(el) }
+        return NSRect(x: f.minX, y: mainScreenHeight - f.maxY, width: f.width, height: f.height)
+    }
 
     /// Right edge of the field if it reports a sensible size around the caret, else of its window.
     private static func rightLimit(_ el: AXUIElement, caret: NSRect) -> CGFloat? {
@@ -335,14 +359,9 @@ struct FocusedField {
         var zeroRect: CGRect?
         if let nextM: CFTypeRef = param(el, "AXNextTextMarkerForTextMarker", caretM) { zeroRect = bounds(range(caretM, nextM)) }
         // The field's own frame for the corner fallback (the zero-length rectangle may be larger than the visible field).
-        var fieldFrame: CGRect?
-        if prevRect == nil, let p: AXValue = attr(el, kAXPositionAttribute), let s: AXValue = attr(el, kAXSizeAttribute) {
-            var o = CGPoint.zero, sz = CGSize.zero
-            if AXValueGetValue(p, .cgPoint, &o), AXValueGetValue(s, .cgSize, &sz), sz.width > 20, sz.height > 20 {
-                let f = CGRect(origin: o, size: sz)
-                if Self.isSaneRect(f) { fieldFrame = f }
-            }
-        }
+        // An editor inside an iframe may have a body one line high or no frame of its own: then the nearest
+        // parent that has one (the frame of the embedded page) stands in.
+        let fieldFrame: CGRect? = prevRect == nil ? Self.nearestRawFrame(el) : nil
         guard let (rect, info) = caretRect(prev: prevRect, zero: zeroRect, field: fieldFrame) else { return .failure(Refusal(reason: "no-rect")) }
         return .success(Raw(before: before, after: after, caret: rect, caretInfo: (viaRange ? "markers+range " : "markers ") + info, fontSize: fs))
     }
@@ -416,7 +435,10 @@ struct FocusedField {
         if let r = prev {
             rect = line(r, x: r.maxX)
             info = "prevChar raw=\(fmt(r))"
-        } else if let r = zero, r.height > maxLineHeight {
+        } else if let r = zero, r.height > maxLineHeight || r.width > max(24, r.height * 2) {
+            // Not a caret: a caret is a thin rectangle. Chrome gives the whole field (<textarea>) or a strip as wide
+            // as the field and not even on the caret's line (contenteditable) — with it the suggestion was drawn at
+            // the start of the line or over the text below the field.
             // The app gave the whole field instead of the caret (Chrome <textarea> reports no character rectangles at
             // all): the suggestion goes into the field's bottom-left corner as a readable bubble (`caretApprox`).
             let f = field ?? r

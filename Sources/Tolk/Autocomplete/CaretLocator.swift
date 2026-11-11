@@ -14,7 +14,10 @@ enum CaretLocator {
     static func locate(field: NSRect, textBefore: String) async -> NSRect? {
         guard field.width > 40, field.height > 12,
               let screen = NSScreen.screens.first(where: { $0.frame.intersects(field) }) else { return nil }
-        let clipped = field.intersection(screen.frame)
+        // A field one line high (an editor body that hugs its text) gives a strip too tight to read reliably: take
+        // a little above and below.
+        let padded = field.height < 48 ? field.insetBy(dx: 0, dy: -10) : field
+        let clipped = padded.intersection(screen.frame)
         guard clipped.width > 40, clipped.height > 12,
               let image = try? await ScreenCaptureController.snapshot(clipped, on: screen) else { return nil }
         let lines: [Line] = await withCheckedContinuation { cont in

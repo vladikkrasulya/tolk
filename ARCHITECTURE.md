@@ -665,3 +665,21 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - `scripts/stand/editors.html`: seven kinds of web input (textarea, input, plain contenteditable, paragraphs like
   ProseMirror, div lines like Gmail / Slack, a field that hugs its text like Jira comments, an iframe editor like
   TinyMCE) for a live pass. Not run yet: live passes are done when the user is away from the Mac.
+
+## v0.9.8 — live pass over seven kinds of web editors (Chrome)
+
+Run on `scripts/stand/editors.html` with the user away: type, wait for the suggestion, Tab (twice), a typo fix.
+
+- **A wide «caret» rectangle is not a caret.** For a plain `contenteditable` Chrome answers the zero-length range
+  with a strip as wide as the field and not on the caret's line (`raw=(64,689 900x21)`); it was taken as the caret,
+  so the ghost text was drawn at the start of the line or over the text below the field. `caretRect` now treats a
+  zero-length rectangle wider than `max(24, 2 × height)` like «no caret»: bubble + lookup on a snapshot.
+- **The rest of a suggestion stays at the caret after Tab.** `scheduleReposition` looks the caret up on a snapshot
+  again for such fields; the bubble is taken off the screen for that moment (its text read as part of the typed line).
+- **Editors inside an iframe are read.** Their body may be one line high or have no frame of its own
+  (`markers:no-rect`): `nearestRawFrame` takes the frame of the nearest parent. `CaretLocator` pads a field lower than
+  48 pt by 10 pt above and below before reading it.
+- Result: textarea, input, plain contenteditable, paragraphs (ProseMirror-like), div lines (Gmail-like), a field that
+  hugs its text (Jira-like) and an iframe editor all show the suggestion at the caret (`ax=ocr`), insert the word on
+  Tab and keep the rest at the caret; a typo fix appears at the caret and is applied.
+- Not covered by the stand: the real Jira, Slack, Gmail and Google Docs (a canvas — not supported).
