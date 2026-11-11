@@ -105,7 +105,12 @@ final class AutocompleteController {
         let decision = AutocompleteSafety.decide(shown: a.snap, now: now?.snapshot, restOfLine: now?.restOfLine ?? "",
                                                  sameElement: sameElement, requireLineEnd: requireLineEnd)
         guard case .apply = decision, let now else {
-            if case .skip(let why) = decision { Diagnostics.log("autocomplete: not inserted, field check failed (\(why))") }
+            if case .skip(let why) = decision {
+                // «rest-of-line»: text appeared after the caret since the suggestion was shown. Its shape (no text) tells what it is.
+                let tail = why == "rest-of-line" ? " tail=" + AutocompleteSafety.tailShape(now?.restOfLine ?? "") + " app=\(a.snap.bundleID ?? "?")" : ""
+                Diagnostics.log("autocomplete: not inserted, field check failed (\(why))\(tail)")
+                UsageStore.shared.recordMiss("not-inserted")
+            }
             cancelPending(); hide(reason: "stale"); return nil
         }
         return now

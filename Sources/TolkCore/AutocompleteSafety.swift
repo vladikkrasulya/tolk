@@ -71,6 +71,17 @@ public enum AutocompleteSafety {
         return .apply
     }
 
+    /// What follows the caret, for the log: length and the first characters by kind — letters and digits are masked
+    /// («L», «9»), everything else is its code point. Never the text itself.
+    public static func tailShape(_ s: String) -> String {
+        let kinds = s.unicodeScalars.prefix(8).map { u -> String in
+            if u.properties.isAlphabetic { return "L" }
+            if u.properties.numericType != nil { return "9" }
+            return String(format: "U+%04X", u.value)
+        }
+        return "\(s.count):[" + kinds.joined(separator: " ") + "]"
+    }
+
     /// Nothing visible after the caret: whitespace plus invisible characters that editors (Electron/ProseMirror,
     /// Slack, Notion) leave after the caret: zero-width space/joiners, word joiner, BOM, soft hyphen, object
     /// replacement char (\u{FFFC}), directional marks, no-break and other Unicode spaces.

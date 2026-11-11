@@ -545,3 +545,13 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Replaces 0.8.3's one-section-at-a-time row (a misread of the user's choice): all sections of a tab are on one page
   again; each starts with a strong rule, a coloured icon and a large title (`SSection`, `SSections`). Titles, notes
   and icons live in `SettingsTab.sections`.
+
+## v0.8.5 — log: what blocks an accepted suggestion, fewer false «problems»
+
+- `not inserted, field check failed (rest-of-line)` now carries `tail=<n>:[…] app=…` — the shape of the text found
+  after the caret (`AutocompleteSafety.tailShape`: letters «L», digits «9», other characters as code points; never
+  the text). Seen in Claude desktop: a suggestion is shown (the tail was blank), Tab finds a non-blank tail with the
+  same text before the caret. The cause is not known yet; the next occurrence will show what the tail is. Counted in
+  the statistics as «not-inserted».
+- Журнал → «Проблемы» no longer lists normal refusals (`step=text-selected`, `step=not-editable`).
+- Dev runs (`TOLK_DL_TEST`, `TOLK_MAIN_DEMO`, `TOLK_RENDER_*`) write their log to a temporary folder, like the smoke run.

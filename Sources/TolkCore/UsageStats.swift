@@ -185,6 +185,7 @@ public enum UsageText {
         case "not-ready": "Модель ещё загружается или не запущена"
         case "secure": "Поле для пароля"
         case "small-field": "Поле поиска, адреса или слишком маленькое"
+        case "not-inserted": "Нажали Tab, но поле изменилось — подсказка не вставлена"
         default: key
         }
     }
@@ -345,6 +346,8 @@ extension SelfTest {
         if let round = try? JSONDecoder().decode(UsageData.self, from: JSONEncoder().encode(d)) { check(round == d, "usage: round trip") } else { check(false, "usage: round trip") }
         check(UsageText.missKey(forSkipReason: "too little text or line start") == "short" && UsageText.missKey(forSkipReason: "field not read after the answer") == "unread"
               && UsageText.missKey(forSkipReason: "model not ready (starting)") == "not-ready", "usage: skip reason keys")
+        check(AutocompleteSafety.tailShape("ab1. я") == "6:[L L 9 U+002E U+0020 L]" && AutocompleteSafety.tailShape("") == "0:[]", "usage: tail shape hides the text",
+              AutocompleteSafety.tailShape("ab1. я"))
         check(UsageText.ms(840) == "840 мс" && UsageText.ms(1300) == "1,3 с" && UsageText.ms(nil) == "—", "usage: time text")
         check(UsageText.count(12345) == "12 345" && UsageText.count(999) == "999" && UsageText.bytes(3_416_118_240) == "3,4 ГБ" && UsageText.bytes(512_000_000) == "512 МБ", "usage: number text",
               "\(UsageText.count(12345)) \(UsageText.bytes(3_416_118_240))")

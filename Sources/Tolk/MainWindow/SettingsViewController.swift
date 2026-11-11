@@ -678,6 +678,9 @@ enum LogFilter: String, CaseIterable, Identifiable {
 
     static func isProblem(_ line: String) -> Bool {
         let l = line.lowercased()
+        // Normal situations that only sound alarming: text is selected, focus is not in a text field, a dev test run.
+        if l.contains("read refused") && (l.contains("step=text-selected") || l.contains("step=not-editable")) { return false }
+        if l.contains("field not readable") && l.contains("read refused") { return false }
         return ["failed", "error", "unavailable", "crash", "exception", "остановилась", "не запустился", "не загрузилась", "занят",
                 "no effect", "refused", "not created", "exhausted", "taken", "not readable"].contains { l.contains($0) }
     }
