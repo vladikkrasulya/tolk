@@ -214,6 +214,7 @@ final class AutocompleteController {
 
         // Typing in Tolk's own windows: no suggestions, no fixes, nothing shown.
         if Self.focusIsInOwnWindow() {
+            skip("focus in Tolk's own window (key window: \(NSApp.keyWindow?.className ?? "none"))")
             if suggestion != nil || instant != nil { hide(reason: "own-window") }
             cancelPending()
             recentTyped = ""
@@ -224,6 +225,7 @@ final class AutocompleteController {
             switch tt.handleKey(event) {
             case .swallow: return true
             case .skipAutocomplete:
+                skip("«Перевод при наборе» owns this app")
                 if suggestion != nil || instant != nil { hide(reason: "type-translate") }
                 cancelPending()
                 recentTyped = ""
@@ -594,8 +596,19 @@ final class AutocompleteController {
 
     // MARK: - Requesting
 
+    /// Why a request for a suggestion ended without one (these exits used to be silent, so «подсказок мало» could not be
+    /// explained from the log). One line per reason at most every 2 s; no text of the user is written.
+    private var lastSkipAt: [String: TimeInterval] = [:]
+    private func skip(_ reason: String) {
+        let now = ProcessInfo.processInfo.systemUptime
+        if let last = lastSkipAt[reason], now - last < 2 { return }
+        lastSkipAt[reason] = now
+        Diagnostics.log("autocomplete: no request — \(reason)")
+    }
+
+
     private func scheduleRequest(after delay: Duration) {
-        guard !suppressed else { return }
+        guard !suppressed else { skip("paused by Esc"); return }
         cancelPending()
         let gen = generation
         pending = Task { [weak self] in
@@ -607,12 +620,15 @@ final class AutocompleteController {
 
     private func request(generation gen: Int) async {
         // Secure input is on while a password is being typed (any app, including web forms): read nothing.
-        guard !IsSecureEventInputEnabled(), !isOff(NSWorkspace.shared.frontmostApplication?.bundleIdentifier),
-              let field = await FocusedField.readAsync() else { return }
+        guard !IsSecureEventInputEnabled() else { skip("secure input"); return }
+        guard !isOff(NSWorkspace.shared.frontmostApplication?.bundleIdentifier) else { return }
+        guard let field = await FocusedField.readAsync() else { skip("field not read"); return }
         guard !Task.isCancelled, gen == generation, !IsSecureEventInputEnabled() else { return }
         if field.pid == Self.ownPID { return }
         if isOff(field.bundleID) { return }
-        guard AutocompleteSafety.isBlankTail(field.restOfLine) else { return }
+        guard AutocompleteSafety.isBlankTail(field.restOfLine) else {
+            skip("text after the caret (\(field.restOfLine.count) chars) app=\(field.bundleID ?? "?")"); return
+        }
 
         // Instant suggestions (emoji, typo fix) need no model and win over it.
         for p in instantProviders {
@@ -631,7 +647,8 @@ final class AutocompleteController {
             break
         }
         if instant != nil { return }
-        guard modelEnabled, server.state == .ready else { return }
+        guard modelEnabled else { return }
+        guard server.state == .ready else { skip("model not ready (\(server.state))"); return }
         if let why = field.skipReason {
             let key = "\(field.bundleID ?? "?"):\(why)"
             if key != lastSkipLog { lastSkipLog = key; Diagnostics.log("autocomplete: small/search field skipped (\(why)) app=\(field.bundleID ?? "?") role=\(field.role) sub=\(field.subrole)") }
@@ -640,7 +657,7 @@ final class AutocompleteController {
         wordBias.refreshIfNeeded(baseURL: server.baseURL, model: server.modelPath, mode: wordBiasMode, texts: wordBiasTexts)
 
         let trimmed = field.textBefore.filter { !$0.isWhitespace }
-        guard trimmed.count >= 4, let last = field.textBefore.last, !last.isNewline else { return }
+        guard trimmed.count >= 4, let last = field.textBefore.last, !last.isNewline else { skip("too little text or line start"); return }
 
         let appName = NSRunningApplication(processIdentifier: field.pid)?.localizedName
         let context = await screenContext.context(forPID: field.pid, waitingUpTo: .milliseconds(50))
@@ -665,10 +682,12 @@ final class AutocompleteController {
         }
         guard !Task.isCancelled, gen == generation else { return }
         // The text may have changed while the model was thinking.
-        guard !IsSecureEventInputEnabled(), let now = await FocusedField.readAsync(), now.pid == field.pid,
-              now.textBefore == field.textBefore, AutocompleteSafety.isBlankTail(now.restOfLine),
-              !isOff(now.bundleID), !Task.isCancelled, gen == generation else { return }
-        if let a = field.element, let b = now.element, !CFEqual(a, b) { return }
+        guard !IsSecureEventInputEnabled(), let now = await FocusedField.readAsync() else { skip("field not read after the answer"); return }
+        guard !Task.isCancelled, gen == generation else { return }
+        guard now.pid == field.pid, now.textBefore == field.textBefore, AutocompleteSafety.isBlankTail(now.restOfLine), !isOff(now.bundleID) else {
+            skip("field changed while the model answered (ms=\(result.ms), before \(field.textBefore.count) → \(now.textBefore.count) chars)"); return
+        }
+        if let a = field.element, let b = now.element, !CFEqual(a, b) { skip("focus moved while the model answered"); return }
         guard let text = AutocompletePrompt.clean(result.text, textBefore: field.textBefore, maxWords: extras.maxWords),
               !text.isEmpty else {
             Diagnostics.log("autocomplete: empty suggestion ms=\(result.ms)")
