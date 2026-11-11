@@ -47,7 +47,8 @@ enum AutocompletePrompt {
     /// rarely, so llama-server's KV cache keeps the prefix while the user types (warm ≈120 ms, cold ≈400 ms).
     /// Format picked on 10 EN/RU adtech chats (autocomplete-eval.md): "Conversation in X:\n<ctx>\n\nMy next message
     /// in this conversation:\n<typed>" made suggestions continue the thread (names, numbers, "logs", "rate card").
-    static func prompt(textBefore: String, appName: String?, context: String?, extras: PromptExtras = PromptExtras()) -> String {
+    /// `heal: false` = the unfinished word stays in the prompt as typed (second attempt when the healed answer is not a word).
+    static func prompt(textBefore: String, appName: String?, context: String?, extras: PromptExtras = PromptExtras(), heal: Bool = true) -> String {
         lastTextBefore = textBefore
         var text = textBefore
         if text.count > maxContextChars {
@@ -57,7 +58,7 @@ enum AutocompletePrompt {
         }
         // No trailing spaces/tabs: the model then supplies its own leading space (see `clean`).
         // With healing the unfinished last word is cut off too and forced back through the grammar.
-        if useHealing {
+        if useHealing && heal {
             let plan = AutocompleteHealing.plan(textBefore: text)
             text = plan.head
             lastHealLiteral = plan.literal

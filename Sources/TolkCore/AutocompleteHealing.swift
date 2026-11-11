@@ -74,7 +74,10 @@ public enum AutocompleteHealing {
             // probability (~0), and correct endings («дост» → «упа») were thrown away as "unsure".
             let inTop = consistent.contains { $0.text == t.text }
             let total = inTop ? z : z + t.prob
-            let p = total > 0 ? min(1, t.prob / total) : t.prob
+            var p = total > 0 ? min(1, t.prob / total) : t.prob
+            // Nothing to compare with (no consistent alternative was reported): the model was far off its own track,
+            // so this is a guess, never a "sure" one («каче» → «р.» came out with probability 1.0).
+            if !inTop, z == 0 { p = min(p, 0.5) }
             var s = String.UnicodeScalarView(); s.append(contentsOf: tt[rem.count...])
             out.append(Token(text: String(s), prob: p))
             consumed = lit.count

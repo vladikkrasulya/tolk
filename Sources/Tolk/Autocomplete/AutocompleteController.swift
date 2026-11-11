@@ -374,8 +374,9 @@ final class AutocompleteController {
         pending = nil
     }
 
-    private func display(_ text: String, caret: NSRect, fontSize: CGFloat? = nil, rightLimit: CGFloat? = nil) {
+    private func display(_ text: String, caret: NSRect, fontSize: CGFloat? = nil, rightLimit: CGFloat? = nil, approx: Bool? = nil) {
         if panel == nil { panel = GhostTextPanel() }
+        if let approx { panel?.bubble = approx }
         suggestion = text
         panel?.show(text, caret: caret, fontSize: fontSize, rightLimit: rightLimit)
         if panel?.isVisible != true { Diagnostics.log("autocomplete: panel not visible after show (no room or empty)"); suggestion = nil }
@@ -638,6 +639,7 @@ final class AutocompleteController {
             instant = s
             anchor = (field.snapshot, field.element)
             shownBundleID = field.bundleID
+            panel?.bubble = field.caretApprox
             panel?.show(s.display, caret: field.caret, fontSize: field.fontSize, rightLimit: field.rightLimit)
             journal.instant(bundleID: field.bundleID, before: field.textBefore, replaceCount: s.replaceCount, display: s.display, caret: field.caret, panel: panel)
             Diagnostics.log("autocomplete: instant replace=\(s.replaceCount) app=\(field.bundleID ?? "?")")
@@ -665,9 +667,22 @@ final class AutocompleteController {
         let extras = promptExtras?(field) ?? PromptExtras()
         let prompt = AutocompletePrompt.prompt(textBefore: field.textBefore, appName: appName, context: context, extras: extras)
         let client = CompletionClient(baseURL: server.baseURL)
-        let result: CompletionClient.Result
+        var result: CompletionClient.Result
         do {
             result = try await client.complete(prompt: prompt, maxTokens: AutocompletePrompt.maxTokens)
+            // Caret inside a word and the answer is not a word («каче» + «р.»): the model re-typed the fragment badly.
+            // Second attempt with the fragment left in the prompt as typed; the first way is better at endings, so it goes first.
+            if field.textBefore.last?.isLetter == true, AutocompletePrompt.useHealing, !Task.isCancelled, gen == generation,
+               AutocompletePrompt.clean(result.text, textBefore: field.textBefore, maxWords: extras.maxWords,
+                                        sure: (result.firstProb ?? 0) >= AutocompletePrompt.sureProb) == nil {
+                let plain = AutocompletePrompt.prompt(textBefore: field.textBefore, appName: appName, context: context, extras: extras, heal: false)
+                let second = try await client.complete(prompt: plain, maxTokens: AutocompletePrompt.maxTokens, healLiteral: nil)
+                if AutocompletePrompt.clean(second.text, textBefore: field.textBefore, maxWords: extras.maxWords) != nil
+                    || (AutocompletePrompt.patient != nil && result.tokens.isEmpty) {
+                    result = CompletionClient.Result(text: second.text, ms: result.ms + second.ms, rawChars: second.rawChars,
+                                                     firstProb: second.firstProb, raw: second.raw, tokens: second.tokens)
+                }
+            }
         } catch {
             if error is CancellationError { return }
             if let e = error as? URLError {
@@ -712,7 +727,7 @@ final class AutocompleteController {
             patient = true
         }
         anchor = (now.snapshot, now.element)
-        display(text, caret: now.caret, fontSize: now.fontSize, rightLimit: now.rightLimit)
+        display(text, caret: now.caret, fontSize: now.fontSize, rightLimit: now.rightLimit, approx: now.caretApprox)
         shownTextBefore = now.textBefore
         shownBundleID = now.bundleID
         let f = panel?.frame ?? .zero

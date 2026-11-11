@@ -16,6 +16,7 @@ enum ACEval {
         let th = AutocompleteTuning.thresholds(frequency: env["TOLK_AC_FREQ"] ?? cfg.autocompleteFrequency)
         AutocompletePrompt.firstTokenProb = th.first
         AutocompletePrompt.minTokenProb = th.next
+        if env["TOLK_AC_NOHEAL"] != nil { AutocompletePrompt.useHealing = false }
         let ctx = env["TOLK_AC_EVAL_CTX"].flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }
         let app = env["TOLK_AC_APP"] ?? "Telegram"
         let lines = ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init).filter { !$0.hasPrefix("#") }
@@ -51,7 +52,14 @@ enum ACEval {
                 if env["TOLK_AC_NOSTYLE"] == nil { extras.examples += StyleMemory.shared.examples(for: field); extras.recent = StyleMemory.shared.recent(for: field) }
             }
             let prompt = AutocompletePrompt.prompt(textBefore: before, appName: app, context: ctx, extras: extras)
-            guard let r = try? await client.complete(prompt: prompt, maxTokens: AutocompletePrompt.maxTokens) else { print("ERR  | \(line)"); continue }
+            guard var r = try? await client.complete(prompt: prompt, maxTokens: AutocompletePrompt.maxTokens) else { print("ERR  | \(line)"); continue }
+            var second = false
+            if before.last?.isLetter == true, AutocompletePrompt.useHealing,
+               AutocompletePrompt.clean(r.text, textBefore: before, maxWords: extras.maxWords, sure: (r.firstProb ?? 0) >= AutocompletePrompt.sureProb) == nil {
+                let plain = AutocompletePrompt.prompt(textBefore: before, appName: app, context: ctx, extras: extras, heal: false)
+                if let r2 = try? await client.complete(prompt: plain, maxTokens: AutocompletePrompt.maxTokens, healLiteral: nil),
+                   AutocompletePrompt.clean(r2.text, textBefore: before, maxWords: extras.maxWords) != nil { r = r2; second = true }
+            }
             let sure = (r.firstProb ?? 0) >= AutocompletePrompt.sureProb
             var final = AutocompletePrompt.clean(r.text, textBefore: before, maxWords: extras.maxWords, sure: sure)
             var patient = false
@@ -67,7 +75,7 @@ enum ACEval {
             if let expected {
                 if let f = final { if f.hasPrefix(expected) { right += 1; mark = " ✓" } else { wrong += 1; mark = " ✗ want «\(expected)»" } } else { mark = " – want «\(expected)»" }
             }
-            let why = patient ? "PATIENT" : final != nil ? "SHOWN" : r.text.isEmpty ? (rawClean == nil ? "cut+clean" : "cut") : "clean"
+            let why = second && final != nil ? "SECOND" : patient ? "PATIENT" : final != nil ? "SHOWN" : r.text.isEmpty ? (rawClean == nil ? "cut+clean" : "cut") : "clean"
             print("\(why.padding(toLength: 9, withPad: " ", startingAt: 0)) p1=\(p1) | …\(before.suffix(34)) ⟶ raw «\(r.raw)» kept «\(r.text)» final «\(final ?? "")»\(mark)")
         }
         print("shown \(shown)/\(lines.count)" + (right + wrong > 0 ? "  right \(right)  wrong \(wrong)  silent \(lines.count - shown)" : ""))

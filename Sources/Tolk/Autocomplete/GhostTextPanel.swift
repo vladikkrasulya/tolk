@@ -21,6 +21,18 @@ private final class GhostLabel: NSView {
     }
 }
 
+/// Background of the bubble shown when the caret position is unknown (the text cannot sit in the line then).
+private final class BubbleBack: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        let r = bounds.insetBy(dx: 0.5, dy: 0.5)
+        NSColor.windowBackgroundColor.withAlphaComponent(0.97).setFill()
+        let path = NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6)
+        path.fill()
+        NSColor.separatorColor.setStroke()
+        path.stroke()
+    }
+}
+
 private final class HintBadge: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor(white: 0.5, alpha: 0.2).setFill()
@@ -78,6 +90,10 @@ private final class HintBadge: NSView {
     var frame: NSRect { panel.frame }
 
     /// caret: insertion-point rectangle in Cocoa screen coordinates (origin bottom-left, height = line height).
+    /// Bubble mode: opaque rounded background and padding (caret position unknown, see `FocusedField.caretApprox`).
+    var bubble = false
+    private let bubbleBack = BubbleBack()
+
     func show(_ text: String, caret: NSRect, fontSize: CGFloat? = nil, rightLimit: CGFloat? = nil) {
         guard place(text, caret: caret, fontSize: fontSize, rightLimit: rightLimit) else { hide(); return }
         if !panel.isVisible { panel.orderFrontRegardless() }
@@ -137,17 +153,23 @@ private final class HintBadge: NSView {
         // rect; our text field is `textH` tall and its baseline is `-descender` above its bottom edge.
         let baselineY = caret.minY + 0.21 * caret.height
         let fieldY = baselineY + font.descender
-        let frame = NSRect(x: x0, y: (fieldY - (height - textH) / 2).rounded(), width: totalW, height: height)
+        let padX: CGFloat = bubble ? 7 : 0, padY: CGFloat = bubble ? 3 : 0
+        let frame = NSRect(x: x0 - padX, y: (fieldY - (height - textH) / 2).rounded() - padY, width: totalW + 2 * padX, height: height + 2 * padY)
         panel.setFrame(frame, display: true)
+        if bubbleBack.superview == nil, let content = panel.contentView { content.addSubview(bubbleBack, positioned: .below, relativeTo: nil) }
+        bubbleBack.isHidden = !bubble
+        bubbleBack.frame = NSRect(origin: .zero, size: frame.size)
+        bubbleBack.needsDisplay = true
 
         textField.text = body
-        textField.leadingGap = gapW
+        textField.color = bubble ? NSColor.labelColor.withAlphaComponent(0.8) : Self.ghostColor
+        textField.leadingGap = bubble ? 0 : gapW
         textField.font = font
-        textField.frame = NSRect(x: 0, y: (height - textH) / 2, width: textW, height: textH)
+        textField.frame = NSRect(x: padX, y: padY + (height - textH) / 2, width: textW, height: textH)
 
         hintBox.isHidden = !withHint
         hintField.font = hintFont
-        hintBox.frame = NSRect(x: textW + Self.gap, y: (height - hintH) / 2, width: hintW, height: hintH)
+        hintBox.frame = NSRect(x: padX + textW + Self.gap, y: padY + (height - hintH) / 2, width: hintW, height: hintH)
         hintField.frame = NSRect(x: Self.hintPadX, y: (hintH - hintSize.height) / 2,
                                  width: hintSize.width, height: hintSize.height)
         return true

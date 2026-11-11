@@ -37,6 +37,9 @@ struct FocusedField {
 
     static let contextLimit = 1500
 
+    /// The caret position is unknown, `caret` is a corner of the field: show the suggestion as a bubble, not as ghost text.
+    var caretApprox: Bool { caretInfo.contains("fieldCorner") }
+
     var snapshot: AutocompleteSafety.FieldSnapshot {
         .init(pid: pid, bundleID: bundleID, textBefore: textBefore)
     }
@@ -297,10 +300,30 @@ struct FocusedField {
             prevRect = bounds(pr)
             if let pr, let a: NSAttributedString = param(el, "AXAttributedStringForTextMarkerRange", pr) { fs = fontSize(a) }
         }
+        // Chrome <textarea>: text markers give no rectangle for a character, and the zero-length fallback is the whole
+        // field (the suggestion then sat in the field's corner). The plain character-range call works there.
+        var viaRange = false
+        if prevRect == nil, !afterNewline, !before.isEmpty, let v: AXValue = attr(el, kAXSelectedTextRangeAttribute) {
+            var sel = CFRange()
+            if AXValueGetValue(v, .cfRange, &sel), sel.length == 0, sel.location > 0,
+               let r = Self.bounds(el, CFRange(location: sel.location - 1, length: 1)), r.height <= 60, r.width <= 80 {
+                prevRect = r
+                viaRange = true
+            }
+        }
         var zeroRect: CGRect?
         if let nextM: CFTypeRef = param(el, "AXNextTextMarkerForTextMarker", caretM) { zeroRect = bounds(range(caretM, nextM)) }
-        guard let (rect, info) = caretRect(prev: prevRect, zero: zeroRect) else { return .failure(Refusal(reason: "no-rect")) }
-        return .success(Raw(before: before, after: after, caret: rect, caretInfo: "markers " + info, fontSize: fs))
+        // The field's own frame for the corner fallback (the zero-length rectangle may be larger than the visible field).
+        var fieldFrame: CGRect?
+        if prevRect == nil, let p: AXValue = attr(el, kAXPositionAttribute), let s: AXValue = attr(el, kAXSizeAttribute) {
+            var o = CGPoint.zero, sz = CGSize.zero
+            if AXValueGetValue(p, .cgPoint, &o), AXValueGetValue(s, .cgSize, &sz), sz.width > 20, sz.height > 20 {
+                let f = CGRect(origin: o, size: sz)
+                if Self.isSaneRect(f) { fieldFrame = f }
+            }
+        }
+        guard let (rect, info) = caretRect(prev: prevRect, zero: zeroRect, field: fieldFrame) else { return .failure(Refusal(reason: "no-rect")) }
+        return .success(Raw(before: before, after: after, caret: rect, caretInfo: (viaRange ? "markers+range " : "markers ") + info, fontSize: fs))
     }
 
     // MARK: - AX helpers
@@ -355,7 +378,7 @@ struct FocusedField {
     /// Screen rect of the caret. Prefers the character before the caret (`prev`, its right edge): some apps
     /// return the whole block/paragraph for a zero-length range (`zero`, the fallback, its left edge).
     /// The result is at most `maxLineHeight` tall; for taller rects the bottom line is used.
-    private static func caretRect(prev: CGRect?, zero: CGRect?) -> (NSRect, String)? {
+    private static func caretRect(prev: CGRect?, zero: CGRect?, field: CGRect? = nil) -> (NSRect, String)? {
         let maxLineHeight: CGFloat = 48
         let fallbackLineHeight: CGFloat = 20
         func line(_ r: CGRect, x: CGFloat) -> CGRect {
@@ -372,9 +395,19 @@ struct FocusedField {
         if let r = prev {
             rect = line(r, x: r.maxX)
             info = "prevChar raw=\(fmt(r))"
+        } else if let r = zero, r.height > maxLineHeight {
+            // The app gave the whole field instead of the caret (Chrome <textarea> reports no character rectangles at
+            // all): the suggestion goes into the field's bottom-left corner as a readable bubble (`caretApprox`).
+            let f = field ?? r
+            rect = CGRect(x: f.minX + 12, y: f.maxY - fallbackLineHeight - 8, width: 1, height: fallbackLineHeight)
+            info = "fieldCorner raw=\(fmt(r))"
         } else if let r = zero {
             rect = line(r, x: r.minX)
             info = "zeroLen raw=\(fmt(r))"
+        } else if let f = field {
+            // No rectangle at all (plain contenteditable in Chrome): same corner fallback.
+            rect = CGRect(x: f.minX + 12, y: f.maxY - fallbackLineHeight - 8, width: 1, height: fallbackLineHeight)
+            info = "fieldCorner raw=\(fmt(f))"
         } else {
             return nil
         }
