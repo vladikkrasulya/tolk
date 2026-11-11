@@ -15,18 +15,20 @@ struct StatsTab: View {
 
     var body: some View {
         periodCard.fullSpan()
-        switch model.section {
-        case 0:
-            translateCard
-            translateChartCard
-            originsCard
-        case 1:
-            suggestCard
-            suggestChartCard
-            missesCard
-            suggestTablesCard
-        default:
-            privacyCard
+        SSections(tab: .stats) { section in
+            switch section {
+            case 0:
+                translateCard
+                translateChartCard
+                originsCard
+            case 1:
+                suggestCard
+                suggestChartCard
+                missesCard
+                suggestTablesCard
+            default:
+                privacyCard
+            }
         }
     }
 
@@ -237,11 +239,13 @@ struct LogTab: View {
     @State private var confirmClear = false
 
     var body: some View {
-        if model.section == 0 {
-            viewerCard.fullSpan()
-        } else {
-            settingsCard
-            legendCard
+        SSections(tab: .log) { section in
+            if section == 0 {
+                viewerCard.fullSpan()
+            } else {
+                settingsCard
+                legendCard
+            }
         }
     }
 

@@ -15,12 +15,14 @@ struct ModelsTab: View {
     @State private var deleteServer: String?
 
     var body: some View {
-        Group {
-            if model.section == 0 {
-                localCard
-                addCard
-            } else {
-                serverCard
+        SSections(tab: .models) { section in
+            Group {
+                if section == 0 {
+                    localCard
+                    addCard
+                } else {
+                    serverCard
+                }
             }
         }
         .confirmationDialog("Удалить модель «\(deleteLocal ?? "")»?", isPresented: Binding(get: { deleteLocal != nil }, set: { if !$0 { deleteLocal = nil } }), titleVisibility: .visible) {

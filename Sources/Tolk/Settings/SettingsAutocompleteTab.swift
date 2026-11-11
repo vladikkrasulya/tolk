@@ -16,23 +16,25 @@ struct AutocompleteTab: View {
     static let appChips = ["Коротко и неформально", "Вежливо, на «Вы»", "Без эмодзи", "Пиши по-английски"]
 
     var body: some View {
-        switch model.section {
-        case 0:
-            mainCard
-            frequencyCard
-        case 1:
-            instructionsCard
-            contextCard
-            styleCard
-        case 2:
-            typingCard
-            typeTranslateCard
-        case 3:
-            batteryCard
-            offAppsCard
-        default:
-            confidenceCard
-            modelParamsCard
+        SSections(tab: .autocomplete) { section in
+            switch section {
+            case 0:
+                mainCard
+                frequencyCard
+            case 1:
+                instructionsCard
+                contextCard
+                styleCard
+            case 2:
+                typingCard
+                typeTranslateCard
+            case 3:
+                batteryCard
+                offAppsCard
+            default:
+                confidenceCard
+                modelParamsCard
+            }
         }
     }
 

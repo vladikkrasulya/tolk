@@ -47,41 +47,14 @@ struct SettingsView: View {
                     ForEach(0..<problems.count, id: \.self) { statusPill(problems[$0].0, tab: problems[$0].1) }
                 }
             }
-            sectionBar
         }
         .padding(.horizontal, 20)
         .padding(.top, 10)
-        .padding(.bottom, 4)
+        .padding(.bottom, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(TolkStyle.page)
+        .overlay(alignment: .bottom) { Rectangle().fill(TolkStyle.hairline).frame(height: 0.5) }
         .onAppear { if model.lanCheck == .idle { model.checkConnection() } }
-    }
-
-    /// Second row: the sections of the current tab. Only the selected one is on screen.
-    private var sectionBar: some View {
-        let sections = model.tab.sections
-        return VStack(alignment: .leading, spacing: 6) {
-            FlowLayout(spacing: 0) {
-                ForEach(0..<sections.count, id: \.self) { i in
-                    let on = model.section == i
-                    Button { model.section = i } label: {
-                        VStack(spacing: 4) {
-                            Text(sections[i].title).lineLimit(1).fixedSize()
-                                .font(.callout.weight(on ? .semibold : .regular))
-                                .foregroundStyle(on ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
-                            Rectangle().fill(on ? Color.accentColor : Color.clear).frame(height: 2)
-                        }
-                        .padding(.horizontal, 10).padding(.top, 4)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .bottom) { Rectangle().fill(TolkStyle.hairline).frame(height: 0.5) }
-            Text(sections[model.section].note).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.top, 2)
     }
 
     private var allGood: some View {
@@ -170,19 +143,21 @@ struct TranslateTab: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        switch model.section {
-        case 0:
-            serverCard
-            modelCard
-            fallbackCard
-            remoteCard
-        case 1:
-            languageCard
-            profilesCard
-            toneCard
-        default:
-            samplingCard
-            copyCard
+        SSections(tab: .translate) { section in
+            switch section {
+            case 0:
+                serverCard
+                modelCard
+                fallbackCard
+                remoteCard
+            case 1:
+                languageCard
+                profilesCard
+                toneCard
+            default:
+                samplingCard
+                copyCard
+            }
         }
     }
 
@@ -412,14 +387,16 @@ struct GeneralTab: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        if model.section == 0 {
-            launchCard
-            permissionsCard
-            hotKeysCard
-        } else {
-            storageCard
-            resetCard
-            aboutCard
+        SSections(tab: .general) { section in
+            if section == 0 {
+                launchCard
+                permissionsCard
+                hotKeysCard
+            } else {
+                storageCard
+                resetCard
+                aboutCard
+            }
         }
     }
 

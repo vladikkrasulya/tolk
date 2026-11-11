@@ -73,7 +73,7 @@ enum MainWindowDemo {
             win.contentViewController = vc
             win.setContentSize(NSSize(width: w, height: h))
             win.appearance = forced
-            for tab in SettingsTab.allCases { for sec in 0..<tab.sections.count {
+            for tab in SettingsTab.allCases { for sec in 0..<1 {
                 vc.model.open(tab, section: sec)
                 try? await Task.sleep(for: .milliseconds(1200))
                 let v = vc.view

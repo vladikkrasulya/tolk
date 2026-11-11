@@ -154,19 +154,47 @@ extension SCard where Trailing == EmptyView {
     }
 }
 
-/// Heading of a group of cards inside a tab: takes the whole row, the cards under it start a fresh set of columns.
+/// Heading of a group of cards inside a tab: a strong rule, a coloured icon and a large title. Takes the whole row;
+/// the cards under it start a fresh set of columns.
 struct SSection: View {
     let title: String
     var subtitle: String?
-    init(_ title: String, _ subtitle: String? = nil) { self.title = title; self.subtitle = subtitle }
+    var symbol: String?
+    /// The first section of a page needs no rule and no extra air above it.
+    var first = false
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.title3.weight(.semibold))
-            if let subtitle { Text(subtitle).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+        VStack(alignment: .leading, spacing: 0) {
+            if !first {
+                Rectangle().fill(Color.primary.opacity(0.22)).frame(height: 1.5).padding(.bottom, 14)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                if let symbol {
+                    Image(systemName: symbol).font(.system(size: 17, weight: .semibold)).foregroundStyle(Color.accentColor).frame(width: 24)
+                }
+                Text(title).font(.system(size: 19, weight: .semibold))
+            }
+            if let subtitle {
+                Text(subtitle).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 3).padding(.leading, symbol == nil ? 0 : 33)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 8).padding(.horizontal, 2)
+        .padding(.top, first ? 2 : 18).padding(.bottom, 2).padding(.horizontal, 2)
         .fullSpan()
+    }
+}
+
+/// Every section of a tab, one under another: heading, then its cards.
+struct SSections<Cards: View>: View {
+    let tab: SettingsTab
+    @ViewBuilder var cards: (Int) -> Cards
+
+    var body: some View {
+        ForEach(0..<tab.sections.count, id: \.self) { i in
+            SSection(title: tab.sections[i].title, subtitle: tab.sections[i].note, symbol: tab.sections[i].symbol, first: i == 0)
+            cards(i)
+        }
     }
 }
 

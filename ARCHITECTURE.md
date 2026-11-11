@@ -539,3 +539,9 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   selected one is shown (`SettingsModel.section`, remembered per tab in `settingsSections`). Links between tabs open
   the right section (`SettingsModel.open(_:section:)`). The status pills appear only when something is wrong; when
   all is fine a small «Всё работает» sits at the end of the tab row.
+
+## v0.8.4 — settings sections on one page, divided by rules
+
+- Replaces 0.8.3's one-section-at-a-time row (a misread of the user's choice): all sections of a tab are on one page
+  again; each starts with a strong rule, a coloured icon and a large title (`SSection`, `SSections`). Titles, notes
+  and icons live in `SettingsTab.sections`.
