@@ -16,7 +16,7 @@ enum Diagnostics {
         #if DEBUG
         // The smoke run must never write into the user's real log directory.
         let env = ProcessInfo.processInfo.environment
-        if env["TOLK_SMOKE"] != nil || env["TOLK_DL_TEST"] != nil || env["TOLK_MAIN_DEMO"] != nil || env["TOLK_RENDER_POPUP"] != nil || env["TOLK_RENDER_REPLY"] != nil {
+        if env["TOLK_SMOKE"] != nil || env["TOLK_DL_TEST"] != nil || env["TOLK_DOC_TEST"] != nil || env["TOLK_MAIN_DEMO"] != nil || env["TOLK_RENDER_POPUP"] != nil || env["TOLK_RENDER_REPLY"] != nil {
             d = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("tolk-smoke-logs", isDirectory: true)
         }
         #endif

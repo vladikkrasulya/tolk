@@ -70,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["TOLK_TYPE_TRANSLATE_SHOT"] != nil { TypeTranslateDemo.run(); return }
         if ProcessInfo.processInfo.environment["TOLK_MAIN_DEMO"] != nil { MainWindowDemo.runIfRequested(); return }
         if ModelLibrary.runDownloadTestIfRequested() { return }
+        if DocumentTranslator.runTestIfRequested() { return }
         // Dev: TOLK_TEST_OLLAMA=http://127.0.0.1:11999 points this run at a fake server (cold-model / down tests); not saved.
         if let url = ProcessInfo.processInfo.environment["TOLK_TEST_OLLAMA"] { config.ollamaURL = url; config.autocomplete = false }
         #endif

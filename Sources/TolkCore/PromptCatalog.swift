@@ -133,6 +133,12 @@ public enum PromptCatalog {
             Improve the wording: remove calques and word-for-word renderings, fix unnatural word order, unnatural collocations, wrong prepositions, articles, gender and case agreement; use the idiom a native speaker would use in this situation.
             """),
 
+        PromptBlock(id: "refine.proofread", group: .editor, title: "«Корректор» — последняя вычитка официальных текстов",
+                    about: "Третий проход только для договоров, лицензий и официальных уведомлений: исправляет падежи и опечатки, ничего не пересказывая. Видит только перевод, без оригинала.",
+                    placeholders: ["target"], defaultText: """
+            You are a proofreader of {target}. The text below is a finished translation. Fix ONLY grammatical errors: wrong case, number or gender agreement, wrong preposition government, typos and misspelled words. Do not rephrase, do not change terms, word order, punctuation style or capital letters. Output ONLY the corrected text; if there is nothing to fix, output the text unchanged.
+            """),
+
         // MARK: Фразы
         PromptBlock(id: "translate.phrases.en", group: .phrases, title: "Правила для фраз: русский и украинский → английский",
                     about: "Каждая строка: шаблон фразы => что сказать модели. Правило попадает в запрос, только если шаблон найден в тексте.",
@@ -183,6 +189,20 @@ extension SelfTest {
         check(Prompt.system(for: ResolvedRequest(text: licence, source: .english, target: .russian, tone: .auto, mode: .translate), rules: "").contains("legal or official document")
               && !Prompt.system(for: ResolvedRequest(text: chat, source: .english, target: .russian, tone: .auto, mode: .translate), rules: "").contains("legal or official document"),
               "prompts: the block for official texts is added only to them")
+        check(AutoEditor.isOfficial(licence) && !AutoEditor.isOfficial(chat), "prompts: a document is recognised as official")
+        let para = String(repeating: "The above notice shall be included in all copies. ", count: 2)
+        check(AutoEditor.wantedForParagraph(mode: "formal", paragraph: para, documentIsOfficial: true)
+              && !AutoEditor.wantedForParagraph(mode: "formal", paragraph: para, documentIsOfficial: false)
+              && !AutoEditor.wantedForParagraph(mode: "formal", paragraph: "MIT License", documentIsOfficial: true)
+              && AutoEditor.wantedForParagraph(mode: "always", paragraph: para, documentIsOfficial: false)
+              && !AutoEditor.wantedForParagraph(mode: "off", paragraph: para, documentIsOfficial: true), "prompts: which paragraphs of a document the editor reads")
+        let plain = ResolvedRequest(text: "The above notice must be included in all copies.", source: .english, target: .russian, tone: .auto, mode: .translate)
+        let forced = FormalContext.$forced.withValue(true) { Prompt.system(for: plain, rules: "") }
+        check(forced.contains("legal or official document") && !Prompt.system(for: plain, rules: "").contains("legal or official document"),
+              "prompts: inside an official document every paragraph gets the official-text block")
+        check(Proofread.accepts(before: "должны прилагаться ко всех копиях 2026", after: "должны прилагаться ко всем копиям 2026")
+              && !Proofread.accepts(before: "должны прилагаться ко всех копиях 2026", after: "ок")
+              && !Proofread.accepts(before: "в 2026 году", after: "в 2025 году") && !Proofread.accepts(before: "а\nб", after: "а б"), "prompts: the proofreader may only make small changes")
         let cfg = try? JSONDecoder().decode(TolkConfig.self, from: Data(#"{"prompts": {"translate.base": "X {source} {target}"}}"#.utf8))
         check(cfg?.prompts["translate.base"] == "X {source} {target}" && TolkConfig().prompts.isEmpty, "prompts: stored in the config")
     }

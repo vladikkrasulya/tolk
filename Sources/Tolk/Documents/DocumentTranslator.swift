@@ -34,6 +34,11 @@ final class DocumentTranslator {
     private(set) var tone: Tone = .formal
 
     private var task: Task<Void, Never>?
+    /// «Редактор после перевода» for this run and whether the document reads as an official one.
+    private var editorMode = "off"
+    private var official = false
+    /// Paragraphs the editor changed in this document (for the log and the status line).
+    private(set) var editedCount = 0
     private var activeSince: Date?
     private var activeTime: TimeInterval = 0
     /// Characters sent to the model while active (for the measured speed).
@@ -55,6 +60,7 @@ final class DocumentTranslator {
         kept = []
         current = nil; partial = ""
         activeTime = 0; measuredChars = 0; measuredTime = 0
+        editedCount = 0
         target = nil
     }
 
@@ -74,7 +80,14 @@ final class DocumentTranslator {
         self.tone = tone
         guard let first = translations.firstIndex(where: { $0 == nil }) else { onEvent?(.finished); return }
         activeSince = Date()
-        task = Task { @MainActor [weak self] in await self?.run(from: first) }
+        // Decided once per run: is this an official document, and does the editor read its paragraphs?
+        editorMode = TolkConfig.load().autoEditor
+        official = AutoEditor.isOfficial(paragraphs.map(\.text).joined(separator: "\n"))
+        if editorMode != "off" { Diagnostics.log("documents: editor=\(editorMode) official=\(official) paragraphs=\(paragraphs.count)") }
+        let formal = official
+        task = Task { @MainActor [weak self] in
+            await FormalContext.$forced.withValue(formal) { await self?.run(from: first) }
+        }
     }
 
     /// Pause / cancel: stops the running request; the unfinished paragraph will be translated again.
@@ -136,23 +149,47 @@ final class DocumentTranslator {
             do {
                 for piece in pieces {
                     var chunk = ""
+                    var fellBack = false
+                    var sourceLanguage: Language?
                     let stream = engine.translate(TranslationRequest(text: piece, source: nil, target: target, tone: tone))
                     for try await event in stream {
                         if Task.isCancelled { return }
                         switch event {
-                        case let .started(provider, _, _): onEvent?(.provider(provider))
+                        case let .started(provider, from, _):
+                            sourceLanguage = from
+                            onEvent?(.provider(provider))
                         case let .delta(s):
                             chunk += s
                             partial = Self.join(finished, chunk)
                             onEvent?(.partial(i, partial))
                         case let .fellBack(from, reason):
                             chunk = ""
+                            fellBack = true
                             onEvent?(.fellBack(from: from, reason: reason))
                         case .stats, .finished: break
                         }
                     }
                     if Task.isCancelled { return }
-                    finished = Self.join(finished, chunk.trimmingCharacters(in: .whitespacesAndNewlines))
+                    var piecedone = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Second look by the editor: fixes case agreement and calques the first pass leaves in long
+                    // sentences. Only with the home model (after a fallback there is nobody to ask).
+                    if !fellBack, let from = sourceLanguage, !piecedone.isEmpty,
+                       AutoEditor.wantedForParagraph(mode: editorMode, paragraph: piece, documentIsOfficial: official) {
+                        let real = (engine as? HistoryRecordingEngine)?.base ?? engine
+                        var edited = ""
+                        for try await part in real.refine(source: piece, translation: piecedone, from: from, to: target, tone: tone) {
+                            if Task.isCancelled { return }
+                            edited += part
+                        }
+                        edited = edited.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !edited.isEmpty, edited != piecedone {
+                            piecedone = edited
+                            editedCount += 1
+                            partial = Self.join(finished, piecedone)
+                            onEvent?(.partial(i, partial))
+                        }
+                    }
+                    finished = Self.join(finished, piecedone)
                 }
             } catch {
                 if Task.isCancelled || error is CancellationError { return }
@@ -173,6 +210,7 @@ final class DocumentTranslator {
         if Task.isCancelled { return }
         task = nil
         stopClock()
+        if editorMode != "off" { Diagnostics.log("documents: finished, editor changed \(editedCount) paragraph(s)") }
         onEvent?(.finished)
     }
 
@@ -185,3 +223,33 @@ final class DocumentTranslator {
         text.filter(\.isLetter).count >= 3 && LanguageDetector.detect(text) == language
     }
 }
+
+#if DEBUG
+extension DocumentTranslator {
+    /// Dev: `TOLK_DOC_TEST=file.txt [TOLK_DOC_TO=ru]` translates the file's paragraphs (blank-line separated) through
+    /// this class with the real engine, prints the result and quits.
+    static func runTestIfRequested() -> Bool {
+        let env = ProcessInfo.processInfo.environment
+        guard let path = env["TOLK_DOC_TEST"], let text = try? String(contentsOfFile: path, encoding: .utf8) else { return false }
+        let paragraphs = text.components(separatedBy: "\n\n").map { $0.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }.map { DocParagraph(text: $0) }
+        let t = DocumentTranslator(engine: DefaultTranslationEngine(config: TolkConfig.load()))
+        keepAlive = t
+        t.load(paragraphs)
+        let started = Date()
+        t.onEvent = { event in
+            switch event {
+            case .finished:
+                for (i, tr) in t.translations.enumerated() { print("[\(i)] " + (tr ?? "—")) }
+                print("[doc-test] edited=\(t.editedCount) seconds=\(Int(Date().timeIntervalSince(started)))")
+                exit(0)
+            case let .failed(m): print("[doc-test] failed: \(m)"); exit(1)
+            default: break
+            }
+        }
+        t.start(target: Language(rawValue: env["TOLK_DOC_TO"] ?? "ru") ?? .russian, tone: .formal)
+        return true
+    }
+    private static var keepAlive: DocumentTranslator?
+}
+#endif

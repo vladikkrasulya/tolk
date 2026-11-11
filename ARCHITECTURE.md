@@ -626,3 +626,17 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   on an 8 GB Mac it is Qwen 3.5 2B, on 16 GB and more Gemma E2B.
 - A GGUF built for another runtime does not load («unknown model architecture: 'qwen3_5'» from
   leventkoldas/Qwen3.8-2B-Distill-Q4_0-GGUF): take builds marked llama.cpp.
+
+## v0.9.4 — official documents: editor and proofreader on the Documents page
+
+- `DocumentTranslator` decides once per run whether the document is official (`AutoEditor.isOfficial` on the whole
+  text) and, by the setting «Редактор после перевода», sends every paragraph of 80+ characters through
+  `engine.refine` after its translation. `FormalContext.forced` (task-local) makes every paragraph of such a document
+  get the official-text block, even one without markers of its own.
+- `refine` for official texts ends with a proofreading pass (`refine.proofread`, editable in settings): the model sees
+  only the translation and may fix nothing but grammar. Reason: with the formal tone the first pass wrote «прилагаться
+  ко всех копиях» and the editor let it through; the narrow proofreader fixed both this and «получившему копия» and
+  left correct sentences unchanged. `Proofread.accepts` rejects a result that changes length by more than 10 %, the
+  number of lines or any digit.
+- The MIT licence as a document, ru: all paragraphs correct, 75 s instead of 30 s (three passes on long paragraphs).
+  Dev check: `TOLK_DOC_TEST=file.txt [TOLK_DOC_TO=ru] .build/debug/Tolk`.

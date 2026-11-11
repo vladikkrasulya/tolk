@@ -191,8 +191,27 @@ enum PhraseRules {
     }
 }
 
+/// A whole document was recognised as official: its paragraphs are translated and edited by the rules for official
+/// texts even when a single paragraph has no marker of its own (set by the Documents page around its requests).
+public enum FormalContext {
+    @TaskLocal public static var forced = false
+}
+
 /// When the editor pass starts by itself after a translation (setting «Редактор после перевода»).
 public enum AutoEditor {
+    /// Documents: is the whole text an official one (so every paragraph gets the official-text rules)?
+    public static func isOfficial(_ document: String) -> Bool { FormalText.looksFormal(document) }
+
+    /// Documents: does this paragraph get the editor pass? Short lines (headings, signatures) are left alone.
+    public static func wantedForParagraph(mode: String, paragraph: String, documentIsOfficial: Bool) -> Bool {
+        guard paragraph.count >= 80 else { return false }
+        switch mode {
+        case "always": return true
+        case "formal": return documentIsOfficial
+        default: return false
+        }
+    }
+
     /// Texts shorter than this are left alone: the slips this pass is for happen in long sentences.
     public static let minChars = 200
 
@@ -217,6 +236,7 @@ enum FormalText {
 
     /// Two different markers, or one in a text written mostly in capitals (disclaimers).
     static func looksFormal(_ text: String) -> Bool {
+        if FormalContext.forced { return true }
         var hits = 0
         for m in markers where text.range(of: m, options: [.regularExpression, .caseInsensitive]) != nil {
             hits += 1

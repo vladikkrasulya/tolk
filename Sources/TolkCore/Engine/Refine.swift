@@ -27,6 +27,20 @@ enum RefinePrompt {
     }
 }
 
+/// The proofreader may only touch grammar: a result that is much shorter or longer, lost a paragraph or a number is
+/// not a proofreading and is thrown away.
+enum Proofread {
+    static func accepts(before: String, after: String) -> Bool {
+        let a = after.trimmingCharacters(in: .whitespacesAndNewlines), b = before.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        let ratio = Double(a.count) / Double(b.count)
+        guard ratio > 0.9, ratio < 1.1 else { return false }
+        guard a.components(separatedBy: "\n").count == b.components(separatedBy: "\n").count else { return false }
+        func digits(_ s: String) -> String { s.filter(\.isNumber) }
+        return digits(a) == digits(b)
+    }
+}
+
 /// Cheap safety net against the editor's known failure modes: a question turned into a statement/order and a swapped
 /// greeting. When it trips, the original translation is kept.
 enum RefineGuard {
@@ -81,7 +95,8 @@ extension DefaultTranslationEngine {
         }
         let rulesBlock = rules.promptBlock(for: source, target: to)
         let calques = CalqueDetector.detect(in: translation, language: to)
-        let system = RefinePrompt.system(from: from, to: to, tone: tone, rules: rulesBlock, calques: calques, formal: FormalText.looksFormal(source))
+        let formal = FormalText.looksFormal(source)
+        let system = RefinePrompt.system(from: from, to: to, tone: tone, rules: rulesBlock, calques: calques, formal: formal)
         let user = RefinePrompt.user(source: source, translation: translation)
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -103,8 +118,19 @@ extension DefaultTranslationEngine {
                         edited += chunk
                     }
                     produced = true
-                    if RefineGuard.isOK(edited) { continuation.yield(translation); continuation.finish(); return }
-                    continuation.yield(RefineGuard.accepts(draft: translation, edited: edited) ? edited : translation)
+                    var result = RefineGuard.isOK(edited) ? translation : (RefineGuard.accepts(draft: translation, edited: edited) ? edited : translation)
+                    // Official text: a last grammar-only reading. The editor works on meaning and wording and lets
+                    // agreement slips through («прилагаться ко всех копиях»); a proofreader that sees only the
+                    // translation and may change nothing but grammar catches them.
+                    if formal {
+                        let proof = PromptCatalog.filled("refine.proofread", ["target": to.englishName])
+                        if !proof.isEmpty,
+                           let fixed = try? await ollama.chatContent(system: proof, user: result, json: false, maxTokens: 3000, temperature: 0.1, timeout: 90),
+                           Proofread.accepts(before: result, after: fixed) {
+                            result = fixed.trimmingCharacters(in: .whitespacesAndNewlines)
+                        }
+                    }
+                    continuation.yield(result)
                     continuation.finish()
                 } catch {
                     if error is CancellationError || Task.isCancelled { continuation.finish(throwing: error); return }
