@@ -106,8 +106,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .stats: [("Перевод", "Сколько, откуда и как быстро переводится.", "character.bubble"),
                       ("Подсказки", "Сколько показано и принято, и почему подсказки не было.", "lightbulb"),
                       ("Данные", "Что хранится и как сбросить.", "lock")]
-        case .log: [("События", "Что Tolk делал и почему.", "list.bullet.rectangle"),
-                    ("Настройка и справка", "Подробность записи, файлы и как читать строки.", "questionmark.circle")]
+        case .log: [("События", "Что Tolk делал и почему. Текста, который вы переводите или печатаете, здесь нет.", "list.bullet.rectangle"),
+                    ("Сводка и запись", "Что из этого требует внимания, и насколько подробно вести журнал.", "exclamationmark.bubble"),
+                    ("Справочник", "Что значит каждая строка и что с этим делать.", "text.book.closed")]
         case .general: [("Система", "Запуск, разрешения macOS и сочетания клавиш.", "gearshape"),
                         ("Данные и обслуживание", "Что лежит на диске, как вернуть стандартные настройки и куда смотреть при сбое.", "internaldrive")]
         }
@@ -178,6 +179,8 @@ final class SettingsModel: ObservableObject {
     @Published var logLines: [String] = []
     @Published var logFilter = LogFilter.all
     @Published var logSearch = ""
+    /// The line clicked in the viewer (its explanation is shown under the list).
+    @Published var logSelected: String?
     private var logStamp: Date?
     /// «Общие → Данные на диске».
     @Published var storage: [StorageItem] = []
@@ -676,14 +679,7 @@ enum LogFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    static func isProblem(_ line: String) -> Bool {
-        let l = line.lowercased()
-        // Normal situations that only sound alarming: text is selected, focus is not in a text field, a dev test run.
-        if l.contains("read refused") && (l.contains("step=text-selected") || l.contains("step=not-editable")) { return false }
-        if l.contains("field not readable") && l.contains("read refused") { return false }
-        return ["failed", "error", "unavailable", "crash", "exception", "остановилась", "не запустился", "не загрузилась", "занят",
-                "no effect", "refused", "not created", "exhausted", "taken", "not readable"].contains { l.contains($0) }
-    }
+    static func isProblem(_ line: String) -> Bool { LogGuide.isProblem(line) }
 
     func matches(_ line: String) -> Bool {
         switch self {

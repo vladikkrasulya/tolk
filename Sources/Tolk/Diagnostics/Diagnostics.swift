@@ -8,6 +8,7 @@
 // with «Скопировать отчёт».
 import AppKit
 import Darwin
+import TolkCore
 
 enum Diagnostics {
     static let dir: URL = {
@@ -77,6 +78,7 @@ enum Diagnostics {
             Diagnostics.log("UNCAUGHT EXCEPTION \(exception.name.rawValue): \(exception.reason ?? "")\n" +
                             exception.callStackSymbols.joined(separator: "\n"))
         }
+        writeGuide()
         log("launch \(version), args: \(CommandLine.arguments.dropFirst().joined(separator: " "))")
         cleanupOldCrashFiles(keeping: crashPath)
     }
@@ -155,6 +157,17 @@ enum Diagnostics {
                 lines = old.split(separator: "\n", omittingEmptySubsequences: true).suffix(limit - lines.count).map(String.init) + lines
             }
             return Array(lines.suffix(limit))
+        }
+    }
+
+    static var guideURL: URL { dir.appendingPathComponent("ЧИТАТЬ — что значат строки.md") }
+
+    /// Writes the guide to the log folder (rewritten when the app's guide changed), so the explanation is always
+    /// next to the files it explains.
+    static func writeGuide() {
+        let text = LogGuide.markdown()
+        queue.async {
+            if (try? String(contentsOf: guideURL, encoding: .utf8)) != text { try? text.write(to: guideURL, atomically: true, encoding: .utf8) }
         }
     }
 

@@ -564,3 +564,13 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   repositioning the app, the element and the text before the caret are still verified, and a non-blank tail is only
   logged (`inserting with text after the caret tail=…`). Why Electron reports that tail is still unknown; the log line
   will show its shape.
+
+## v0.8.7 — a guide to the log
+
+- `TolkCore/LogGuide.swift`: every kind of line in tolk.log (about a hundred) in 12 groups, each with a plain-words
+  title, a meaning, a kind (обычное / к сведению / проблема) and, for problems, what to do. An entry matches by how
+  the event starts plus optional substrings; the self-test checks that every sample is explained by its own entry.
+- One source, three readers: Настройки → Журнал (click a line → explanation; «Что происходило» — problems and notes
+  counted by kind; «Справочник» by group; the «Проблемы» filter and line colours come from the guide); a README
+  written next to the log files at launch (`Diagnostics.writeGuide`); `docs/journal.md` (`tolk-cli --log-guide`).
+- When a log line is added or reworded, add or update its `LogGuide` entry and regenerate `docs/journal.md`.

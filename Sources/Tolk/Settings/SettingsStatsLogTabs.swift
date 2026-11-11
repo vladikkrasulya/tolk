@@ -240,11 +240,14 @@ struct LogTab: View {
 
     var body: some View {
         SSections(tab: .log) { section in
-            if section == 0 {
+            switch section {
+            case 0:
                 viewerCard.fullSpan()
-            } else {
+            case 1:
+                summaryCard
                 settingsCard
-                legendCard
+            default:
+                guideCard.fullSpan()
             }
         }
     }
@@ -252,7 +255,7 @@ struct LogTab: View {
     private var viewerCard: some View {
         let lines = model.shownLogLines
         return SCard("Журнал событий", symbol: "list.bullet.rectangle",
-                     subtitle: "Что Tolk делал и почему. Текст, который вы переводите или печатаете, сюда не попадает — только длины, времена и названия программ.") {
+                     subtitle: "Нажмите на строку — под списком появится объяснение по-человечески. Красные строки — проблемы, оранжевые — «к сведению».") {
             Text("\(lines.count) строк").font(.callout).foregroundStyle(.secondary).monospacedDigit()
         } content: {
             HStack(spacing: 8) {
@@ -274,7 +277,10 @@ struct LogTab: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
                         ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
-                            LogLine(line: line).id(i)
+                            LogLine(line: line, selected: model.logSelected == line)
+                                .id(i)
+                                .contentShape(Rectangle())
+                                .onTapGesture { model.logSelected = model.logSelected == line ? nil : line }
                         }
                         if lines.isEmpty {
                             Text(model.logLines.isEmpty ? "Журнал пуст." : "По этому фильтру ничего нет.").font(.callout).foregroundStyle(.secondary).padding(8)
@@ -283,10 +289,107 @@ struct LogTab: View {
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(minHeight: 260, idealHeight: 380, maxHeight: 460)
+                .frame(minHeight: 240, idealHeight: 340, maxHeight: 420)
                 .background(TolkStyle.tile, in: RoundedRectangle(cornerRadius: TolkStyle.controlRadius, style: .continuous))
                 .onAppear { model.refreshLog(force: true); proxy.scrollTo(max(0, lines.count - 1), anchor: .bottom) }
                 .onChange(of: lines.count) { _, n in proxy.scrollTo(max(0, n - 1), anchor: .bottom) }
+            }
+            explanation.padding(.top, 8)
+        }
+    }
+
+    /// What the clicked line means.
+    @ViewBuilder private var explanation: some View {
+        if let line = model.logSelected {
+            if let e = LogGuide.explain(line) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(e.title).fontWeight(.medium)
+                        kindPill(e.kind)
+                        SPill(text: e.group.title)
+                    }
+                    Text(e.meaning).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let a = e.action {
+                        (Text("Что делать: ").fontWeight(.medium) + Text(a)).font(.callout).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .background(TolkStyle.tile, in: RoundedRectangle(cornerRadius: TolkStyle.controlRadius, style: .continuous))
+            } else {
+                SHint("Для этой строки объяснения в справочнике нет — это редкое техническое событие.")
+            }
+        } else {
+            SHint("Нажмите на любую строку, чтобы увидеть, что она значит.")
+        }
+    }
+
+    private func kindPill(_ k: LogGuide.Kind) -> some View {
+        switch k {
+        case .problem: SPill(text: "проблема", symbol: "exclamationmark.triangle", role: .bad)
+        case .note: SPill(text: "к сведению", symbol: "info.circle", role: .warn)
+        case .normal: SPill(text: "обычное", symbol: "checkmark", role: .ok)
+        }
+    }
+
+    /// Problems and notes found in the loaded lines, by kind of event.
+    private var summaryCard: some View {
+        let items = LogGuide.summary(model.logLines)
+        return SCard("Что происходило", symbol: "exclamationmark.bubble",
+                     subtitle: "Проблемы и события «к сведению» в последних \(model.logLines.count) строках журнала, от частых к редким.") {
+            if items.isEmpty {
+                SHint("Ничего примечательного: только обычная работа.")
+            }
+            ForEach(Array(items.prefix(12).enumerated()), id: \.offset) { _, it in
+                VStack(alignment: .leading, spacing: 3) {
+                    Rectangle().fill(TolkStyle.hairline).frame(height: 0.5).padding(.bottom, 4)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(it.entry.title).fontWeight(.medium).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 6)
+                        Text("\(it.count)×").monospacedDigit().foregroundStyle(.secondary)
+                        kindPill(it.entry.kind)
+                    }
+                    Text(it.entry.meaning).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let a = it.entry.action {
+                        (Text("Что делать: ").fontWeight(.medium) + Text(a)).font(.callout).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.bottom, 8)
+            }
+        }
+        .onAppear { model.refreshLog(force: true) }
+    }
+
+    /// The whole guide, by group.
+    private var guideCard: some View {
+        SCard("Справочник по строкам журнала", symbol: "text.book.closed",
+              subtitle: "Все виды событий по группам. Тот же текст лежит файлом рядом с журналом — его можно открыть и читать отдельно.") {
+            Button("Открыть файлом") { Diagnostics.writeGuide(); NSWorkspace.shared.open(Diagnostics.guideURL) }
+        } content: {
+            ForEach(LogGuide.Group.allCases, id: \.rawValue) { g in
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text(g.about).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        ForEach(Array(LogGuide.entries.filter { $0.group == g }.enumerated()), id: \.offset) { _, e in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 8) { Text(e.title).fontWeight(.medium); kindPill(e.kind) }
+                                Text(e.sample).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
+                                Text(e.meaning).font(.callout).fixedSize(horizontal: false, vertical: true)
+                                if let a = e.action {
+                                    (Text("Что делать: ").fontWeight(.medium) + Text(a)).font(.callout).fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 6).padding(.bottom, 8)
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(g.title).fontWeight(.medium)
+                        let n = LogGuide.entries.filter { $0.group == g && $0.kind == .problem }.count
+                        Text("\(LogGuide.entries.filter { $0.group == g }.count) событий" + (n > 0 ? ", из них проблем \(n)" : "")).font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 3)
             }
         }
     }
@@ -314,31 +417,11 @@ struct LogTab: View {
             }
         }
     }
-
-    private var legendCard: some View {
-        SCard("Как читать журнал", symbol: "text.book.closed") {
-            VStack(alignment: .leading, spacing: 7) {
-                legend("translate: popup en→ru in=120 out=131 … ms=840", "Перевод: откуда, направление, длина текста и ответа в знаках, кто перевёл и за сколько миллисекунд. «cache» — взят из кэша, «fallback» — сработал запасной перевод.")
-                legend("autocomplete: shown len=14 ms=160 …", "Подсказка показана: длина, время ответа модели, программа.")
-                legend("autocomplete: empty suggestion … p1=0.21 need=0.3", "Модель ответила, но неуверенно (p1 ниже порога need) — подсказка не показана. «patient=N» — будет показана после паузы.")
-                legend("autocomplete: no request — …", "Запрос к модели не отправлялся: мало текста, поле не читается, пауза после Esc и т. п.")
-                legend("autocomplete: accepted word / all", "Вы приняли слово (Tab) или всю подсказку (→).")
-                legend("vkbox …: available / unavailable", "Сервер перевода появился или пропал.")
-                legend("models: …", "Скачивание и удаление моделей.")
-            }
-        }
-    }
-
-    private func legend(_ sample: String, _ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(sample).font(.system(.caption, design: .monospaced)).foregroundStyle(.primary)
-            Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }
-    }
 }
 
 private struct LogLine: View {
     let line: String
+    var selected = false
 
     var body: some View {
         // "2026-11-11 12:14:01 message" or the old "2026-11-11T11:14:01Z message".
@@ -349,13 +432,19 @@ private struct LogLine: View {
         }
         let stamp = cut.map { String(line[..<$0]) } ?? ""
         let message = cut.map { String(line[$0...]) } ?? line
-        let problem = LogFilter.isProblem(message)
+        let entry = LogGuide.explain(message)
+        let problem = entry.map { $0.kind == .problem } ?? LogGuide.isProblem(message)
+        let color: AnyShapeStyle = problem ? AnyShapeStyle(Color.red) : (entry?.kind == .note ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.primary))
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(shortStamp(stamp)).foregroundStyle(.tertiary)
-            Text(message).foregroundStyle(problem ? AnyShapeStyle(Color.red) : AnyShapeStyle(.primary)).textSelection(.enabled)
+            Text(message).foregroundStyle(color)
         }
         .font(.system(size: 11.5, design: .monospaced))
         .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 4).padding(.vertical, 1)
+        .background(selected ? Color.accentColor.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+        .help(entry.map { $0.title + " — " + $0.meaning } ?? "")
     }
 
     /// "11-11 12:14:01"
