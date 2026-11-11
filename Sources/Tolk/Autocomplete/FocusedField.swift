@@ -402,14 +402,18 @@ struct FocusedField {
             // The app gave the whole field instead of the caret (Chrome <textarea> reports no character rectangles at
             // all): the suggestion goes into the field's bottom-left corner as a readable bubble (`caretApprox`).
             let f = field ?? r
-            rect = CGRect(x: f.minX + 12, y: f.maxY - fallbackLineHeight - 8, width: 1, height: fallbackLineHeight)
+            // Just UNDER the field, not inside it: a field that hugs its text (Jira's comment editor) would otherwise
+            // get the bubble on top of the line being typed.
+            rect = CGRect(x: f.minX + 12, y: f.maxY + 4, width: 1, height: fallbackLineHeight)
             info = "fieldCorner raw=\(fmt(r))"
         } else if let r = zero {
             rect = line(r, x: r.minX)
             info = "zeroLen raw=\(fmt(r))"
         } else if let f = field {
             // No rectangle at all (plain contenteditable in Chrome): same corner fallback.
-            rect = CGRect(x: f.minX + 12, y: f.maxY - fallbackLineHeight - 8, width: 1, height: fallbackLineHeight)
+            // Just UNDER the field, not inside it: a field that hugs its text (Jira's comment editor) would otherwise
+            // get the bubble on top of the line being typed.
+            rect = CGRect(x: f.minX + 12, y: f.maxY + 4, width: 1, height: fallbackLineHeight)
             info = "fieldCorner raw=\(fmt(f))"
         } else {
             return nil

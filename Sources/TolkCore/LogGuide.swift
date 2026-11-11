@@ -134,6 +134,9 @@ public enum LogGuide {
         Entry(["autocomplete: hidden reason="], .suggestShown, .normal, "Подсказка спрятана",
               "esc — вы нажали Esc; key — нажата клавиша управления (стрелки, ⌘…); click — щелчок мышью; app — переключились в другую программу.",
               sample: "autocomplete: hidden reason=key code=123 mods=0"),
+        Entry(["autocomplete: caret not found on the snapshot"], .suggestShown, .note, "Курсор на снимке не найден",
+              "Программа не сообщила, где курсор, а на снимке поля Tolk не нашёл набранный текст. Плашка показана под полем.",
+              sample: "autocomplete: caret not found on the snapshot (field 1300x40, lines read 2, typed tail 14 chars)"),
         Entry(["autocomplete: panel not visible after show"], .suggestShown, .note, "Подсказке не хватило места",
               "Курсор стоит у правого края поля — подсказка не поместилась и не показана.", sample: "autocomplete: panel not visible after show (no room or empty)"),
 

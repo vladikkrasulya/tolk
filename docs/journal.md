@@ -182,6 +182,12 @@ len — длина подсказки, ms — сколько думала мод
 
 esc — вы нажали Esc; key — нажата клавиша управления (стрелки, ⌘…); click — щелчок мышью; app — переключились в другую программу.
 
+### Курсор на снимке не найден — к сведению
+
+`autocomplete: caret not found on the snapshot (field 1300x40, lines read 2, typed tail 14 chars)`
+
+Программа не сообщила, где курсор, а на снимке поля Tolk не нашёл набранный текст. Плашка показана под полем.
+
 ### Подсказке не хватило места — к сведению
 
 `autocomplete: panel not visible after show (no room or empty)`

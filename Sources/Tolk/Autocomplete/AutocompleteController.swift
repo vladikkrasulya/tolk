@@ -666,6 +666,17 @@ final class AutocompleteController {
             Diagnostics.log("autocomplete: instant replace=\(s.replaceCount) app=\(field.bundleID ?? "?")")
             stats.instantShown(model: statsModel, app: field.bundleID); onStatsChanged?()
             scheduleInstantRecheck()
+            // The app does not say where the caret is (web editors): find the typed text on a snapshot and move the
+            // bubble there, as for model suggestions.
+            if field.caretApprox, Self.caretBubble, ScreenContext.ocrAllowed, CGPreflightScreenCaptureAccess(),
+               let el = field.element, let frame = FocusedField.frame(of: el) {
+                let typed = field.textBefore, shown = s.text, size = field.fontSize, limit = field.rightLimit
+                Task { [weak self] in
+                    guard let found = await CaretLocator.locate(field: frame, textBefore: typed),
+                          let self, self.instant?.text == shown, self.anchor?.snap.textBefore == typed else { return }
+                    self.panel?.show(s.display, caret: found, fontSize: size, rightLimit: limit)
+                }
+            }
             if s.blocksModel { return }
             break
         }

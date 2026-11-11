@@ -20,7 +20,11 @@ enum CaretLocator {
         let lines: [Line] = await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async { cont.resume(returning: (try? recognize(image)) ?? []) }
         }
-        guard let hit = match(lines: lines, textBefore: textBefore) else { return nil }
+        guard let hit = match(lines: lines, textBefore: textBefore) else {
+            // No text of the user in the log: only how much was read and how the search ended.
+            Diagnostics.log("autocomplete: caret not found on the snapshot (field \(Int(clipped.width))x\(Int(clipped.height)), lines read \(lines.count), typed tail \(min(14, norm(textBefore).count)) chars)")
+            return nil
+        }
         let sx = clipped.width / CGFloat(image.width), sy = clipped.height / CGFloat(image.height)
         let h = max(12, min(40, hit.rect.height * sy * 1.15))
         // A typed trailing space is not part of the recognized line: step over it.

@@ -646,3 +646,11 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - `Language.main` = uk, en, ru, pl (also the first four enum cases, so every list built from `allCases` follows);
   `Language.others` = the rest by Russian name. The popup's «Перевести на» menu and the Documents target list use
   them. Default translation direction (`primaryLanguage` / `secondaryLanguage`) is unchanged.
+
+## v0.9.6 — the bubble no longer covers the text being typed (Jira in Chrome)
+
+- Jira's comment editor (an iframe with a contenteditable body) reports no caret and a field that hugs its text, so
+  the fallback bubble «in the field's bottom-left corner» landed on the line being typed. The fallback is now just
+  under the field. Typo-fix (instant) suggestions also look the caret up on a snapshot (`CaretLocator`) and move the
+  bubble there, as model suggestions do. When the snapshot search fails the log says so
+  (`caret not found on the snapshot (field WxH, lines read N, …)`), without any text.
