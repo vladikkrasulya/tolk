@@ -555,3 +555,12 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   the statistics as «not-inserted».
 - Журнал → «Проблемы» no longer lists normal refusals (`step=text-selected`, `step=not-editable`).
 - Dev runs (`TOLK_DL_TEST`, `TOLK_MAIN_DEMO`, `TOLK_RENDER_*`) write their log to a temporary folder, like the smoke run.
+
+## v0.8.6 — Tab no longer falls through to the app
+
+- Seen in the log: 10 of 35 accepted suggestions (Claude desktop, Slack) were dropped at the Tab press with
+  `rest-of-line` — the re-read reported text after the caret although the text before it was unchanged — and Tab went
+  to the app (the focus jumped). The end-of-line rule now applies only when a suggestion is shown; at insertion and at
+  repositioning the app, the element and the text before the caret are still verified, and a non-blank tail is only
+  logged (`inserting with text after the caret tail=…`). Why Electron reports that tail is still unknown; the log line
+  will show its shape.

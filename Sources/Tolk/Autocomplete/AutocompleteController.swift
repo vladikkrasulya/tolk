@@ -95,7 +95,12 @@ final class AutocompleteController {
     /// Quick re-read of the field for a key handler: returns it only if it is still the field (process, element,
     /// text before the caret, end of line) the visible suggestion was built for. Otherwise (or when the read does
     /// not finish within the budget) the suggestion is dropped and nil is returned: the caller must pass the key on.
-    private func verifiedField(requireLineEnd: Bool = true) -> FocusedField? {
+    /// The end-of-line rule is applied when a suggestion is SHOWN. At insertion it is no longer required: in Electron
+    /// apps (Claude, Slack) a re-read at the Tab press reported text after the caret for about every third accepted
+    /// suggestion although the text before the caret was unchanged — the suggestion was dropped and Tab went to the
+    /// app (focus jumped). What must hold for a safe insertion — same app, same element, same text before the caret —
+    /// is still checked; the tail is only logged.
+    private func verifiedField(requireLineEnd: Bool = false) -> FocusedField? {
         guard let a = anchor, !IsSecureEventInputEnabled(), !isOff(a.snap.bundleID) else {
             cancelPending(); hide(reason: "stale"); return nil
         }
@@ -112,6 +117,9 @@ final class AutocompleteController {
                 UsageStore.shared.recordMiss("not-inserted")
             }
             cancelPending(); hide(reason: "stale"); return nil
+        }
+        if !AutocompleteSafety.isBlankTail(now.restOfLine) {
+            Diagnostics.log("autocomplete: inserting with text after the caret tail=\(AutocompleteSafety.tailShape(now.restOfLine)) app=\(a.snap.bundleID ?? "?")")
         }
         return now
     }
@@ -431,7 +439,7 @@ final class AutocompleteController {
         guard let a = anchor else { return false }
         var same = true
         if let ae = a.element, let ne = f.element { same = CFEqual(ae, ne) }
-        let d = AutocompleteSafety.decide(shown: a.snap, now: f.snapshot, restOfLine: f.restOfLine, sameElement: same, requireLineEnd: true)
+        let d = AutocompleteSafety.decide(shown: a.snap, now: f.snapshot, restOfLine: f.restOfLine, sameElement: same, requireLineEnd: false)
         if case .skip(let why) = d { Diagnostics.log("autocomplete: reposition dropped (\(why))") }
         return d == .apply
     }
