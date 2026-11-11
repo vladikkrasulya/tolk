@@ -304,10 +304,10 @@ extension DefaultTranslationEngine {
 
     /// The model must be up: wait for a cold load like a normal translation does.
     func readyOllama() async throws -> OllamaProvider {
-        guard let ollama = primary as? OllamaProvider else { throw TolkError.unavailable("Эта функция работает только через модель на vkbox") }
-        if await ollama.isAvailable() == false { throw TolkError.unavailable("vkbox недоступен (Ollama не отвечает)") }
+        guard let ollama = primary as? OllamaProvider else { throw TolkError.unavailable("Эта функция работает только через модель на сервере") }
+        if await ollama.isAvailable() == false { throw TolkError.unavailable("сервер недоступен (Ollama не отвечает)") }
         if await ollama.ensureReady(timeout: Self.coldLoadWait) == .stillLoading {
-            throw TolkError.unavailable("модель ещё загружается на vkbox (холодный старт), попробуйте через минуту")
+            throw TolkError.unavailable("модель ещё загружается на сервере (холодный старт), попробуйте через минуту")
         }
         return ollama
     }

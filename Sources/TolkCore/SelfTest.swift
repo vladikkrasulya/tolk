@@ -85,7 +85,7 @@ public enum SelfTest {
         let t = Date(timeIntervalSince1970: 2_000_000)
         ModelUsage.markUsed(at: t)
         check(ModelUsage.usedRecently(now: t.addingTimeInterval(14 * 60)), "usage: used 14 min ago → warm-up allowed")
-        check(!ModelUsage.usedRecently(now: t.addingTimeInterval(16 * 60)), "usage: used 16 min ago → leave vkbox alone")
+        check(!ModelUsage.usedRecently(now: t.addingTimeInterval(16 * 60)), "usage: used 16 min ago → leave the home server alone")
         ModelUsage.reset()
     }
 

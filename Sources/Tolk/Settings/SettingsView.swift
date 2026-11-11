@@ -164,7 +164,7 @@ struct TranslateTab: View {
     private var serverCard: some View {
         SCard("Сервер перевода", symbol: "server.rack") {
             SRow("Адрес в домашней сети", hint: "Компьютер, на котором работает Ollama с моделью перевода. Tolk сначала пробует этот адрес, затем адрес вне дома.", divider: false) {
-                TextField("", text: $model.config.ollamaURL, prompt: Text("http://192.168.1.13:11434"))
+                TextField("", text: $model.config.ollamaURL, prompt: Text("http://192.168.1.10:11434"))
                     .textFieldStyle(.roundedBorder).frame(minWidth: 200, maxWidth: 280)
             }
             SRow("Соединение") {

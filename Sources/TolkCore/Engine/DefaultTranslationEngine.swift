@@ -1,6 +1,6 @@
 import Foundation
 
-/// Qwen (Ollama on vkbox) first; Google when vkbox is off, Ollama is stopped (e.g. while gaming),
+/// Qwen (Ollama on the home server) first; Google when the home server is off, Ollama is stopped (e.g. while gaming),
 /// or the request fails before the first chunk.
 public final class DefaultTranslationEngine: TranslationEngine, @unchecked Sendable {
     public let config: TolkConfig
@@ -108,7 +108,7 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                         // never cancelled by the user closing the popup). Too long -> fall back, load goes on.
                         if let ollama = primary as? OllamaProvider, await ollama.ensureReady(timeout: Self.coldLoadWait) == .stillLoading {
                             try Task.checkCancellation()
-                            coldFailure = "модель ещё загружается на vkbox (холодный старт), прогрев продолжается"
+                            coldFailure = "модель ещё загружается на сервере (холодный старт), прогрев продолжается"
                         }
                         if coldFailure == nil { do {
                             try await UsageBox.$current.withValue(usage) {
@@ -138,13 +138,13 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                             failure = Self.describe(error)
                         } } else { failure = coldFailure }
                     } else {
-                        failure = "vkbox недоступен (Ollama не отвечает)"
+                        failure = "сервер недоступен (Ollama не отвечает)"
                     }
                     // Google can only translate; a polish request has no fallback.
                     guard let fallback, resolved.mode == .translate else {
                         let why = failure ?? "\(primary.name) недоступен"
                         throw TolkError.unavailable(resolved.mode == .polish
-                            ? "«Причесать» работает только через модель на vkbox, а она сейчас недоступна: \(why)"
+                            ? "«Причесать» работает только через модель на сервере, а она сейчас недоступна: \(why)"
                             : "Перевод не получился: \(why). Запасной перевод выключен (Настройки → Перевод).")
                     }
                     try Task.checkCancellation()
@@ -161,7 +161,7 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                     } catch {
                         if error is CancellationError || Task.isCancelled { throw error }
                         // No silent trip to the cloud: Apple was chosen as the private fallback.
-                        throw TolkError.unavailable("\(failure ?? "vkbox недоступен"). Запасной перевод \(fallback.name): \(Self.describe(error))" + Self.googleHint(for: fallback))
+                        throw TolkError.unavailable("\(failure ?? "сервер недоступен"). Запасной перевод \(fallback.name): \(Self.describe(error))" + Self.googleHint(for: fallback))
                     }
                     continuation.yield(.stats(stats(fallback, reason: failure)))
                     continuation.yield(.finished)
@@ -221,9 +221,9 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
         if let u = error as? URLError {
             switch u.code {
             case .timedOut: return "модель не отвечает (таймаут)"
-            case .networkConnectionLost: return "связь с vkbox оборвалась"
+            case .networkConnectionLost: return "связь с сервером оборвалась"
             case .cannotConnectToHost, .notConnectedToInternet, .cannotFindHost, .dnsLookupFailed:
-                return "vkbox недоступен (нет связи с сетью или сервером)"
+                return "сервер недоступен (нет связи с сетью или сервером)"
             case .cancelled: return "запрос отменён"
             default: return "ошибка сети (\(u.code.rawValue))"
             }
@@ -233,8 +233,8 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
 }
 
 
-/// When the user last asked for a translation. The background health check reloads the model on vkbox only if the
-/// user translated recently: a model that was unloaded on purpose (vkbox is used for games) must stay unloaded.
+/// When the user last asked for a translation. The background health check reloads the model on the home server only if the
+/// user translated recently: a model that was unloaded on purpose (the home server is used for games) must stay unloaded.
 public enum ModelUsage {
     nonisolated(unsafe) private static var last: Date?
     private static let lock = NSLock()

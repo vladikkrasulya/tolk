@@ -83,24 +83,24 @@ extension SelfTest {
 
 extension SelfTest {
     static func serverTextChecks(_ check: Check) {
-        check(ServerText.unavailable == "vkbox недоступен", "server text: one name for the state")
-        check(ServerText.menuLine(available: true, model: "Gemma", fallback: "Google") == "● Переводит Gemma (vkbox)", "server text: menu, available")
-        check(ServerText.menuLine(available: false, model: "Gemma", fallback: nil) == "○ vkbox недоступен", "server text: menu, no fallback")
-        check(ServerText.menuLine(available: false, model: "Gemma", fallback: "Apple") == "○ vkbox недоступен — переводит Apple", "server text: menu, fallback")
-        check(ServerText.switching() == "vkbox недоступен — переключаюсь на запасной перевод", "server text: switching")
-        check(ServerText.switched(to: "Google") == "vkbox недоступен — перевод от Google", "server text: switched")
-        for raw in ["vkbox не ответил", "Ollama недоступна", "модель не отвечает (таймаут)", "связь с vkbox оборвалась"] {
-            check(ServerText.statusReason(raw).hasPrefix("vkbox"), "server text: status reason «\(raw)» speaks about vkbox", ServerText.statusReason(raw))
+        check(ServerText.unavailable == "Сервер недоступен", "server text: one name for the state")
+        check(ServerText.menuLine(available: true, model: "Gemma", fallback: "Google") == "● Переводит Gemma на сервере", "server text: menu, available")
+        check(ServerText.menuLine(available: false, model: "Gemma", fallback: nil) == "○ Сервер недоступен", "server text: menu, no fallback")
+        check(ServerText.menuLine(available: false, model: "Gemma", fallback: "Apple") == "○ Сервер недоступен — переводит Apple", "server text: menu, fallback")
+        check(ServerText.switching() == "Сервер недоступен — переключаюсь на запасной перевод", "server text: switching")
+        check(ServerText.switched(to: "Google") == "Сервер недоступен — перевод от Google", "server text: switched")
+        for raw in ["сервер не ответил", "Ollama недоступна", "модель не отвечает (таймаут)", "связь с сервером оборвалась"] {
+            check(ServerText.statusReason(raw).hasPrefix("Сервер"), "server text: status reason «\(raw)» speaks about the server", ServerText.statusReason(raw))
         }
-        check(ServerText.statusReason("модель не отвечает (таймаут)") == "vkbox не успел ответить", "server text: timeout wording")
-        check(ServerText.statusReason("vkbox недоступен (нет связи)") == "vkbox недоступен", "server text: reasons with the name collapse")
-        check(ServerText.hudFallback(progress: "переводю… (Google)") == "vkbox недоступен — переводю… (Google)", "server text: HUD")
-        check(ServerText.needsServer("причесать текст") == "vkbox недоступен — причесать текст без него нельзя", "server text: needs server")
+        check(ServerText.statusReason("модель не отвечает (таймаут)") == "Сервер не успел ответить", "server text: timeout wording")
+        check(ServerText.statusReason("сервер недоступен (нет связи)") == "Сервер недоступен", "server text: reasons with the name collapse")
+        check(ServerText.hudFallback(progress: "переводю… (Google)") == "Сервер недоступен — переводю… (Google)", "server text: HUD")
+        check(ServerText.needsServer("причесать текст") == "Сервер недоступен — причесать текст без него нельзя", "server text: needs server")
         check(ServerText.homeOnly("Разбор смысла").hasPrefix("Разбор смысла делает домашняя модель"), "server text: home-only feature")
         check(EscText.closeHint == "Esc — закрыть" && EscText.cancelHint == "Esc — отмена", "esc text: two phrases")
         // Every state-phrase in the file set must come out of the one source: no stray variants of the old wording.
         for s in [ServerText.switching(), ServerText.unavailable, ServerText.menuChecking] {
-            check(!s.contains("не ответил") && !s.contains("Модель на vkbox"), "server text: no legacy phrase in «\(s)»")
+            check(!s.contains("не ответил") && !s.contains("Модель на сервере"), "server text: no legacy phrase in «\(s)»")
         }
     }
 }

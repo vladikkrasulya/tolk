@@ -685,10 +685,10 @@ enum LogFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: true
         case .problems: Self.isProblem(line)
-        case .translate: ["translate:", "double cmd+c", "reply", "quick ", "vkbox", "incremental:", "type-translate:", "mask:"].contains { line.lowercased().contains($0) }
+        case .translate: ["translate:", "double cmd+c", "reply", "quick ", "server ", "incremental:", "type-translate:", "mask:"].contains { line.lowercased().contains($0) }
         case .autocomplete: line.contains("autocomplete:") || line.contains("style:")
         case .capture: line.contains("capture")
-        case .models: line.contains("models:") || line.contains("llama-server") || line.contains("model ready") || line.contains("vkbox")
+        case .models: line.contains("models:") || line.contains("llama-server") || line.contains("model ready") || line.contains("server ")
         }
     }
 }

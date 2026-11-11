@@ -202,7 +202,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   suggestion at the first unsure token and never shows half a word. Frequency (menu/Settings): rare 0.6 / normal 0.4 /
   often 0.25 first-token probability. A real word before the caret gets letters appended only at p ≥ 0.8.
   Filters drop invented numbers, markup and header echoes; 3 short few-shot messages lead the prompt.
-- Measured (autocomplete-eval.md, rounds 2–3): Gemma 26B on vkbox via Ollama ≈1.35 s and over-confident — kept for
+- Measured (autocomplete-eval.md, rounds 2–3): Gemma 26B on the home server via Ollama ≈1.35 s and over-confident — kept for
   translation only; 26B on the Mac was rejected by the user (memory/heat).
 - Autocorrect is conservative: never changes the first letter, skips brands/slang and words already in the text,
   remembers ignored fixes.
@@ -307,7 +307,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - `RulesFingerprint` is part of the live-typing sentence cache key (`UI/LiveTranslation.swift`).
 - Autocomplete statistics (`autocomplete-stats.json`, numbers only): Settings → Автодополнение and the menu bar;
   `tolk-cli --ac-stats`.
-- Measured on vkbox (2026-11-10): num_ctx 8192 vs 32768 — generation ≈26 vs ≈22 tok/s, first token the same (~1.1 s).
+- Measured on the home server (2026-11-10): num_ctx 8192 vs 32768 — generation ≈26 vs ≈22 tok/s, first token the same (~1.1 s).
   Ollama reloads the model (~30 s) whenever a request asks for another num_ctx, so change it only in the Modelfile.
 
 ### v0.6.5 — «Перевод при наборе» (type in your language, insert the translation)
@@ -315,7 +315,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   message on screen is in another language; off by default). Also in the menu bar and Settings → Автодополнение.
 - After a 500 ms pause the whole field text is translated into the partner's language (`TolkCore/TypeTranslate.swift`:
   partner message + language from `ScreenContext`, else `secondaryLanguage`) with `replyTo`, app tone and thread
-  context; the engine for this mode has no fallback (vkbox down → silence, nothing goes to Google).
+  context; the engine for this mode has no fallback (server down → silence, nothing goes to Google).
 - `Sources/Tolk/TypeTranslate/`: grey line under the field (≤3 lines, «→ EN», «Tab — вставить, Esc — оставить»).
   Tab re-reads the field (process, element, full text), selects all via `AXSelectedTextRange` and pastes through the
   shared `Actions/ClipboardPaste.swift` (pasteboard restored, transient types) so the app's ⌘Z works. Enter is never
@@ -370,7 +370,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Time zones in the popup and in the «Проверка» card (`TimezoneConverter`); thread memory in «Ответить».
 - One source for server/fallback texts (`ServerText`) and Esc hints (`EscText`); hotkeys are editable in Settings →
   Общие (quick actions and «Перевод при наборе»); `TOLK_RENDER_POPUP` renders off-screen now (never shown).
-- vkbox: `gemma-translate` recreated with num_ctx 8192 (old one kept as `gemma-translate-32k`). Self-test: 690 checks.
+- Home server: `gemma-translate` recreated with num_ctx 8192 (old one kept as `gemma-translate-32k`). Self-test: 690 checks.
 
 ### v0.6.9 — reply chips, honest tones
 - «Ответить» window: «Подтвердить», «Смотрим», «Детали?», «Созвон?», «Отказать» (⌘1…⌘5, `Engine/ReplyChips.swift`):
@@ -498,7 +498,7 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
     server (good file, wrong size, not a model, 404).
   - `ServerModels` — Ollama server: list (`/api/tags`), pull with progress (`/api/pull`), «Подготовить» builds
     `<base>-translate` = base + translator system prompt + temperature 0.3, num_ctx 8192, num_predict 8192
-    (`/api/create`, the recipe of `gemma-translate`), delete (`/api/delete`). Create and delete were checked on vkbox.
+    (`/api/create`, the recipe of `gemma-translate`), delete (`/api/delete`). Create and delete were checked on the home server.
 - **Statistics** (`TolkCore/UsageStats.swift`, `usage-stats.json`, numbers only, one year): translations per day,
   characters, median time and time to the first words, cache share, fallback share, errors, by origin / language pair
   / app / provider; and why a suggestion did not appear (`acMisses`: unsure, nothing, short, unread, moved, esc,
@@ -574,3 +574,9 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   counted by kind; «Справочник» by group; the «Проблемы» filter and line colours come from the guide); a README
   written next to the log files at launch (`Diagnostics.writeGuide`); `docs/journal.md` (`tolk-cli --log-guide`).
 - When a log line is added or reworded, add or update its `LogGuide` entry and regenerate `docs/journal.md`.
+
+## v0.9.0 — open source
+
+- MIT licence. The author's server nickname and LAN address are gone from the program: the server is «Сервер» in
+  every message (`ServerText`), the default address is `http://127.0.0.1:11434`, the health line in the log is
+  `server <model>: available / unavailable`. README, SETUP and the user guide describe the current version.

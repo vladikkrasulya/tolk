@@ -1,6 +1,6 @@
 import Foundation
 
-/// Qwen on vkbox via Ollama's OpenAI-compatible endpoint, streamed over SSE.
+/// Qwen on the home server via Ollama's OpenAI-compatible endpoint, streamed over SSE.
 public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
     /// Display name from the model id: "qwen-translate" -> "Qwen", "gemma-translate" -> "Gemma".
     public let name: String

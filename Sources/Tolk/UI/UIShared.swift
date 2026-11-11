@@ -106,7 +106,7 @@ enum UIText {
         ServerText.switching(fromHome: !isFallbackProvider(from), name: providerName(from))
     }
 
-    /// «vkbox недоступен — перевод от Google» (the fallback has started to answer).
+    /// «the home server недоступен — перевод от Google» (the fallback has started to answer).
     static func fallbackDone(from: String, to: String) -> String {
         ServerText.switched(fromHome: !isFallbackProvider(from), name: providerName(from), to: providerName(to))
     }

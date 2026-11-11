@@ -4,7 +4,7 @@
 //
 // Keys come from the autocomplete event tap (`AutocompleteController.typeTranslate`); the pure rules are in
 // `TolkCore/TypeTranslate.swift`. Nothing from the text is logged (only lengths and bundle ids), the model on
-// vkbox is the only translator (no Google fallback), and when it is unreachable the line simply does not appear.
+// the home server is the only translator (no Google fallback), and when it is unreachable the line simply does not appear.
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox

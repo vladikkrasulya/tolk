@@ -2,7 +2,7 @@
 //   ● Qwen · жду ответ…            (grey)
 //   ● Qwen · генерация · 31 ток/с  (live, updated per chunk — no timers)
 //   ● Qwen дома · первое слово 0,4 с · 29 ток/с · 1,9 с   (green / blue when remote)
-//   ● Google · 0,8 с · vkbox недоступен                    (orange: fallback, no glossary)
+//   ● Google · 0,8 с · the home server недоступен                    (orange: fallback, no glossary)
 import AppKit
 import TolkCore
 

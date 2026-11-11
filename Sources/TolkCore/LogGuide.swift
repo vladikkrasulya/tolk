@@ -242,10 +242,10 @@ public enum LogGuide {
         Entry(["models:"], .model, .normal, "Файлы моделей", "Скачивание начато, завершено, отменено; файл добавлен или перемещён в Корзину.", sample: "models: downloaded gemma-4-E4B-abl-Q4_K.gguf (5,3 ГБ)"),
 
         // MARK: Сервер
-        Entry(["vkbox", "unavailable"], .server, .problem, "Сервер перевода недоступен",
+        Entry(["server ", "unavailable"], .server, .problem, "Сервер перевода недоступен",
               "Домашний сервер перестал отвечать. Пока он недоступен, работает запасной перевод (если включён).",
-              action: "Проверьте, что сервер включён и в той же сети; «Настройки → Перевод → Проверить».", sample: "vkbox Gemma: unavailable"),
-        Entry(["vkbox", "available"], .server, .normal, "Сервер перевода на связи", "Сервер ответил.", sample: "vkbox Gemma: available"),
+              action: "Проверьте, что сервер включён и в той же сети; «Настройки → Перевод → Проверить».", sample: "server Gemma: unavailable"),
+        Entry(["server ", "available"], .server, .normal, "Сервер перевода на связи", "Сервер ответил.", sample: "server Gemma: available"),
         Entry(["server models:", "Не удалось"], .server, .problem, "Действие с моделью на сервере не удалось", "Текст после двоеточия объясняет, что именно.",
               sample: "server models: Не удалось скачать «gemma4:26b»: …"),
         Entry(["server models:"], .server, .normal, "Модели на сервере", "Скачивание, подготовка для перевода или удаление модели на сервере.", sample: "server models: Модель перевода «gemma4-26b-translate» готова — её можно выбрать."),
@@ -386,7 +386,7 @@ extension SelfTest {
               "log guide: not inserted is a problem, inserted with a tail is a note")
         check(G.message(of: "2026-11-11 12:00:01 quit") == "quit" && G.message(of: "2026-11-11T11:00:02Z quit") == "quit" && G.message(of: "quit") == "quit", "log guide: timestamp is stripped")
         check(G.explain("something nobody wrote") == nil && G.isProblem("weird thing failed") && !G.isProblem("weird thing"), "log guide: unknown lines fall back to keywords")
-        let s = G.summary(["2026-11-11 12:00:01 autocomplete: empty suggestion ms=1", "2026-11-11T11:00:02Z autocomplete: empty suggestion ms=2", "vkbox Gemma: unavailable", "autocomplete: shown len=3"])
+        let s = G.summary(["2026-11-11 12:00:01 autocomplete: empty suggestion ms=1", "2026-11-11T11:00:02Z autocomplete: empty suggestion ms=2", "server Gemma: unavailable", "autocomplete: shown len=3"])
         check(s.count == 2 && s[0].entry.kind == .problem && s[1].count == 2, "log guide: summary puts problems first and skips routine lines", "\(s.map { "\($0.entry.title):\($0.count)" })")
         let md = G.markdown()
         check(md.contains("## Перевод") && md.contains("**Что делать:**") && md.contains("### Подсказка показана — обычное"), "log guide: markdown has groups, actions and marks")

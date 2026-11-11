@@ -82,7 +82,7 @@ while let a = args.next() {
     case "--twice": twice = true                             // translate the text twice in one process: shows the result cache
     case "--log-guide": print(LogGuide.markdown()); exit(0)  // the guide to tolk.log as Markdown (docs/journal.md)
     case "--self-test": selfTest = true                      // engine checks without model or network
-    case "--warm": warmOnly = true                          // load the model on vkbox and report the time
+    case "--warm": warmOnly = true                          // load the model on the home server and report the time
     case "--pairs": pairsTranslation = value()               // text = source; value = translation: sentence pairs (no model)
     case "--variants": variantsCurrent = value()             // text = source sentence; value = its translation; full texts via --context-*
     case "--variants-all": variantsAll = value()             // text = source; value = its translation: 2-3 whole-translation variants (--reply-to works)

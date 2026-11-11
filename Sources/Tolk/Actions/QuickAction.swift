@@ -72,7 +72,7 @@ enum QuickActionText {
         if s.contains("qwen") { return "Qwen" }
         if s.contains("google") { return "Google" }
         if s.contains("apple") { return "Apple" }
-        if s.contains("ollama") { return "vkbox" }
+        if s.contains("ollama") { return "сервер" }
         return raw
     }
 

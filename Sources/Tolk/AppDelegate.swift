@@ -497,12 +497,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let primary = engine.primary
         Task { @MainActor [weak self] in
             let ok = await primary.isAvailable()
-            if self?.lastHealth != ok { Diagnostics.log("vkbox \(primary.name): \(ok ? "available" : "unavailable")") }
+            if self?.lastHealth != ok { Diagnostics.log("server \(primary.name): \(ok ? "available" : "unavailable")") }
             self?.lastHealth = ok
             self?.showHealth(ok)
             // Model fell out of memory (idle > keep_alive, Ollama restart): load it in the background now,
             // so the next translation is not a 35+ s cold start — but only if the user translated in the last
-            // 15 minutes. Otherwise vkbox may be busy with something else (games): an unloaded model stays unloaded,
+            // 15 minutes. Otherwise the home server may be busy with something else (games): an unloaded model stays unloaded,
             // and the first translation loads it.
             let warmFor = TimeInterval((self?.config.keepWarmMinutes ?? 15) * 60)
             if ok, warmFor > 0, ModelUsage.usedRecently(within: warmFor), let ollama = primary as? OllamaProvider { await ollama.warmUpIfNeeded() }

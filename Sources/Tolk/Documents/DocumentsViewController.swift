@@ -108,7 +108,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
 
     /// Characters per second assumed for the estimate before the real speed is measured.
     static let assumedSpeed: Double = 350
-    /// Seconds per request on top of the speed (connection, prompt, first token) — measured ~1.5–3 s on vkbox.
+    /// Seconds per request on top of the speed (connection, prompt, first token) — measured ~1.5–3 s on the home server.
     static let perRequest: Double = 1.5
     static let bigPages = 300
     static let bigChars = 500_000

@@ -295,7 +295,7 @@ public struct GlossaryProfile: Codable, Sendable, Equatable, Identifiable {
 
 /// App settings. Stored as JSON at `TolkConfig.defaultPath`; missing file = defaults.
 public struct TolkConfig: Codable, Sendable, Equatable {
-    public var ollamaURL: String = "http://192.168.1.13:11434"
+    public var ollamaURL: String = "http://127.0.0.1:11434"
     public var model: String = "gemma-translate"
     /// Rules + glossary in Markdown, injected into the system prompt.
     public var rulesPath: String = "~/Translate/rules.md"

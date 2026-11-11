@@ -72,7 +72,7 @@ final class DemoTranslationEngine: TranslationEngine, @unchecked Sendable {
                         try await Task.sleep(for: .milliseconds(400))
                         c.yield(.delta("Прив"))
                         try await Task.sleep(for: .milliseconds(500))
-                        c.yield(.fellBack(from: "qwen", reason: "vkbox: connection refused"))
+                        c.yield(.fellBack(from: "qwen", reason: "сервер: connection refused"))
                         c.yield(.started(provider: "google", source: src, target: dst))
                     } else {
                         c.yield(.started(provider: "qwen", source: src, target: dst))
