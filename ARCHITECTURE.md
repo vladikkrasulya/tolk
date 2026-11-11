@@ -640,3 +640,9 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   number of lines or any digit.
 - The MIT licence as a document, ru: all paragraphs correct, 75 s instead of 30 s (three passes on long paragraphs).
   Dev check: `TOLK_DOC_TEST=file.txt [TOLK_DOC_TO=ru] .build/debug/Tolk`.
+
+## v0.9.5 — language lists start with Ukrainian, English, Russian, Polish
+
+- `Language.main` = uk, en, ru, pl (also the first four enum cases, so every list built from `allCases` follows);
+  `Language.others` = the rest by Russian name. The popup's «Перевести на» menu and the Documents target list use
+  them. Default translation direction (`primaryLanguage` / `secondaryLanguage`) is unchanged.

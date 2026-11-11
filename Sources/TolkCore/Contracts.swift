@@ -3,12 +3,17 @@
 import Foundation
 
 public enum Language: String, CaseIterable, Codable, Sendable {
-    // Order = order in menus: main working languages first, then the rest.
-    case english = "en", russian = "ru", ukrainian = "uk"
+    // Order = order in menus: the four main languages first (`Language.main`), then the rest.
+    case ukrainian = "uk", english = "en", russian = "ru", polish = "pl"
     case german = "de", french = "fr", spanish = "es", italian = "it", portuguese = "pt"
-    case polish = "pl", czech = "cs", dutch = "nl", romanian = "ro", bulgarian = "bg"
+    case czech = "cs", dutch = "nl", romanian = "ro", bulgarian = "bg"
     case turkish = "tr", kazakh = "kk", georgian = "ka", hebrew = "he", arabic = "ar"
     case chinese = "zh", japanese = "ja", korean = "ko", hindi = "hi", indonesian = "id", vietnamese = "vi"
+
+    /// The languages at the top of every language list, in this order.
+    public static let main: [Language] = [.ukrainian, .english, .russian, .polish]
+    /// The other languages, by their Russian name.
+    public static var others: [Language] { allCases.filter { !main.contains($0) }.sorted { $0.russianName < $1.russianName } }
 
     /// Name used inside LLM prompts.
     public var englishName: String {

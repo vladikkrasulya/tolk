@@ -630,8 +630,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         targetPopup.lastItem?.representedObject = nil
         targetPopup.lastItem?.toolTip = "Направление из настроек для языка документа"
         targetPopup.menu?.addItem(.separator())
-        let main: [Language] = [.russian, .ukrainian, .english]
-        for l in main + Language.allCases.filter({ !main.contains($0) }) {
+        for l in Language.main + Language.others {
             targetPopup.addItem(withTitle: "\(l.flag)  \(UIText.capitalized(l))")
             targetPopup.lastItem?.representedObject = l.rawValue
             if l == .english { targetPopup.menu?.addItem(.separator()) }

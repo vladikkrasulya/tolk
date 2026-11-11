@@ -560,7 +560,9 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
             menu.addItem(.separator())
         }
         menu.addItem(NSMenuItem.sectionHeader(title: "Перевести на"))
-        Language.allCases.sorted { $0.russianName < $1.russianName }.forEach(addLanguage)
+        Language.main.forEach(addLanguage)
+        menu.addItem(.separator())
+        Language.others.forEach(addLanguage)
         menu.addItem(.separator())
         let swap = NSMenuItem(title: "Поменять направление", action: #selector(swapDirection), keyEquivalent: "")
         swap.target = self

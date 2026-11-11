@@ -376,6 +376,8 @@ extension SelfTest {
            let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
             check(json["temperature"] as? Double == 0.4 && json["seed"] == nil, "tuning: translation request uses the settings", "\(json["temperature"] ?? "-")")
         } else { check(false, "tuning: translation request uses the settings") }
+        check(Array(Language.allCases.prefix(4)) == Language.main && Language.main == [.ukrainian, .english, .russian, .polish]
+              && Language.others.count == Language.allCases.count - 4 && !Language.others.contains(.polish), "languages: the four main ones lead every list")
         let cfg = try? JSONDecoder().decode(TolkConfig.self, from: Data(#"{"autocompletePatientDelay": 50, "keepWarmMinutes": -3}"#.utf8))
         check(cfg?.autocompletePatientDelay == 3 && cfg?.keepWarmMinutes == 0 && cfg?.autocompletePatient == true && cfg?.verboseLog == false, "usage: new config keys are clamped and default")
     }
