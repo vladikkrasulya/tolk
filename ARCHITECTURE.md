@@ -532,3 +532,10 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   shown under the user's instructions, can be reworded (`autocompleteBaseRules`, empty = built-in) and reset; «Что
   получает модель целиком» shows the whole prompt for a sample message with the current settings.
 - Defaults unchanged; endings set still 30 shown / 24 right. Self-test: 859 checks.
+
+## v0.8.3 — one settings section on screen
+
+- The sections of a settings tab are a second row under the tabs (`SettingsTab.sections`, underline style); only the
+  selected one is shown (`SettingsModel.section`, remembered per tab in `settingsSections`). Links between tabs open
+  the right section (`SettingsModel.open(_:section:)`). The status pills appear only when something is wrong; when
+  all is fine a small «Всё работает» sits at the end of the tab row.

@@ -15,17 +15,19 @@ struct StatsTab: View {
 
     var body: some View {
         periodCard.fullSpan()
-        SSection("Перевод")
-        translateCard
-        translateChartCard
-        originsCard
-        SSection("Подсказки")
-        suggestCard
-        suggestChartCard
-        missesCard
-        suggestTablesCard
-        SSection("Данные")
-        privacyCard
+        switch model.section {
+        case 0:
+            translateCard
+            translateChartCard
+            originsCard
+        case 1:
+            suggestCard
+            suggestChartCard
+            missesCard
+            suggestTablesCard
+        default:
+            privacyCard
+        }
     }
 
     private func pct(_ part: Int, _ whole: Int) -> String { whole > 0 ? "\(Int((Double(part) / Double(whole) * 100).rounded())) %" : "—" }
@@ -235,10 +237,12 @@ struct LogTab: View {
     @State private var confirmClear = false
 
     var body: some View {
-        viewerCard.fullSpan()
-        SSection("Настройка и справка")
-        settingsCard
-        legendCard
+        if model.section == 0 {
+            viewerCard.fullSpan()
+        } else {
+            settingsCard
+            legendCard
+        }
     }
 
     private var viewerCard: some View {

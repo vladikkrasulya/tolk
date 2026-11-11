@@ -73,19 +73,19 @@ enum MainWindowDemo {
             win.contentViewController = vc
             win.setContentSize(NSSize(width: w, height: h))
             win.appearance = forced
-            for tab in SettingsTab.allCases {
-                vc.model.tab = tab
+            for tab in SettingsTab.allCases { for sec in 0..<tab.sections.count {
+                vc.model.open(tab, section: sec)
                 try? await Task.sleep(for: .milliseconds(1200))
                 let v = vc.view
                 v.layoutSubtreeIfNeeded(); v.displayIfNeeded()
                 if let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
                     v.cacheDisplay(in: v.bounds, to: rep)
                     if let data = rep.representation(using: .png, properties: [:]) {
-                        try? data.write(to: URL(fileURLWithPath: "\(dir)/settings-\(tab.rawValue)-\(Int(w))-\(suffix).png"))
+                        try? data.write(to: URL(fileURLWithPath: "\(dir)/settings-\(tab.rawValue)\(sec)-\(Int(w))-\(suffix).png"))
                         print("[main-demo] wrote \(dir)/settings-\(tab.rawValue)-\(suffix).png")
                     }
                 }
-            }
+            } }
             win.orderOut(nil)
         }
 

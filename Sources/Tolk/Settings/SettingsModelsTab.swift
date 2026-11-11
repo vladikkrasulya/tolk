@@ -15,11 +15,14 @@ struct ModelsTab: View {
     @State private var deleteServer: String?
 
     var body: some View {
-        SSection("Подсказки — на этом Mac", "Небольшая модель, которая продолжает ваш текст.")
-        localCard
-        addCard
-        SSection("Перевод — на сервере", "Большая модель на домашнем сервере.")
-        serverCard
+        Group {
+            if model.section == 0 {
+                localCard
+                addCard
+            } else {
+                serverCard
+            }
+        }
         .confirmationDialog("Удалить модель «\(deleteLocal ?? "")»?", isPresented: Binding(get: { deleteLocal != nil }, set: { if !$0 { deleteLocal = nil } }), titleVisibility: .visible) {
             Button("Переместить в Корзину", role: .destructive) { if let f = deleteLocal { library.delete(f) }; deleteLocal = nil }
             Button("Отмена", role: .cancel) { deleteLocal = nil }

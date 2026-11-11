@@ -35,27 +35,58 @@ struct SettingsView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Narrow window: the tab icons go first, so the bar stays on one line.
+            let problems = statuses.filter { $0.0.2 != .ok }
             ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { tabBar(icons: true); Spacer(minLength: 8); if problems.isEmpty { allGood } }
                 tabBar(icons: true)
                 tabBar(icons: false)
                 FlowLayout(spacing: 2) { tabButtons(icons: false) }
             }
-            FlowLayout(spacing: 6) {
-                let problems = statuses.filter { $0.0.2 != .ok }
-                if problems.isEmpty {
-                    SPill(text: "Всё работает: сервер перевода, модель подсказок, разрешения", symbol: "checkmark", role: .ok)
-                } else {
+            if !problems.isEmpty {
+                FlowLayout(spacing: 6) {
                     ForEach(0..<problems.count, id: \.self) { statusPill(problems[$0].0, tab: problems[$0].1) }
                 }
             }
+            sectionBar
         }
         .padding(.horizontal, 20)
         .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(TolkStyle.page)
-        .overlay(alignment: .bottom) { Rectangle().fill(TolkStyle.hairline).frame(height: 0.5) }
         .onAppear { if model.lanCheck == .idle { model.checkConnection() } }
+    }
+
+    /// Second row: the sections of the current tab. Only the selected one is on screen.
+    private var sectionBar: some View {
+        let sections = model.tab.sections
+        return VStack(alignment: .leading, spacing: 6) {
+            FlowLayout(spacing: 0) {
+                ForEach(0..<sections.count, id: \.self) { i in
+                    let on = model.section == i
+                    Button { model.section = i } label: {
+                        VStack(spacing: 4) {
+                            Text(sections[i].title).lineLimit(1).fixedSize()
+                                .font(.callout.weight(on ? .semibold : .regular))
+                                .foregroundStyle(on ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                            Rectangle().fill(on ? Color.accentColor : Color.clear).frame(height: 2)
+                        }
+                        .padding(.horizontal, 10).padding(.top, 4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .bottom) { Rectangle().fill(TolkStyle.hairline).frame(height: 0.5) }
+            Text(sections[model.section].note).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 2)
+    }
+
+    private var allGood: some View {
+        SPill(text: "Всё работает", symbol: "checkmark", role: .ok)
+            .help("Сервер перевода на связи, модель подсказок готова, разрешения macOS выданы")
     }
 
     private func tabBar(icons: Bool) -> some View {
@@ -87,7 +118,7 @@ struct SettingsView: View {
     }
 
     private func statusPill(_ s: (String, String, SRole), tab: SettingsTab) -> some View {
-        Button { model.tab = tab } label: { SPill(text: s.0, symbol: s.1, role: s.2) }
+        Button { model.open(tab, section: 0) } label: { SPill(text: s.0, symbol: s.1, role: s.2) }
             .buttonStyle(.plain)
             .help("Открыть вкладку «\(tab.title)»")
     }
@@ -139,18 +170,20 @@ struct TranslateTab: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        SSection("Сервер и модель", "Где и чем переводится текст, и что делать, если сервер недоступен.")
-        serverCard
-        modelCard
-        fallbackCard
-        remoteCard
-        SSection("Язык и стиль", "На какой язык переводить, какие термины и какой тон использовать.")
-        languageCard
-        profilesCard
-        toneCard
-        SSection("Управление и тонкая настройка", "Стандартные значения подобраны замерами — меняйте по одному.")
-        copyCard
-        samplingCard
+        switch model.section {
+        case 0:
+            serverCard
+            modelCard
+            fallbackCard
+            remoteCard
+        case 1:
+            languageCard
+            profilesCard
+            toneCard
+        default:
+            samplingCard
+            copyCard
+        }
     }
 
     private var serverCard: some View {
@@ -197,7 +230,7 @@ struct TranslateTab: View {
                 .padding(.top, 6)
             HStack {
                 SHint("Скачать другую модель на сервер или удалить лишнюю можно во вкладке «Модели».")
-                Button("Модели…") { model.tab = .models }
+                Button("Модели…") { model.open(.models, section: 1) }
             }
             .padding(.top, 8)
         }
@@ -379,14 +412,15 @@ struct GeneralTab: View {
     @ObservedObject var model: SettingsModel
 
     var body: some View {
-        SSection("Система", "Запуск, разрешения macOS и сочетания клавиш.")
-        launchCard
-        permissionsCard
-        hotKeysCard
-        SSection("Данные и обслуживание", "Что лежит на диске, как вернуть стандартные настройки и куда смотреть при сбое.")
-        storageCard
-        resetCard
-        aboutCard
+        if model.section == 0 {
+            launchCard
+            permissionsCard
+            hotKeysCard
+        } else {
+            storageCard
+            resetCard
+            aboutCard
+        }
     }
 
     private var launchCard: some View {

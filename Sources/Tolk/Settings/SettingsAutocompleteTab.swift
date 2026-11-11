@@ -16,22 +16,24 @@ struct AutocompleteTab: View {
     static let appChips = ["Коротко и неформально", "Вежливо, на «Вы»", "Без эмодзи", "Пиши по-английски"]
 
     var body: some View {
-        SSection("Подсказки", "Включить и настроить, как часто и какой длины они появляются.")
-        mainCard
-        frequencyCard
-        SSection("Что знает модель", "Ваши пожелания, контекст разговора и ваша манера письма.")
-        instructionsCard
-        contextCard
-        styleCard
-        SSection("Помощники при наборе", "Работают отдельно от подсказок.")
-        typingCard
-        typeTranslateCard
-        SSection("Ограничения", "Когда и где подсказывать меньше или не подсказывать вовсе.")
-        batteryCard
-        offAppsCard
-        SSection("Тонкая настройка", "Числа, которыми управляется модель. Стандартные значения подобраны замерами — меняйте по одному и смотрите вкладку «Статистика».")
-        confidenceCard
-        modelParamsCard
+        switch model.section {
+        case 0:
+            mainCard
+            frequencyCard
+        case 1:
+            instructionsCard
+            contextCard
+            styleCard
+        case 2:
+            typingCard
+            typeTranslateCard
+        case 3:
+            batteryCard
+            offAppsCard
+        default:
+            confidenceCard
+            modelParamsCard
+        }
     }
 
     private var cfg: Binding<TolkConfig> { $model.config }
@@ -57,7 +59,7 @@ struct AutocompleteTab: View {
                 HStack(spacing: 8) {
                     Text(ACStats.shortModel(ModelLibrary.fileName(ofConfigPath: model.config.autocompleteModel)))
                         .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    Button("Модели…") { model.tab = .models }
+                    Button("Модели…") { model.open(.models, section: 0) }
                 }
             }
         }

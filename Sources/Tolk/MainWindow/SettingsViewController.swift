@@ -90,6 +90,28 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .general: "gearshape"
         }
     }
+    /// Sections of the tab (second row under the tabs): title and a one-line description. One is on screen at a time.
+    var sections: [(title: String, note: String)] {
+        switch self {
+        case .translate: [("Сервер и модель", "Где и чем переводится текст и что делать, если сервер недоступен."),
+                          ("Язык и стиль", "На какой язык переводить, какие термины и какой тон использовать."),
+                          ("Тонкая настройка", "Двойное ⌘C и параметры модели. Стандартные значения подобраны замерами — меняйте по одному.")]
+        case .autocomplete: [("Подсказки", "Включить и настроить, как часто и какой длины они появляются."),
+                             ("Что знает модель", "Ваши пожелания, контекст разговора и ваша манера письма."),
+                             ("Помощники при наборе", "Опечатки, эмодзи и перевод при наборе — работают отдельно от подсказок."),
+                             ("Ограничения", "Когда и где подсказывать меньше или не подсказывать вовсе."),
+                             ("Тонкая настройка", "Числа, которыми управляется модель. Стандартные значения подобраны замерами — меняйте по одному и смотрите «Статистику».")]
+        case .models: [("Подсказки — на этом Mac", "Небольшая модель, которая продолжает ваш текст."),
+                       ("Перевод — на сервере", "Большая модель на домашнем сервере.")]
+        case .stats: [("Перевод", "Сколько, откуда и как быстро переводится."),
+                      ("Подсказки", "Сколько показано и принято, и почему подсказки не было."),
+                      ("Данные", "Что хранится и как сбросить.")]
+        case .log: [("События", "Что Tolk делал и почему."),
+                    ("Настройка и справка", "Подробность записи, файлы и как читать строки.")]
+        case .general: [("Система", "Запуск, разрешения macOS и сочетания клавиш."),
+                        ("Данные и обслуживание", "Что лежит на диске, как вернуть стандартные настройки и куда смотреть при сбое.")]
+        }
+    }
     static let key = "settingsTab"
     static var saved: SettingsTab {
         var t: SettingsTab = .translate
@@ -120,6 +142,17 @@ final class SettingsModel: ObservableObject {
     @Published var config: TolkConfig { didSet { if config != oldValue { scheduleSave() } } }
     @Published var headers: [HeaderRow] { didSet { if headers != oldValue { syncHeaders() } } }
     @Published var tab: SettingsTab = SettingsTab.saved { didSet { UserDefaults.standard.set(tab.rawValue, forKey: SettingsTab.key) } }
+    /// Selected section of every tab (remembered between launches).
+    @Published var sectionByTab: [String: Int] = (UserDefaults.standard.dictionary(forKey: "settingsSections") as? [String: Int]) ?? [:] {
+        didSet { UserDefaults.standard.set(sectionByTab, forKey: "settingsSections") }
+    }
+    /// Section of the current tab.
+    var section: Int {
+        get { min(max(0, sectionByTab[tab.rawValue] ?? 0), tab.sections.count - 1) }
+        set { sectionByTab[tab.rawValue] = newValue }
+    }
+    /// Opens a tab on a given section (links like «Модели…»).
+    func open(_ t: SettingsTab, section s: Int) { sectionByTab[t.rawValue] = s; tab = t }
     @Published var saveStatus = ""
     @Published var saveFailed = false
     @Published var lanCheck: CheckState = .idle
