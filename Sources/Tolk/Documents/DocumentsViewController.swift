@@ -278,7 +278,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
             ])
         }
         show(.empty)
-        root.widthAnchor.constraint(greaterThanOrEqualToConstant: 640).isActive = true
+        root.widthAnchor.constraint(greaterThanOrEqualToConstant: 700).isActive = true
         root.heightAnchor.constraint(greaterThanOrEqualToConstant: 440).isActive = true
     }
 
@@ -311,9 +311,10 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         open.controlSize = .large
         open.keyEquivalent = "\r"
 
-        let hint = UIFactory.label("Сканы в PDF распознаются прямо на этом Mac. Перевод сохраняется в Word, RTF, TXT или Markdown.",
-                                   size: 12, color: .tertiaryLabelColor)
+        let hint = UIFactory.wrappingLabel("Сканы в PDF распознаются прямо на этом Mac. Перевод сохраняется в Word, RTF, TXT или Markdown.",
+                                           size: 12, color: .tertiaryLabelColor)
         hint.alignment = .center
+        hint.preferredMaxLayoutWidth = 480
 
         let stack = NSStackView(views: [icon, title, subtitle, open, hint])
         stack.orientation = .vertical
@@ -409,6 +410,16 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         optionsRow.spacing = 8
         optionsRow.setCustomSpacing(18, after: targetPopup)
         optionsRow.setCustomSpacing(14, after: saveButton)
+        // The row must never push the window wider (it used to grow past the screen edge once «Сохранить как…» appeared):
+        // the language popup shrinks first, then the two captions drop out.
+        optionsRow.setClippingResistancePriority(.defaultLow, for: .horizontal)
+        optionsRow.setVisibilityPriority(NSStackView.VisibilityPriority(rawValue: 200), for: targetTitle)
+        optionsRow.setVisibilityPriority(NSStackView.VisibilityPriority(rawValue: 300), for: toneTitle)
+        targetPopup.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(100), for: .horizontal)
+        targetPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 110).isActive = true
+        for b in [saveButton, cancelButton, pauseButton, translateButton] as [NSView] {
+            b.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
 
         // Notice + progress
         noticeLabel = UIFactory.wrappingLabel("", size: 12, color: .systemOrange)

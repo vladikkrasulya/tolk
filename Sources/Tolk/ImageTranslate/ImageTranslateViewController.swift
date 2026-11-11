@@ -287,7 +287,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         let sourceTitle = UIFactory.label("Распознанный текст", size: 13, weight: .semibold, color: .labelColor)
         ocrSpinner = spinner()
         ocrStatus = UIFactory.label("", size: 12)
-        copyTextButton = toolButton("Копировать текст", symbol: "doc.on.doc", #selector(copyText(_:)), tip: "Скопировать распознанный текст")
+        copyTextButton = toolButton("Копировать", symbol: "doc.on.doc", #selector(copyText(_:)), tip: "Скопировать распознанный текст")
         copyTextButton.controlSize = .small
         let sourceHeader = NSStackView(views: [sourceTitle, ocrSpinner, ocrStatus, UIFactory.spacer(), copyTextButton])
         sourceHeader.spacing = 6
@@ -319,11 +319,21 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         targetPopup.toolTip = "На какой язык переводить"
         retranslateButton = toolButton("Перевести", symbol: "arrow.clockwise", #selector(retranslate(_:)), tip: "Перевести текст ещё раз (после правок)")
         retranslateButton.controlSize = .small
-        copyTranslationButton = toolButton("Копировать перевод", symbol: "doc.on.doc", #selector(copyTranslation(_:)), tip: "Скопировать перевод")
+        copyTranslationButton = toolButton("Копировать", symbol: "doc.on.doc", #selector(copyTranslation(_:)), tip: "Скопировать перевод")
         copyTranslationButton.controlSize = .small
         let translationHeader = NSStackView(views: [translationTitle, providerBadge, translateSpinner, progressLabel,
                                                     UIFactory.spacer(), targetPopup, retranslateButton, copyTranslationButton])
         translationHeader.spacing = 6
+        // The two header rows must not dictate the page width (the window used to widen itself when this page opened):
+        // status texts are truncated, the language popup shrinks.
+        for row in [sourceHeader, translationHeader] { row.setClippingResistancePriority(.init(490), for: .horizontal) }
+        for l in [ocrStatus!, progressLabel!] {
+            l.lineBreakMode = .byTruncatingTail
+            l.setContentCompressionResistancePriority(.init(100), for: .horizontal)
+        }
+        targetPopup.setContentCompressionResistancePriority(.init(200), for: .horizontal)
+        targetPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 70).isActive = true
+        translationHeader.setVisibilityPriority(.init(300), for: providerBadge)
 
         let (translationScroll, tv) = makeTextArea(editable: false)
         translationView = tv
@@ -649,14 +659,14 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         let s = sel.length > 0 ? (sourceView.string as NSString).substring(with: sel) : sourceView.string
         guard !s.isEmpty else { return }
         Clipboard.copy(s)
-        flashCopied(sender, title: "Копировать текст")
+        flashCopied(sender, title: "Копировать")
     }
 
     @objc private func copyTranslation(_ sender: NSButton) {
         let s = translator.translation
         guard !s.isEmpty else { return }
         Clipboard.copy(s)
-        flashCopied(sender, title: "Копировать перевод")
+        flashCopied(sender, title: "Копировать")
     }
 
     private func flashCopied(_ b: NSButton, title: String) {

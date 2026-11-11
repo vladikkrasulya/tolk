@@ -32,6 +32,8 @@ final class StatusLineView: NSView {
         label.font = .systemFont(ofSize: fontSize)
         label.textColor = .secondaryLabelColor
         label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
+        label.cell?.usesSingleLineMode = true
         label.translatesAutoresizingMaskIntoConstraints = false
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         addSubview(dot)
@@ -138,6 +140,10 @@ final class StatusLineView: NSView {
                 }
                 attr.append(NSAttributedString(string: " заново", attributes: [
                     .font: label.font as Any, .foregroundColor: NSColor.controlAccentColor]))
+                // Without a paragraph style the attributed text wraps into a column when the pane is narrow.
+                let para = NSMutableParagraphStyle()
+                para.lineBreakMode = .byTruncatingTail
+                attr.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: attr.length))
                 label.attributedStringValue = attr
                 retranslatable = true
                 toolTip = "Перевод взят из памяти. Нажмите — перевести заново, без кеша"

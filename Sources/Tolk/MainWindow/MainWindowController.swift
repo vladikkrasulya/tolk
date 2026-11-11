@@ -115,6 +115,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     /// Shows the window on the last used section.
     func show() { show(current) }
 
+    /// ⌘V while the keyboard focus is still in the sidebar (right after choosing «Фото и скриншоты»): the page takes the picture.
+    @objc func paste(_ sender: Any?) {
+        guard current == .image, let page = pages[.image] as? ImageTranslateViewController else { NSSound.beep(); return }
+        page.pasteFromClipboard(nil)
+    }
+
     private func present() {
         AppPresence.shared.windowWillAppear()
         guard let window else { return }

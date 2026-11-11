@@ -904,6 +904,19 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         inputView.placeholder = reply ? "Ваш ответ" : "Введите или вставьте текст"
         inputView.setAccessibilityLabel(reply ? "Мой ответ" : "Исходный текст")
         outputPlaceholderView.placeholder = reply ? "Ответ на языке собеседника" : "Перевод"
+        outputPlaceholderView.needsDisplay = true
+        inputView.needsDisplay = true
+        // Coming from a translated foreign text (popup → «развернуть» → «Ответ»): that text is the partner's message, not my answer.
+        if reply, replyMessage.isEmpty {
+            let carried = inputView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !carried.isEmpty, LanguageDetector.detect(carried) != TolkConfig.load().primaryLanguage {
+                messageCard.messageView.string = carried
+                messageCard.messageView.needsDisplay = true
+                inputView.string = ""
+                inputView.needsDisplay = true
+                updateCounter()
+            }
+        }
         clearPairs()
         cancelRewrite()
         hints.invalidate()
@@ -915,6 +928,13 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         updateHintsVisibility(forceHide: !hints.hasContext && !(reply && !replyMessage.isEmpty))
         hints.refresh()
         view.window?.makeFirstResponder(reply && replyMessage.isEmpty ? messageCard.messageView : inputView)
+        // The answer card changes height with the mode: without this the text stays scrolled with its first line cut off.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.view.layoutSubtreeIfNeeded()
+            self.inputView.scrollRangeToVisible(NSRange(location: 0, length: 0))
+            self.inputView.scrollRangeToVisible(self.inputView.selectedRange())
+        }
     }
 
     /// The partner's message changed: its translation (to the user's language) and the answer's translation follow.
@@ -1434,6 +1454,10 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
 
         // Rows never force the window wider: when short of room their contents are clipped / truncated.
         for row in [inBottom, leftBar, rightBar] { row.setClippingResistancePriority(.init(1), for: .horizontal) }
+        // Narrow window: the language selector gives way (its title is truncated) before the mode switch gets clipped.
+        rightBar.setClippingResistancePriority(.init(490), for: .horizontal)
+        targetPopup.setContentCompressionResistancePriority(.init(200), for: .horizontal)
+        targetPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 60).isActive = true
         let leftCard = card(inScroll, bottom: inBottom, tinted: false)
         rewriteBar = RewriteBar()
         rewriteBar.onMode = { [weak self] in self?.rewriteRequested($0) }
