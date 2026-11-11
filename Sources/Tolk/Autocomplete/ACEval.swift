@@ -38,7 +38,11 @@ enum ACEval {
         }
         var shown = 0
         print("thresholds first=\(th.first) next=\(th.next) chat=\(AutocompletePrompt.chatTemplateAvailable) cases=\(lines.count)")
-        for line in lines {
+        var right = 0, wrong = 0
+        for full0 in lines {
+            // "text => expected": the suggestion must start with `expected` (word endings).
+            let parts = full0.components(separatedBy: " => ")
+            let line = parts[0], expected = parts.count > 1 ? parts[1] : nil
             let before = line.hasSuffix("_") ? String(line.dropLast()) + " " : line
             var extras = PromptExtras()
             if full {
@@ -59,9 +63,13 @@ enum ACEval {
             let rawClean = AutocompletePrompt.clean(r.raw, textBefore: before, maxWords: extras.maxWords)
             if final != nil { shown += 1 }
             let p1 = r.firstProb.map { String(format: "%.2f", $0) } ?? "-"
+            var mark = ""
+            if let expected {
+                if let f = final { if f.hasPrefix(expected) { right += 1; mark = " ✓" } else { wrong += 1; mark = " ✗ want «\(expected)»" } } else { mark = " – want «\(expected)»" }
+            }
             let why = patient ? "PATIENT" : final != nil ? "SHOWN" : r.text.isEmpty ? (rawClean == nil ? "cut+clean" : "cut") : "clean"
-            print("\(why.padding(toLength: 9, withPad: " ", startingAt: 0)) p1=\(p1) | …\(before.suffix(34)) ⟶ raw «\(r.raw)» kept «\(r.text)» final «\(final ?? "")»")
+            print("\(why.padding(toLength: 9, withPad: " ", startingAt: 0)) p1=\(p1) | …\(before.suffix(34)) ⟶ raw «\(r.raw)» kept «\(r.text)» final «\(final ?? "")»\(mark)")
         }
-        print("shown \(shown)/\(lines.count)")
+        print("shown \(shown)/\(lines.count)" + (right + wrong > 0 ? "  right \(right)  wrong \(wrong)  silent \(lines.count - shown)" : ""))
     }
 }

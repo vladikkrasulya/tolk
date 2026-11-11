@@ -449,3 +449,12 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - A single typed letter is completed when the model is nearly certain (p ≥ 0.8): «как е» + «сть».
 - The log says why a request was dropped or came back empty (`no request — …`, `empty suggestion … p1= need= patient=`).
 - Dev: `TOLK_AC_EVAL=cases.txt [TOLK_AC_FULL=1] .build/debug/Tolk` runs cases through the live pipeline (`ACEval`).
+
+## v0.7.5 — autocomplete: word endings
+- `AutocompleteHealing.strip`: when the token that finishes the typed fragment was not among the reported
+  alternatives, it kept its raw probability (~0) and correct endings were cut as "unsure" («дост» → «упа»,
+  «каче» → «ства»). It is now weighed against the consistent alternatives; `n_probs` 20 → 100 for such requests.
+  `~/Translate/test-corpus/ac/endings-30.txt` (ending must fit the grammar of the sentence): 24 → 28 shown, 22 right.
+- Model check on the same sets (2026-11-11): E2B-abl 28/30 shown, 22 right, 39/40 mid-sentence; E4B-abl 23/30,
+  13 right, 36/40 and twice as slow. E2B stays.
+

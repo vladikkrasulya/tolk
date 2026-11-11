@@ -244,7 +244,7 @@ struct CompletionClient {
         }
         if let lit = healLiteral, !lit.isEmpty {
             body["grammar"] = AutocompleteHealing.grammar(forLiteral: lit)
-            body["n_probs"] = 20   // alternatives for the first free token (renormalised in AutocompleteHealing.strip)
+            body["n_probs"] = 100  // alternatives for the first free token (renormalised in AutocompleteHealing.strip)
         }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let t0 = Date()

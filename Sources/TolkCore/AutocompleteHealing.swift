@@ -68,7 +68,13 @@ public enum AutocompleteHealing {
                 return has(cs, prefix: rem) || (!cs.isEmpty && has(rem, prefix: cs))
             }
             let z = consistent.reduce(0) { $0 + $1.prob }
-            let p = (z > 0 && consistent.contains { $0.text == t.text }) ? min(1, t.prob / z) : t.prob
+            // The chosen token may be missing from the reported alternatives (the model's raw favourites were all
+            // inconsistent with the typed letters, e.g. tokens with a leading space): it is still the best consistent
+            // one, so it is weighed against the consistent alternatives that were reported. It used to keep its raw
+            // probability (~0), and correct endings («дост» → «упа») were thrown away as "unsure".
+            let inTop = consistent.contains { $0.text == t.text }
+            let total = inTop ? z : z + t.prob
+            let p = total > 0 ? min(1, t.prob / total) : t.prob
             var s = String.UnicodeScalarView(); s.append(contentsOf: tt[rem.count...])
             out.append(Token(text: String(s), prob: p))
             consumed = lit.count
