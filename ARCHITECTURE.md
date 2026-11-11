@@ -614,3 +614,15 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - «Другая модель» explains how to judge any other GGUF from those reference points (memory ≈ file size, time grows
   with size, bigger is not better, compare in the statistics) with the numbers of this Mac.
 - A model that is not downloaded says «скачается N ГБ» instead of «N ГБ на диске».
+
+## v0.9.3 — two small Qwen models measured
+
+- Measured 2026-11-11 on endings-30 / midsentence-40 (shown, right) and a direct timing of warm 14-token suggestions:
+  Gemma E2B 30 shown / 24 right, 39 of 40, ≈150 ms; Qwen 3.5 2B (unsloth Q4_K_M, 1.28 GB) 25 / 20, 30 of 40, ≈120 ms;
+  Qwen 3.8 2B Distill (empero-ai Q4_K_M, 1.31 GB — a third-party fine-tune of Qwen 3.5 2B) 26 / 20, 29 of 40, ≈100 ms.
+  Both small Qwens are faster and three times smaller, but answer less often and slip in Russian agreement
+  («следующий кампания»). Gemma E2B stays the default. Their RAM (≈1.7 GB) is an estimate from the file size.
+- Both are in the tested list. `ModelLibrary.recommended` now prefers the best model that fits with room to spare, so
+  on an 8 GB Mac it is Qwen 3.5 2B, on 16 GB and more Gemma E2B.
+- A GGUF built for another runtime does not load («unknown model architecture: 'qwen3_5'» from
+  leventkoldas/Qwen3.8-2B-Distill-Q4_0-GGUF): take builds marked llama.cpp.

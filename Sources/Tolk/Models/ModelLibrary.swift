@@ -86,28 +86,43 @@ final class ModelLibrary: ObservableObject {
     nonisolated static var folder: URL { URL(fileURLWithPath: (folderDisplay as NSString).expandingTildeInPath, isDirectory: true) }
 
     /// Models measured on the project's own test sets (see ARCHITECTURE.md, 2026-11-11).
+    /// Measured 2026-11-11 on the two test sets (endings-30, midsentence-40) and with a direct timing of warm
+    /// 14-token suggestions on an M1 Max; E4B and Qwen 4B were measured a day earlier, before the 0.7.6 changes.
     static let catalog: [CatalogModel] = [
         CatalogModel(file: "gemma-4-E2B-abl-Q4_K.gguf", title: "Gemma 4 E2B",
                      url: "https://huggingface.co/huihui-ai/Huihui-gemma-4-E2B-it-qat-q4_0-unquantized-abliterated-GGUF/resolve/main/Huihui-gemma-4-E2B-it-qat-q4_0-unquantized-abliterated-Q4_K.gguf",
                      bytes: 3_416_118_240,
-                     summary: "Лучший результат в замерах при самой высокой скорости.",
-                     memoryGB: 3.6, speed: "≈ 0,1 с", endings: "22 из 30", continuations: "39 из 40", rank: 1),
+                     summary: "Лучшее качество в замерах: чаще всех подсказывает и реже ошибается в окончаниях.",
+                     memoryGB: 3.6, speed: "≈ 0,15 с", endings: "24 из 30", continuations: "39 из 40", rank: 1),
+        CatalogModel(file: "qwen3.5-2B-Q4_K_M.gguf", title: "Qwen 3.5 2B",
+                     url: "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf",
+                     bytes: 1_280_835_840,
+                     summary: "Втрое меньше Gemma E2B и немного быстрее, но подсказывает реже (30 продолжений против 39) и чаще ошибается в русских окончаниях. Разумный выбор для Mac с 8 ГБ памяти.",
+                     memoryGB: 1.7, speed: "≈ 0,12 с", endings: "20 из 30", continuations: "30 из 40", rank: 2),
+        CatalogModel(file: "qwen3.8-2B-distill-Q4_K_M.gguf", title: "Qwen 3.8 2B Distill",
+                     url: "https://huggingface.co/empero-ai/Qwen3.8-2B-Distill-GGUF/resolve/main/Qwen3.8-2B-Q4_K_M.gguf",
+                     bytes: 1_312_164_224,
+                     summary: "Не от Qwen: сторонняя доработка Qwen 3.5 2B по образцу большой Qwen 3.8. Самая быстрая; по качеству на уровне обычной Qwen 3.5 2B, в продолжениях попадаются ошибки согласования.",
+                     memoryGB: 1.7, speed: "≈ 0,10 с", endings: "20 из 30", continuations: "29 из 40", rank: 3),
         CatalogModel(file: "gemma-4-E4B-abl-Q4_K.gguf", title: "Gemma 4 E4B",
                      url: "https://huggingface.co/huihui-ai/Huihui-gemma-4-E4B-it-qat-q4_0-unquantized-abliterated-GGUF/resolve/main/Huihui-gemma-4-E4B-it-qat-q4_0-unquantized-abliterated-Q4_K.gguf",
                      bytes: 5_302_272_352,
-                     summary: "Крупнее, но в замерах слабее E2B и вдвое медленнее. Пример того, что больше — не значит лучше.",
-                     memoryGB: 5.5, speed: "0,16–0,25 с", endings: "13 из 30", continuations: "36 из 40", rank: 2),
+                     summary: "Крупнее E2B, но в замерах слабее и медленнее — пример того, что больше не значит лучше. Замер сделан на день раньше остальных.",
+                     memoryGB: 5.5, speed: "0,16–0,25 с", endings: "13 из 30", continuations: "36 из 40", rank: 4),
         CatalogModel(file: "qwen3.5-4B-abl-Q4_K_M.gguf", title: "Qwen 3.5 4B",
                      url: "https://huggingface.co/mradermacher/Huihui-Qwen3.5-4B-abliterated-GGUF/resolve/main/Huihui-Qwen3.5-4B-abliterated.Q4_K_M.gguf",
                      bytes: 2_707_514_688,
-                     summary: "Самая лёгкая по памяти. В раннем сравнении уступила Gemma по русскому языку; на новых наборах не замерялась.",
-                     memoryGB: 3.0, speed: "≈ 0,23 с", endings: "—", continuations: "—", rank: 3),
+                     summary: "В раннем сравнении уступила Gemma по русскому языку и оказалась медленнее; на новых наборах не замерялась.",
+                     memoryGB: 3.0, speed: "≈ 0,23 с", endings: "—", continuations: "—", rank: 5),
     ]
 
-    /// The best measured model that this Mac can run: the top one that fits, else the lightest.
+    /// The best measured model for this Mac: the top one that runs with room to spare, else the top one that fits at
+    /// all, else the lightest.
     static func recommended(ramGB: Double = MacHardware.memoryGB) -> CatalogModel {
         let byRank = catalog.sorted { $0.rank < $1.rank }
-        return byRank.first { MacHardware.fit(modelGB: $0.memoryGB, ramGB: ramGB) != .no } ?? catalog.min { $0.memoryGB < $1.memoryGB }!
+        return byRank.first { MacHardware.fit(modelGB: $0.memoryGB, ramGB: ramGB) == .comfortable }
+            ?? byRank.first { MacHardware.fit(modelGB: $0.memoryGB, ramGB: ramGB) == .tight }
+            ?? catalog.min { $0.memoryGB < $1.memoryGB }!
     }
 
     @Published private(set) var installed: [InstalledModel] = []
