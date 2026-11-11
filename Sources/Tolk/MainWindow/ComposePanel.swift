@@ -128,7 +128,7 @@ final class ComposePanel: NSView, NSTextViewDelegate {
         toneControl.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         toneControl.selectedSegment = 0
         toneControl.toolTip = "Тон сообщения"
-        toneControl.setContentCompressionResistancePriority(.init(700), for: .horizontal)
+        toneControl.setContentCompressionResistancePriority(.init(400), for: .horizontal)
         let cfg = TolkConfig.load()
         langPopup.addItems(withTitles: Language.allCases.map { "\($0.flag)  " + UIText.capitalized($0) })
         langPopup.controlSize = .small
@@ -156,6 +156,12 @@ final class ComposePanel: NSView, NSTextViewDelegate {
         row2.translatesAutoresizingMaskIntoConstraints = false
         row1.widthAnchor.constraint(equalTo: controls.widthAnchor).isActive = true
         row2.widthAnchor.constraint(equalTo: controls.widthAnchor).isActive = true
+        // Narrow window: the controls stay inside the card — the tone switch squeezes its segments, the language popup shrinks.
+        toneControl.segmentDistribution = .fillProportionally
+        toneControl.widthAnchor.constraint(lessThanOrEqualTo: controls.widthAnchor).isActive = true
+        row2.setClippingResistancePriority(.init(490), for: .horizontal)
+        langPopup.setContentCompressionResistancePriority(.init(200), for: .horizontal)
+        langPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 70).isActive = true
         controls.translatesAutoresizingMaskIntoConstraints = false
         let l1 = line(), l2 = line()
         for v in [msgTitle, msgScroll, l1, ptsTitle, ptsScroll, l2, controls] { lc.addSubview(v) }

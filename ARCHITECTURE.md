@@ -430,3 +430,13 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   interface captions when it looks for the partner's language.
 - Measured on gemma-translate: trap corpus 318/321 (was 315), fresh sets 53/60 and 8/9; test sets in
   `~/Translate/test-corpus/`. Self-test: 837 checks.
+
+## v0.7.3 — live pass over the installed app
+- Regression of 0.7.2 fixed: «Составить» and the quick-reply chips answered «недоступно для этого движка» —
+  `DefaultTranslationEngine.compose` had gained a parameter and no longer satisfied the protocol requirement, so the
+  protocol's default was called. The exact witness is back; a self-test calls `compose` through the protocol.
+- The main window no longer resizes itself (it could grow past the screen edge): toolbar and header rows of
+  «Документы», «Фото и скриншоты» and «Составить» shrink instead (popup titles truncate, captions drop out).
+- Translate page at narrow widths: the mode switch is not clipped, the «из кеша · заново» status stays on one line.
+- «Ответ»: a foreign text carried over from a translation becomes the partner's message, not «my answer».
+- ⌘V right after choosing «Фото и скриншоты» in the sidebar pastes the picture (`MainWindowController.paste`).
