@@ -515,6 +515,14 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             refineButton.isEnabled = !translation.isEmpty
             pushHints(useStats: true)
             scheduleFinalPass()
+            // Official text (or «всегда» in settings): the editor looks at the translation right away. Not while the
+            // text is still being typed (live pieces) — the pass would restart on every pause.
+            let typed = inputView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if mode == .translate, beforeRefine == nil, !translation.isEmpty, !live.hadPartials,
+               AutoEditor.wanted(mode: TolkConfig.load().autoEditor, source: typed) {
+                Diagnostics.log("editor: started by itself (page, \(typed.count) chars)")
+                refineClicked()
+            }
         case let .failed(message):
             statusLine?.failed(message)
             spinner.stopAnimation(nil)

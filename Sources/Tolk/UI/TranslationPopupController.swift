@@ -484,6 +484,12 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
             else {
                 showTimeConversions()
                 refineButton.isEnabled = true
+                // Official text (or «всегда» in settings): the editor looks at the translation right away.
+                if beforeRefine == nil, fellBackFrom == nil, AutoEditor.wanted(mode: TolkConfig.load().autoEditor, source: sourceText) {
+                    Diagnostics.log("editor: started by itself (popup, \(sourceText.count) chars)")
+                    refineClicked()
+                    break
+                }
                 // Two Ollama slots: back-translation first, footnotes after it — so a word-alternatives
                 // request or another user is not stuck behind both.
                 if backEnabled { notesAfterBack = notesEnabled; startBack() }

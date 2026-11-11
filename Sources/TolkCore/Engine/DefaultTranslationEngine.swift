@@ -27,6 +27,7 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
     }
 
     public init(config: TolkConfig, rules: RulesStore, primary: TranslationProvider, fallback: TranslationProvider?) {
+        PromptCatalog.overrides = config.prompts   // the instructions in force are the ones of the newest engine
         self.config = config; self.rules = rules; self.primary = primary; self.fallback = fallback
         self.cache = ResultCache(); self.notesCache = ResultCache()
     }

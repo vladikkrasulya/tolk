@@ -411,6 +411,11 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     /// The base instruction of the suggestion model, in the user's wording. Empty = the built-in one
     /// (`AutocompletePrompt.defaultRules`).
     public var autocompleteBaseRules: String = ""
+    /// The user's rewordings of the built-in instructions, block id → text (see `PromptCatalog`). Missing = built-in.
+    public var prompts: [String: String] = [:]
+    /// Run the editor pass by itself after a translation: "off", "formal" (contracts, licences, official notices —
+    /// where the model slips on case agreement in long sentences) or "always".
+    public var autoEditor: String = "formal"
 
     public static let defaultAutocompleteOffApps: [String] = [
         "com.apple.Terminal", "com.googlecode.iterm2", "com.apple.dt.Xcode",
@@ -430,7 +435,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         case autocompletePatient, autocompletePatientDelay, autocompleteCaretBubble, verboseLog, keepWarmMinutes
         case translateTemperature, translateFixedSeed, translateCache, autocompleteCustomConfidence, autocompleteFirstProb
         case autocompleteNextProb, autocompletePatientProb, autocompleteTemperature, autocompleteContextSize, autocompleteMinChars
-        case autocompleteBaseRules
+        case autocompleteBaseRules, prompts, autoEditor
     }
 
     /// Every key is optional: `{"model": "x"}` keeps all other defaults.
@@ -494,6 +499,9 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         let ctx = c.lenient(Int.self, forKey: .autocompleteContextSize) ?? d.autocompleteContextSize
         autocompleteContextSize = [2048, 4096, 8192].contains(ctx) ? ctx : d.autocompleteContextSize
         autocompleteBaseRules = c.lenient(String.self, forKey: .autocompleteBaseRules) ?? d.autocompleteBaseRules
+        prompts = c.lenient([String: String].self, forKey: .prompts) ?? d.prompts
+        let ae = c.lenient(String.self, forKey: .autoEditor) ?? d.autoEditor
+        autoEditor = ["off", "formal", "always"].contains(ae) ? ae : d.autoEditor
         autocompleteMinChars = min(20, max(2, c.lenient(Int.self, forKey: .autocompleteMinChars) ?? d.autocompleteMinChars))
     }
 
@@ -547,6 +555,8 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         try c.encode(autocompleteContextSize, forKey: .autocompleteContextSize)
         try c.encode(autocompleteMinChars, forKey: .autocompleteMinChars)
         try c.encode(autocompleteBaseRules, forKey: .autocompleteBaseRules)
+        try c.encode(prompts, forKey: .prompts)
+        try c.encode(autoEditor, forKey: .autoEditor)
     }
 
     /// Tone for an app (bundle id), `.auto` if not configured.

@@ -38,9 +38,12 @@ enum AutocompletePrompt {
     /// Three short finished messages in the same "Message in X:" format, at the very start of every prompt.
     /// Constant text → llama-server's KV cache keeps it. Made the model write short, neutral, same-language
     /// continuations without markdown/noise (eval: autocomplete-eval.md). Deliberately free of digits and names.
-    static let fewShot = "Message in Slack:\nПривет! Ты уже посмотрел логи по вчерашней кампании?\n\n"
-        + "Message in Slack:\nCan you check the feed and send me the report today?\n\n"
-        + "Message in Slack:\nСпасибо, получилось запустить, завтра скину результаты.\n\n"
+    static var fewShot: String { exampleLines.map { "Message in Slack:\n" + $0 + "\n\n" }.joined() }
+
+    /// The example messages from settings (`autocomplete.examples`), one per line.
+    static var exampleLines: [String] {
+        PromptCatalog.text("autocomplete.examples").components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
 
     /// Prompt for a raw `/completion` call. `appName` is the frontmost app (e.g. "Telegram").
     /// `context` is the visible conversation around the field (see `ScreenContext`); it goes FIRST and changes
@@ -92,7 +95,7 @@ enum AutocompletePrompt {
         + "Never invent numbers, names or facts that are not in the conversation."
     /// The user's own wording of it from settings; empty = `defaultRules`.
     nonisolated(unsafe) static var customRules = ""
-    static let chatExamples = "Examples of finished messages:\n- Привет! Ты уже посмотрел логи по вчерашней кампании?\n- Can you check the feed and send me the report today?\n- Спасибо, получилось запустить, завтра скину результаты.\n\n"
+    static var chatExamples: String { "Examples of finished messages:\n" + exampleLines.map { "- " + $0 }.joined(separator: "\n") + "\n\n" }
 
     static var chatRules: String {
         let own = customRules.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -34,6 +34,7 @@ enum AutocompleteFeatures {
                                                                              first: config.autocompletePatientProb)
         CompletionClient.temperature = config.autocompleteTemperature
         AutocompletePrompt.customRules = config.autocompleteBaseRules
+        PromptCatalog.overrides = config.prompts
         AutocompleteController.minChars = config.autocompleteMinChars
         AutocompleteController.patientDelayMs = AutocompleteTuning.patientDelayMs(seconds: config.autocompletePatientDelay)
         AutocompleteController.caretBubble = config.autocompleteCaretBubble

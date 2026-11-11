@@ -580,3 +580,26 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - MIT licence. The author's server nickname and LAN address are gone from the program: the server is «Сервер» in
   every message (`ServerText`), the default address is `http://127.0.0.1:11434`, the health line in the log is
   `server <model>: available / unavailable`. README, SETUP and the user guide describe the current version.
+
+## v0.9.1 — instructions are editable in the app; official texts
+
+- **`PromptCatalog`** (`TolkCore/PromptCatalog.swift`): every built-in instruction of the translator is a named block —
+  base instruction, anti-calque lines (ru/uk, en, other), consistency rules, the three tones, the Ukrainian note,
+  «Причесать», the editor's rules, phrase rules (`pattern => note` lines), and the example messages of the suggestion
+  model. `Prompt`, `RefinePrompt`, `PhraseRules` and `AutocompletePrompt` read the blocks; the user's rewordings are
+  `TolkConfig.prompts` (block id → text, missing = built-in). For ordinary texts the assembled prompts are
+  byte-identical to 0.9.0 (compared old vs new on six requests).
+- **Настройки → Перевод → «Инструкции модели»**: every block can be read, reworded and reset; «Проверка: весь запрос
+  целиком» shows the full prompt for any sample text with the current settings. The suggestion model's examples are
+  edited next to its base instruction (Автодополнение → «Что знает модель»).
+- **Official and legal texts.** Found on the MIT licence: the model wrote «получившему копия», merged list items and
+  used calques («в результате, из или в связи с»). The slip «копия» is not caused by any one line of the prompt —
+  the model sits on a tie there and flips with almost any prompt change (minimal prompt: right; full prompt: wrong;
+  removing any single line: still wrong). So two measures:
+  - `translate.formal` — a block with the established legal formulas (ru/uk), added only when `FormalText.looksFormal`
+    (two different markers such as «hereby», «without warranty», «liability», «настоящим», «договор»); 0 of 205 corpus
+    messages trigger it.
+  - the editor pass starts by itself for such texts of 200+ characters (`TolkConfig.autoEditor`: off / formal /
+    always; popup and the translate page) and gets the same block. It fixes the agreement slip.
+  Result on the licence, ru and uk: correct cases, «товарная пригодность / товарна придатність», «деликт / делікт»,
+  three separate liability items, translated title. Not covered: the Documents page (chunks go straight to the engine).

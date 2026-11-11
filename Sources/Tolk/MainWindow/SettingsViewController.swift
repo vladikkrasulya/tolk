@@ -95,7 +95,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .translate: [("Сервер и модель", "Где и чем переводится текст и что делать, если сервер недоступен.", "server.rack"),
                           ("Язык и стиль", "На какой язык переводить, какие термины и какой тон использовать.", "globe"),
-                          ("Тонкая настройка", "Двойное ⌘C и параметры модели. Стандартные значения подобраны замерами — меняйте по одному.", "slider.horizontal.3")]
+                          ("Тонкая настройка", "Двойное ⌘C и параметры модели. Стандартные значения подобраны замерами — меняйте по одному.", "slider.horizontal.3"),
+                          ("Инструкции модели", "Встроенные указания, с которыми модель переводит. Их можно прочитать, переписать и вернуть обратно.", "text.quote")]
         case .autocomplete: [("Подсказки", "Включить и настроить, как часто и какой длины они появляются.", "lightbulb"),
                              ("Что знает модель", "Ваши пожелания, контекст разговора и ваша манера письма.", "brain"),
                              ("Помощники при наборе", "Опечатки, эмодзи и перевод при наборе — работают отдельно от подсказок.", "keyboard"),
@@ -304,6 +305,7 @@ final class SettingsModel: ObservableObject {
             config.translateTemperature = d.translateTemperature
             config.translateFixedSeed = d.translateFixedSeed
             config.translateCache = d.translateCache
+            config.autoEditor = d.autoEditor
         }
     }
 

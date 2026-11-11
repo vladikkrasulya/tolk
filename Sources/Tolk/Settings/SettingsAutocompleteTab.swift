@@ -197,6 +197,8 @@ struct AutocompleteTab: View {
                 Text("Базовая инструкция (встроенная)").font(.callout)
             }
             .padding(.vertical, 6)
+            if let ex = PromptCatalog.block("autocomplete.examples") { PromptEditor(model: model, block: ex, minHeight: 70) }
+            Rectangle().fill(TolkStyle.hairline).frame(height: 0.5)
             DisclosureGroup(isExpanded: $showPrompt) {
                 VStack(alignment: .leading, spacing: 6) {
                     SHint("Весь текст, который уходит в модель, когда вы печатаете «Давай созвонимся» в Slack. Переписка с экрана, буфер обмена и примеры вашего стиля подставляются на лету.")

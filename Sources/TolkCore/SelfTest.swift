@@ -30,6 +30,7 @@ public enum SelfTest {
         autocompleteTuning(check)
         usageStats(check)
         logGuide(check)
+        promptCatalog(check)
         screenContextRefresh(check)
         refineGuard(check)
         bigWindow(check)
