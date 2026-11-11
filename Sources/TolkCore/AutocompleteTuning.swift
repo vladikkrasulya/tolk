@@ -32,8 +32,26 @@ public enum AutocompleteTuning {
     /// The user stopped typing and keeps waiting: a continuation the model was not sure enough about is shown after
     /// all. Measured on 40 mid-sentence stops: 28 shown at once, 9 more cut by the confidence bar — all nine were
     /// sensible continuations («будет время.», «плохо.», «посмотрю.»). Not in «редко» mode (nil).
-    public static func patientThresholds(frequency: String, enabled: Bool = true) -> (first: Double, next: Double)? {
-        (!enabled || frequency == "rare") ? nil : (0.08, 0.2)
+    public static func patientThresholds(frequency: String, enabled: Bool = true, first: Double = 0.08) -> (first: Double, next: Double)? {
+        (!enabled || frequency == "rare") ? nil : (min(0.5, max(0.02, first)), 0.2)
+    }
+
+    /// The bars in force: the user's own (Настройки → «Тонкая настройка») or the preset of the frequency. The later
+    /// words never need more than the first one.
+    public static func thresholds(config c: TolkConfig, frequency: String) -> (first: Double, next: Double) {
+        guard c.autocompleteCustomConfidence else { return thresholds(frequency: frequency) }
+        return (c.autocompleteFirstProb, min(c.autocompleteNextProb, max(c.autocompleteFirstProb, 0.05)))
+    }
+
+    /// Roughly how many shown suggestions are right at a first-word bar (curve of the 54-case set, see `thresholds`).
+    public static func expectedAccuracy(firstBar: Double) -> Int {
+        let pts: [(Double, Double)] = [(0.2, 50), (0.3, 53), (0.4, 57), (0.5, 60), (0.6, 63), (0.8, 70)]
+        if firstBar <= pts[0].0 { return Int(pts[0].1) }
+        for i in 1..<pts.count where firstBar <= pts[i].0 {
+            let (a, b) = (pts[i - 1], pts[i])
+            return Int((a.1 + (b.1 - a.1) * (firstBar - a.0) / (b.0 - a.0)).rounded())
+        }
+        return Int(pts.last!.1)
     }
     /// How long the caret must stay put after an empty answer before the less sure continuation appears.
     public static let patientDelayMs = 650

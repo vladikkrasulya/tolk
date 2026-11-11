@@ -354,6 +354,25 @@ extension SelfTest {
         check(pruned.days["2024-01-01"] == nil && pruned.days.count == 2, "usage: prune after a year")
         check(AutocompleteTuning.patientThresholds(frequency: "often", enabled: false) == nil && AutocompleteTuning.patientDelayMs(seconds: 1) == 1000
               && AutocompleteTuning.patientDelayMs(seconds: 99) == 3000, "usage: patient switch and delay")
+        var custom = TolkConfig()
+        custom.autocompleteFrequency = "rare"; custom.autocompleteCustomConfidence = true
+        custom.autocompleteFirstProb = 0.2; custom.autocompleteNextProb = 0.6
+        let own = AutocompleteTuning.thresholds(config: custom, frequency: "rare")
+        check(own.first == 0.2 && own.next == 0.2, "tuning: own bars replace the preset, later words never above the first", "\(own)")
+        custom.autocompleteCustomConfidence = false
+        check(AutocompleteTuning.thresholds(config: custom, frequency: "rare").first == 0.6, "tuning: preset when own bars are off")
+        check(AutocompleteTuning.patientThresholds(frequency: "often", first: 0.15)?.first == 0.15 && AutocompleteTuning.patientThresholds(frequency: "rare", first: 0.15) == nil,
+              "tuning: patient bar from settings")
+        check(AutocompleteTuning.expectedAccuracy(firstBar: 0.3) == 53 && AutocompleteTuning.expectedAccuracy(firstBar: 0.6) == 63
+              && AutocompleteTuning.expectedAccuracy(firstBar: 0.05) == 50 && AutocompleteTuning.expectedAccuracy(firstBar: 0.95) == 70, "tuning: expected accuracy curve")
+        let tuned = try? JSONDecoder().decode(TolkConfig.self, from: Data(#"{"translateTemperature": 7, "autocompleteContextSize": 5000, "autocompleteMinChars": 99, "autocompleteFirstProb": 0}"#.utf8))
+        check(tuned?.translateTemperature == 1 && tuned?.autocompleteContextSize == 4096 && tuned?.autocompleteMinChars == 20 && tuned?.autocompleteFirstProb == 0.05
+              && tuned?.translateFixedSeed == true && tuned?.translateCache == true, "tuning: fine-tuning keys are clamped and default")
+        let hot = OllamaProvider(config: { var c = TolkConfig(); c.translateTemperature = 0.4; c.translateFixedSeed = false; return c }(), rules: RulesStore(path: "/nonexistent/rules.md"))
+        if let req = try? hot.makeChatRequest(system: "s", user: "u"), let body = req.httpBody,
+           let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+            check(json["temperature"] as? Double == 0.4 && json["seed"] == nil, "tuning: translation request uses the settings", "\(json["temperature"] ?? "-")")
+        } else { check(false, "tuning: translation request uses the settings") }
         let cfg = try? JSONDecoder().decode(TolkConfig.self, from: Data(#"{"autocompletePatientDelay": 50, "keepWarmMinutes": -3}"#.utf8))
         check(cfg?.autocompletePatientDelay == 3 && cfg?.keepWarmMinutes == 0 && cfg?.autocompletePatient == true && cfg?.verboseLog == false, "usage: new config keys are clamped and default")
     }

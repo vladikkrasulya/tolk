@@ -18,16 +18,23 @@ enum AutocompleteFeatures {
             onBattery: PowerMonitor.shared.onBattery, batteryRare: config.autocompleteBatteryRare,
             batteryNoScreen: config.autocompleteBatteryNoScreen, batteryShort: config.autocompleteBatteryShort)
         ScreenContext.ocrAllowed = power.screenContext
+        // «Реже на батарее» wins over the user's own bars: it asks for the cautious preset.
+        let forcedByBattery = power.frequency != config.autocompleteFrequency
         var config = config
         config.autocompleteFrequency = power.frequency
+        if forcedByBattery { config.autocompleteCustomConfidence = false }
         config.autocompleteLength = power.length
 
         // Frequency → confidence thresholds (curve on 54 cases with a request on every key, see AutocompleteTuning.thresholds):
         // rare 0.6 ≈ 63 % right; normal 0.5 ≈ 60 %; often 0.3 ≈ 53 %. Below 0.5 only wrong suggestions are added.
-        let th = AutocompleteTuning.thresholds(frequency: config.autocompleteFrequency)
+        let th = AutocompleteTuning.thresholds(config: config, frequency: config.autocompleteFrequency)
         AutocompletePrompt.firstTokenProb = th.first
         AutocompletePrompt.minTokenProb = th.next
-        AutocompletePrompt.patient = AutocompleteTuning.patientThresholds(frequency: config.autocompleteFrequency, enabled: config.autocompletePatient)
+        AutocompletePrompt.patient = AutocompleteTuning.patientThresholds(frequency: config.autocompleteFrequency, enabled: config.autocompletePatient,
+                                                                             first: config.autocompletePatientProb)
+        CompletionClient.temperature = config.autocompleteTemperature
+        AutocompletePrompt.customRules = config.autocompleteBaseRules
+        AutocompleteController.minChars = config.autocompleteMinChars
         AutocompleteController.patientDelayMs = AutocompleteTuning.patientDelayMs(seconds: config.autocompletePatientDelay)
         AutocompleteController.caretBubble = config.autocompleteCaretBubble
 

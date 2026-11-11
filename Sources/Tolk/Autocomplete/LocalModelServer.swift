@@ -19,6 +19,8 @@ final class LocalModelServer {
     private(set) var nextRetryAt: Date?
 
     private(set) var modelPath: String
+    /// Context window in tokens (`-c`), from settings.
+    private(set) var contextSize = 4096
     private var process: Process?
     private var startTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
@@ -46,6 +48,12 @@ final class LocalModelServer {
         let p = (path as NSString).expandingTildeInPath
         guard p != modelPath else { return }
         modelPath = p
+        if state != .stopped { stop(); start() }
+    }
+
+    func setContextSize(_ n: Int) {
+        guard n != contextSize else { return }
+        contextSize = n
         if state != .stopped { stop(); start() }
     }
 
@@ -134,7 +142,7 @@ final class LocalModelServer {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
         let command = [bin, "-m", modelPath, "--host", "127.0.0.1", "--port", "\(port)",
-                       "-c", "4096", "-ngl", "99", "-fa", "on", "-np", "1",
+                       "-c", "\(contextSize)", "-ngl", "99", "-fa", "on", "-np", "1",
                        "--cache-reuse", "64", "--no-webui",
                        // 3 = every request with timings (megabytes per hour); 2 = warnings and errors only.
                        "-lv", Diagnostics.verbose ? "3" : "2"]
@@ -204,6 +212,8 @@ struct HTTPStatusError: Error { let status: Int }
 
 struct CompletionClient {
     let baseURL: URL
+    /// From settings. 0 = always the most likely token (what the confidence bars were measured with).
+    nonisolated(unsafe) static var temperature = 0.0
 
     /// `rawChars` / `firstProb`: what the model said before the confidence cut (for the log: why nothing was shown).
     struct Result { let text: String; let ms: Int; var rawChars = 0; var firstProb: Double? = nil; var raw = ""
@@ -235,8 +245,8 @@ struct CompletionClient {
         var body: [String: Any] = [
             "prompt": prompt,
             "n_predict": maxTokens,
-            "temperature": 0,
-            "top_k": 1,
+            "temperature": Self.temperature,
+            "top_k": Self.temperature > 0 ? 40 : 1,
             "stop": ["\n"],
             "cache_prompt": true,
             "n_probs": 1,   // per-token probabilities → AutocompletePrompt.confidentPrefix

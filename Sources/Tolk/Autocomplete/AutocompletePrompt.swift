@@ -86,10 +86,18 @@ enum AutocompletePrompt {
         return "<|turn>user\n" + body + "<turn|>\n<|turn>model\n" + typed
     }
 
-    static let chatRules = "You are the user's typing assistant. Your reply is the message the user is writing right now: it already begins with the words typed so far, and you continue it from exactly where it stops. "
+    /// The built-in base instruction (shown and editable in Настройки → Автодополнение → Инструкции).
+    static let defaultRules = "You are the user's typing assistant. Your reply is the message the user is writing right now: it already begins with the words typed so far, and you continue it from exactly where it stops. "
         + "Write only the next few words, in the user's language and tone, no quotes, no markdown. If the text stops in the middle of a word, finish that word first. "
-        + "Never invent numbers, names or facts that are not in the conversation.\n\n"
-        + "Examples of finished messages:\n- Привет! Ты уже посмотрел логи по вчерашней кампании?\n- Can you check the feed and send me the report today?\n- Спасибо, получилось запустить, завтра скину результаты.\n\n"
+        + "Never invent numbers, names or facts that are not in the conversation."
+    /// The user's own wording of it from settings; empty = `defaultRules`.
+    nonisolated(unsafe) static var customRules = ""
+    static let chatExamples = "Examples of finished messages:\n- Привет! Ты уже посмотрел логи по вчерашней кампании?\n- Can you check the feed and send me the report today?\n- Спасибо, получилось запустить, завтра скину результаты.\n\n"
+
+    static var chatRules: String {
+        let own = customRules.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (own.isEmpty ? defaultRules : own.replacingOccurrences(of: "\n", with: " ")) + "\n\n" + chatExamples
+    }
 
     /// "Writing notes / Copied text / My earlier messages" blocks, each followed by a blank line; "" when there are none.
     static func extrasPrefix(_ e: PromptExtras) -> String {

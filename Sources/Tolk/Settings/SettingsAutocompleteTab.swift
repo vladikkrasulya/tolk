@@ -4,6 +4,9 @@ import TolkCore
 
 struct AutocompleteTab: View {
     @ObservedObject var model: SettingsModel
+    // TOLK_SETTINGS_EXPAND (dev renders): open the folded blocks.
+    @State private var showBase = ProcessInfo.processInfo.environment["TOLK_SETTINGS_EXPAND"] != nil
+    @State private var showPrompt = ProcessInfo.processInfo.environment["TOLK_SETTINGS_EXPAND"] != nil
 
     /// Ready-made instructions (a click adds the line).
     static let instructionChips = [
@@ -26,6 +29,9 @@ struct AutocompleteTab: View {
         SSection("Ограничения", "Когда и где подсказывать меньше или не подсказывать вовсе.")
         batteryCard
         offAppsCard
+        SSection("Тонкая настройка", "Числа, которыми управляется модель. Стандартные значения подобраны замерами — меняйте по одному и смотрите вкладку «Статистика».")
+        confidenceCard
+        modelParamsCard
     }
 
     private var cfg: Binding<TolkConfig> { $model.config }
@@ -87,6 +93,62 @@ struct AutocompleteTab: View {
         }
     }
 
+    // MARK: Тонкая настройка
+
+    private func pctText(_ v: Double) -> String { "\(Int((v * 100).rounded())) %" }
+
+    private var confidenceCard: some View {
+        let preset = AutocompleteTuning.thresholds(frequency: model.config.autocompleteFrequency)
+        let first = model.config.autocompleteCustomConfidence ? model.config.autocompleteFirstProb : preset.first
+        return SCard("Уверенность модели", symbol: "gauge.with.dots.needle.50percent",
+                     subtitle: "Модель для каждого слова сообщает, насколько в нём уверена. Подсказка показывается, только если уверенность выше порога.") {
+            SToggle("Свои пороги", isOn: cfg.autocompleteCustomConfidence,
+                    hint: "Действуют пороги ниже, а переключатель «Частота подсказок» не влияет на них.",
+                    offHint: "Пороги берутся из «Частоты подсказок»: сейчас первое слово \(pctText(preset.first)), следующие \(pctText(preset.next)).",
+                    divider: false)
+            if model.config.autocompleteCustomConfidence {
+                SSlider(title: "Первое слово", value: cfg.autocompleteFirstProb, range: 0.05...0.9, step: 0.05, format: pctText,
+                        hint: "Ниже — подсказки чаще, но больше промахов. Выше — реже и точнее. При \(pctText(first)) верны примерно \(AutocompleteTuning.expectedAccuracy(firstBar: first)) из 100 показанных.")
+                SSlider(title: "Следующие слова", value: cfg.autocompleteNextProb, range: 0.05...0.9, step: 0.05, format: pctText,
+                        hint: "На слове, в котором модель уверена меньше, подсказка обрывается. Ниже — подсказки длиннее, но хвост чаще неточен.")
+            }
+            SSlider(title: "Порог после паузы", value: cfg.autocompletePatientProb, range: 0.02...0.3, step: 0.01, format: pctText,
+                    hint: "Для подсказки, которая появляется, когда вы остановились и ждёте. Стандартно 8 %: показывается почти любое осмысленное продолжение. Выше — после паузы чаще останется пусто.")
+            SExample(label: "Как читать", text: "«empty suggestion … p1=0.21 need=0.3» в журнале значит: модель была уверена на 21 %, а порог 30 % — подсказку не показали.")
+        }
+    }
+
+    private var modelParamsCard: some View {
+        SCard("Параметры модели", symbol: "dial.medium") {
+            SSlider(title: "Температура", value: cfg.autocompleteTemperature, range: 0...1, step: 0.05,
+                    format: { String(format: "%.2f", $0).replacingOccurrences(of: ".", with: ",") },
+                    hint: model.config.autocompleteTemperature == 0
+                        ? "0 — модель всегда берёт самое вероятное слово: в одном и том же месте подсказка одна и та же. Пороги уверенности замерены именно так."
+                        : "Выше нуля модель иногда берёт менее вероятные слова: подсказки разнообразнее, но чаще мимо, и пороги уверенности работают хуже.",
+                    divider: false)
+            SRow("Память модели (контекст)", hint: contextHint) {
+                Picker("", selection: cfg.autocompleteContextSize) {
+                    Text("2048").tag(2048); Text("4096").tag(4096); Text("8192").tag(8192)
+                }
+                .labelsHidden().pickerStyle(.segmented).fixedSize()
+            }
+            SRow("Начинать после", hint: "Сколько букв должно быть в поле, прежде чем Tolk спросит модель. Меньше — подсказки с первых букв, но они почти наугад. Стандартно 4.") {
+                Stepper("\(model.config.autocompleteMinChars) букв", value: cfg.autocompleteMinChars, in: 2...20).fixedSize()
+            }
+            SRow("Стандартные значения", hint: "Вернуть пороги, температуру, контекст и число букв к замеренным.") {
+                Button("Сбросить") { model.resetModelTuning(autocomplete: true) }
+            }
+        }
+    }
+
+    private var contextHint: String {
+        switch model.config.autocompleteContextSize {
+        case 2048: "Модель видит меньше переписки с экрана и примеров вашего стиля, зато занимает чуть меньше памяти. Модель перезапустится."
+        case 8192: "Влезает больше текста окна, но памяти нужно примерно на 0,5 ГБ больше, а первая подсказка в новом окне считается дольше. Модель перезапустится."
+        default: "Стандартно: хватает на текст окна, примеры стиля и инструкции. Смена значения перезапускает модель (несколько секунд)."
+        }
+    }
+
     // MARK: Инструкции
 
     private var instructionsCard: some View {
@@ -107,6 +169,45 @@ struct AutocompleteTab: View {
                 .padding(.top, 6)
             SHint("Нажмите на вариант, чтобы добавить его. Маленькая модель слушается простых указаний (коротко, на «Вы», без эмодзи) и плохо — сложных.")
                 .padding(.top, 4).padding(.bottom, 10)
+
+            Rectangle().fill(TolkStyle.hairline).frame(height: 0.5)
+            DisclosureGroup(isExpanded: $showBase) {
+                VStack(alignment: .leading, spacing: 6) {
+                    SHint("Ваше поле выше пустое, но модель всегда получает эту базовую инструкцию — она объясняет ей саму задачу. Написана по-английски: так маленькая модель понимает её точнее. Ваши пожелания добавляются к ней, а не заменяют её.")
+                    TextEditor(text: Binding(
+                        get: { model.config.autocompleteBaseRules.isEmpty ? AutocompletePrompt.defaultRules : model.config.autocompleteBaseRules },
+                        set: { model.config.autocompleteBaseRules = ($0.trimmingCharacters(in: .whitespacesAndNewlines) == AutocompletePrompt.defaultRules) ? "" : $0 }))
+                        .font(.system(.callout, design: .monospaced)).frame(minHeight: 120, maxHeight: 180)
+                        .scrollContentBackground(.hidden).padding(4)
+                        .background(TolkStyle.tile, in: RoundedRectangle(cornerRadius: TolkStyle.controlRadius, style: .continuous))
+                    HStack {
+                        SPill(text: model.config.autocompleteBaseRules.isEmpty ? "стандартная" : "изменена вами", role: model.config.autocompleteBaseRules.isEmpty ? .ok : .warn)
+                        Spacer()
+                        Button("Вернуть стандартную") { model.config.autocompleteBaseRules = "" }
+                            .disabled(model.config.autocompleteBaseRules.isEmpty)
+                    }
+                    SHint("Менять стоит осторожно: стандартный текст подобран на проверочных наборах, после правки смотрите долю принятых подсказок в «Статистике». Работает с моделями Gemma; у других моделей базовой инструкции нет, им показываются только примеры сообщений.")
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Базовая инструкция (встроенная)").font(.callout)
+            }
+            .padding(.vertical, 6)
+            DisclosureGroup(isExpanded: $showPrompt) {
+                VStack(alignment: .leading, spacing: 6) {
+                    SHint("Весь текст, который уходит в модель, когда вы печатаете «Давай созвонимся» в Slack. Переписка с экрана, буфер обмена и примеры вашего стиля подставляются на лету.")
+                    ScrollView {
+                        Text(promptPreview).font(.system(size: 11.5, design: .monospaced)).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                    }
+                    .frame(maxHeight: 260)
+                    .background(TolkStyle.tile, in: RoundedRectangle(cornerRadius: TolkStyle.controlRadius, style: .continuous))
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Что получает модель целиком").font(.callout)
+            }
+            .padding(.bottom, 8)
 
             Rectangle().fill(TolkStyle.hairline).frame(height: 0.5)
             HStack {
@@ -140,6 +241,27 @@ struct AutocompleteTab: View {
                 .padding(.top, 8)
             }
         }
+    }
+
+    /// The whole prompt for a sample message, with the current settings.
+    private var promptPreview: String {
+        var e = PromptExtras()
+        var lines: [String] = []
+        let general = model.config.autocompleteInstructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !general.isEmpty { lines.append(general) }
+        if let app = model.config.autocompleteAppInstructions["com.tinyspeck.slackmacgap"]?.trimmingCharacters(in: .whitespacesAndNewlines), !app.isEmpty { lines.append(app) }
+        if model.config.autocompleteUseGlossary {
+            switch model.config.tone(forApp: "com.tinyspeck.slackmacgap") {
+            case .chat: lines.append("Casual, conversational tone (informal «ты» in Russian).")
+            case .formal: lines.append("Polite, formal, businesslike tone (formal «Вы» in Russian).")
+            case .auto: break
+            }
+        }
+        e.instructions = lines.isEmpty ? nil : lines.joined(separator: "\n")
+        if model.config.autocompleteLearnStyle { e.examples = ["‹пример вашего сообщения из памяти стиля›"] }
+        if model.config.autocompleteClipboard { e.clipboard = "‹недавно скопированный текст›" }
+        return AutocompletePrompt.chatPrompt(typed: "Давай созвонимся", appName: "Slack",
+                                             context: "‹текст переписки, прочитанный из окна или со снимка экрана›", extras: e)
     }
 
     private func add(_ chip: String) {

@@ -19,6 +19,9 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
         lock.withLock { usingRemote ? (remoteURL ?? lanURL, remoteHeaders) : (lanURL, [:]) }
     }
     let model: String
+    /// Sampling from settings: temperature and whether the seed is fixed.
+    let temperature: Double
+    let fixedSeed: Bool
     let rules: RulesStore
     private let session: URLSession
     /// Separate session for loading the model: long silence is normal while 26B weights come off the disk.
@@ -31,6 +34,8 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
         self.remoteURL = Self.normalize(config.remoteURL)
         self.remoteHeaders = config.remoteHeaders.filter { !$0.key.isEmpty }
         self.model = config.effectiveModel
+        self.temperature = config.translateTemperature
+        self.fixedSeed = config.translateFixedSeed
         self.name = OllamaProvider.displayName(for: config.effectiveModel)
         self.rules = rules
         let cfg = URLSessionConfiguration.ephemeral
@@ -185,7 +190,7 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
             "stream": true,
             "stream_options": ["include_usage": true],
@@ -193,13 +198,14 @@ public final class OllamaProvider: TranslationProvider, @unchecked Sendable {
             "reasoning_effort": "none",
             // Low temperature + fixed seed: the same text gets the same translation every time
             // (verified with Gemma: 3/3 identical with a seed, 3 different without).
-            "temperature": 0.1,
-            "seed": 42,
+            // Both come from settings (defaults 0.1 and fixed).
+            "temperature": temperature,
             "messages": [
                 ["role": "system", "content": system],
                 ["role": "user", "content": user],
             ],
         ]
+        if fixedSeed { body["seed"] = 42 }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         ep.headers.forEach { req.setValue($0.value, forHTTPHeaderField: $0.key) }
         return req

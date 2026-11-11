@@ -252,6 +252,25 @@ final class SettingsModel: ObservableObject {
         config.autocompleteBatteryShort = d.autocompleteBatteryShort
     }
 
+    /// «Тонкая настройка» back to the measured values.
+    func resetModelTuning(autocomplete: Bool) {
+        let d = TolkConfig()
+        if autocomplete {
+            config.autocompleteCustomConfidence = d.autocompleteCustomConfidence
+            config.autocompleteFirstProb = d.autocompleteFirstProb
+            config.autocompleteNextProb = d.autocompleteNextProb
+            config.autocompletePatientProb = d.autocompletePatientProb
+            config.autocompleteTemperature = d.autocompleteTemperature
+            config.autocompleteContextSize = d.autocompleteContextSize
+            config.autocompleteMinChars = d.autocompleteMinChars
+            config.autocompleteBaseRules = d.autocompleteBaseRules
+        } else {
+            config.translateTemperature = d.translateTemperature
+            config.translateFixedSeed = d.translateFixedSeed
+            config.translateCache = d.translateCache
+        }
+    }
+
     func resetTranslateTuning() {
         let d = TolkConfig()
         config.doubleCopyInterval = d.doubleCopyInterval

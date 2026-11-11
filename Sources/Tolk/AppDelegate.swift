@@ -369,6 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         acController.disabledApps = Set(config.autocompleteOffApps)
         AutocompleteFeatures.configure(acController, config: config)
         acServer.setModel(config.autocompleteModel)
+        acServer.setContextSize(config.autocompleteContextSize)
         acTimer?.invalidate(); acTimer = nil
         // The model server belongs to autocomplete; the key tap also serves typo fixes and emoji on their own.
         if config.autocomplete {

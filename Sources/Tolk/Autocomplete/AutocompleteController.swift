@@ -604,6 +604,8 @@ final class AutocompleteController {
     /// caret is looked for on a snapshot in fields that do not report it.
     static var patientDelayMs = AutocompleteTuning.patientDelayMs
     static var caretBubble = true
+    /// Letters in the field before the first request.
+    static var minChars = 4
     private func skip(_ reason: String) {
         let now = ProcessInfo.processInfo.systemUptime
         let key = UsageText.missKey(forSkipReason: reason)
@@ -665,7 +667,7 @@ final class AutocompleteController {
         wordBias.refreshIfNeeded(baseURL: server.baseURL, model: server.modelPath, mode: wordBiasMode, texts: wordBiasTexts)
 
         let trimmed = field.textBefore.filter { !$0.isWhitespace }
-        guard trimmed.count >= 4, let last = field.textBefore.last, !last.isNewline else { skip("too little text or line start"); return }
+        guard trimmed.count >= Self.minChars, let last = field.textBefore.last, !last.isNewline else { skip("too little text or line start"); return }
 
         let appName = NSRunningApplication(processIdentifier: field.pid)?.localizedName
         let context = await screenContext.context(forPID: field.pid, waitingUpTo: .milliseconds(50))

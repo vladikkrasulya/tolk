@@ -148,8 +148,9 @@ struct TranslateTab: View {
         languageCard
         profilesCard
         toneCard
-        SSection("Управление")
+        SSection("Управление и тонкая настройка", "Стандартные значения подобраны замерами — меняйте по одному.")
         copyCard
+        samplingCard
     }
 
     private var serverCard: some View {
@@ -330,6 +331,30 @@ struct TranslateTab: View {
                 .buttonStyle(.borderless)
             SHint("Заголовки отправляются только на адрес вне дома — например, CF-Access-Client-Id и CF-Access-Client-Secret.").padding(.top, 4)
         }
+    }
+
+    private var samplingCard: some View {
+        SCard("Параметры модели перевода", symbol: "dial.medium") {
+            SSlider(title: "Температура", value: $model.config.translateTemperature, range: 0...1, step: 0.05,
+                    format: { String(format: "%.2f", $0).replacingOccurrences(of: ".", with: ",") },
+                    hint: temperatureHint, divider: false)
+            SToggle("Одинаковый перевод для одинакового текста", isOn: $model.config.translateFixedSeed,
+                    hint: "Тот же текст всегда переводится теми же словами (проверено: 3 из 3 совпадают).",
+                    offHint: "Каждый раз перевод может быть сформулирован по-другому — удобно перебирать варианты кнопкой «заново», но результат нельзя воспроизвести. Кэш в этом режиме не используется.")
+            SToggle("Кэш переводов", isOn: $model.config.translateCache,
+                    hint: "Повторный перевод того же текста отдаётся мгновенно, без обращения к модели. Хранится сутки, только в памяти программы.",
+                    offHint: "Каждый перевод заново считается моделью, даже если текст только что переводился.")
+            SRow("Стандартные значения", hint: "Температура 0,10, одинаковый перевод и кэш включены.") {
+                Button("Сбросить") { model.resetModelTuning(autocomplete: false) }
+            }
+        }
+    }
+
+    private var temperatureHint: String {
+        let t = model.config.translateTemperature
+        if t <= 0.15 { return "Низкая (стандартно 0,10): перевод точный и ближе к оригиналу, термины стабильны." }
+        if t <= 0.5 { return "Средняя: формулировки свободнее и живее, но модель чаще отходит от глоссария и может потерять деталь." }
+        return "Высокая: перевод заметно вольный, возможны выдуманные подробности. Для рабочей переписки не подходит."
     }
 
     private var copyCard: some View {

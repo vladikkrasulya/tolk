@@ -516,3 +516,19 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Every settings tab is split into named groups (`SSection`, a full-width heading): e.g. Автодополнение → «Подсказки»,
   «Что знает модель», «Помощники при наборе», «Ограничения». `MasonryLayout` lays each group out on its own and never
   uses more columns than the group has cards, so a short group fills the width.
+
+## v0.8.2 — fine tuning of both models in settings
+
+- **Translation model** (Перевод → «Параметры модели перевода»): `translateTemperature` (was a constant 0.1),
+  `translateFixedSeed` (seed 42 or none), `translateCache`. Temperature and seed are part of the cache identity;
+  without a fixed seed the cache is not read (a repeat is meant to give a new wording).
+- **Suggestion model** (Автодополнение → «Тонкая настройка»): own confidence bars instead of the frequency preset
+  (`autocompleteCustomConfidence`, `autocompleteFirstProb`, `autocompleteNextProb`; «Реже на батарее» still wins),
+  the bar of the patient suggestion (`autocompletePatientProb`, was 0.08), `autocompleteTemperature` (top_k 40 when
+  above zero, else greedy as before), `autocompleteContextSize` (`llama-server -c`, restarts the model),
+  `autocompleteMinChars` (was 4). The hint of the first-word bar shows the expected share of right suggestions
+  (`AutocompleteTuning.expectedAccuracy`, the measured curve).
+- **Base instruction is visible**: the built-in rules of the suggestion model (`AutocompletePrompt.defaultRules`) are
+  shown under the user's instructions, can be reworded (`autocompleteBaseRules`, empty = built-in) and reset; «Что
+  получает модель целиком» shows the whole prompt for a sample message with the current settings.
+- Defaults unchanged; endings set still 30 shown / 24 right. Self-test: 859 checks.

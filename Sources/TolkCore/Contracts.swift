@@ -388,6 +388,30 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     /// in the background (0 = never: the first translation after a pause waits for the load).
     public var keepWarmMinutes: Int = 15
 
+    // Fine tuning of the models (Настройки → «Тонкая настройка»). The defaults are the measured values.
+    /// Translation sampling temperature, 0…1. Low = the same, more literal wording every time.
+    public var translateTemperature: Double = 0.1
+    /// Fixed seed: the same text gets the same translation every time.
+    public var translateFixedSeed: Bool = true
+    /// Keep finished translations in memory for a day and answer repeats instantly.
+    public var translateCache: Bool = true
+    /// Suggestions: use the two bars below instead of the «Частота» preset.
+    public var autocompleteCustomConfidence: Bool = false
+    /// Minimum probability of the first word / of every later word of a suggestion, 0.05…0.95.
+    public var autocompleteFirstProb: Double = 0.3
+    public var autocompleteNextProb: Double = 0.3
+    /// Bar for the first word of the suggestion shown after a pause, 0.02…0.5.
+    public var autocompletePatientProb: Double = 0.08
+    /// Suggestion sampling temperature, 0…1 (0 = always the most likely word).
+    public var autocompleteTemperature: Double = 0
+    /// Context window of the suggestion model, tokens: 2048, 4096 or 8192.
+    public var autocompleteContextSize: Int = 4096
+    /// Letters typed in the field before the first suggestion is asked for, 2…20.
+    public var autocompleteMinChars: Int = 4
+    /// The base instruction of the suggestion model, in the user's wording. Empty = the built-in one
+    /// (`AutocompletePrompt.defaultRules`).
+    public var autocompleteBaseRules: String = ""
+
     public static let defaultAutocompleteOffApps: [String] = [
         "com.apple.Terminal", "com.googlecode.iterm2", "com.apple.dt.Xcode",
         "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92",
@@ -404,6 +428,9 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         case autocompleteClipboard, autocompleteEmoji, autocorrect, autocompleteLearnStyle, autocompleteFrequency, autocompleteRecordAll, autocompleteWordPreference
         case autocompleteScreenContext, autocompleteBatteryRare, autocompleteBatteryNoScreen, autocompleteBatteryShort, typeTranslateApps, typeTranslateAuto
         case autocompletePatient, autocompletePatientDelay, autocompleteCaretBubble, verboseLog, keepWarmMinutes
+        case translateTemperature, translateFixedSeed, translateCache, autocompleteCustomConfidence, autocompleteFirstProb
+        case autocompleteNextProb, autocompletePatientProb, autocompleteTemperature, autocompleteContextSize, autocompleteMinChars
+        case autocompleteBaseRules
     }
 
     /// Every key is optional: `{"model": "x"}` keeps all other defaults.
@@ -455,6 +482,19 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         autocompleteCaretBubble = c.lenient(Bool.self, forKey: .autocompleteCaretBubble) ?? d.autocompleteCaretBubble
         verboseLog = c.lenient(Bool.self, forKey: .verboseLog) ?? d.verboseLog
         keepWarmMinutes = max(0, c.lenient(Int.self, forKey: .keepWarmMinutes) ?? d.keepWarmMinutes)
+        func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(hi, max(lo, v)) }
+        translateTemperature = clamp(c.lenient(Double.self, forKey: .translateTemperature) ?? d.translateTemperature, 0, 1)
+        translateFixedSeed = c.lenient(Bool.self, forKey: .translateFixedSeed) ?? d.translateFixedSeed
+        translateCache = c.lenient(Bool.self, forKey: .translateCache) ?? d.translateCache
+        autocompleteCustomConfidence = c.lenient(Bool.self, forKey: .autocompleteCustomConfidence) ?? d.autocompleteCustomConfidence
+        autocompleteFirstProb = clamp(c.lenient(Double.self, forKey: .autocompleteFirstProb) ?? d.autocompleteFirstProb, 0.05, 0.95)
+        autocompleteNextProb = clamp(c.lenient(Double.self, forKey: .autocompleteNextProb) ?? d.autocompleteNextProb, 0.05, 0.95)
+        autocompletePatientProb = clamp(c.lenient(Double.self, forKey: .autocompletePatientProb) ?? d.autocompletePatientProb, 0.02, 0.5)
+        autocompleteTemperature = clamp(c.lenient(Double.self, forKey: .autocompleteTemperature) ?? d.autocompleteTemperature, 0, 1)
+        let ctx = c.lenient(Int.self, forKey: .autocompleteContextSize) ?? d.autocompleteContextSize
+        autocompleteContextSize = [2048, 4096, 8192].contains(ctx) ? ctx : d.autocompleteContextSize
+        autocompleteBaseRules = c.lenient(String.self, forKey: .autocompleteBaseRules) ?? d.autocompleteBaseRules
+        autocompleteMinChars = min(20, max(2, c.lenient(Int.self, forKey: .autocompleteMinChars) ?? d.autocompleteMinChars))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -496,6 +536,17 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         try c.encode(autocompleteCaretBubble, forKey: .autocompleteCaretBubble)
         try c.encode(verboseLog, forKey: .verboseLog)
         try c.encode(keepWarmMinutes, forKey: .keepWarmMinutes)
+        try c.encode(translateTemperature, forKey: .translateTemperature)
+        try c.encode(translateFixedSeed, forKey: .translateFixedSeed)
+        try c.encode(translateCache, forKey: .translateCache)
+        try c.encode(autocompleteCustomConfidence, forKey: .autocompleteCustomConfidence)
+        try c.encode(autocompleteFirstProb, forKey: .autocompleteFirstProb)
+        try c.encode(autocompleteNextProb, forKey: .autocompleteNextProb)
+        try c.encode(autocompletePatientProb, forKey: .autocompletePatientProb)
+        try c.encode(autocompleteTemperature, forKey: .autocompleteTemperature)
+        try c.encode(autocompleteContextSize, forKey: .autocompleteContextSize)
+        try c.encode(autocompleteMinChars, forKey: .autocompleteMinChars)
+        try c.encode(autocompleteBaseRules, forKey: .autocompleteBaseRules)
     }
 
     /// Tone for an app (bundle id), `.auto` if not configured.

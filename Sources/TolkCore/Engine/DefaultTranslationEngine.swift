@@ -39,7 +39,9 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
     }
 
     /// Which model answers: part of every cache key.
-    var cacheIdentity: String { (primary as? OllamaProvider).map { "ollama:" + $0.model } ?? "provider:" + primary.name }
+    var cacheIdentity: String {
+        (primary as? OllamaProvider).map { "ollama:\($0.model):t\($0.temperature):s\($0.fixedSeed)" } ?? "provider:" + primary.name
+    }
 
     func systemPrompt(for r: ResolvedRequest) -> String {
         let selector = [r.text, r.replyTo, r.context?.source].compactMap { $0 }.joined(separator: "\n")
@@ -53,7 +55,8 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
         let cache = self.cache
         let key = TranslationCacheKey.translation(resolved, systemPrompt: systemPrompt(for: resolved), identity: cacheIdentity)
         let isEmpty = resolved.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if !request.bypassCache, !isEmpty, let hit = cache.get(key) {
+        // Without a fixed seed a repeat is meant to give a new wording, so the cache would defeat it.
+        if !request.bypassCache, config.translateCache, config.translateFixedSeed, !isEmpty, let hit = cache.get(key) {
             return AsyncThrowingStream { c in
                 c.yield(.started(provider: hit.provider, source: resolved.source, target: resolved.target))
                 c.yield(.delta(hit.text))
