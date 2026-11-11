@@ -471,14 +471,33 @@ struct FocusedField {
 
     private static let enhancedUIApps: Set<String> = ["com.tinyspeck.slackmacgap", "com.microsoft.teams2", "com.microsoft.teams"]
 
-    /// Chromium/Electron apps build their accessibility tree only when asked.
-    static func enableAccessibility(pid: pid_t) {
+    /// Chromium/Electron apps build their accessibility tree only when asked. Returns true when the stronger
+    /// «enhanced» switch was set too (Slack, Teams): that one makes the app behave as if a screen reader were running
+    /// (focus frames around elements, a first click that only moves the focus), so it must be taken back with
+    /// `disableEnhanced` as soon as the user stops typing.
+    @discardableResult
+    static func enableAccessibility(pid: pid_t) -> Bool {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.25) // runs on the main thread (and the event tap): a hung app must not freeze typing
         AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         // Slack / Teams (Chromium) sometimes need the older switch too.
         if let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier, enhancedUIApps.contains(id) {
             AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            return true
         }
+        return false
+    }
+
+    /// At launch: an earlier Tolk (or this one before a crash) may have left the «enhanced» switch on in Slack / Teams.
+    static func clearLeftoverEnhanced() {
+        for app in NSWorkspace.shared.runningApplications where enhancedUIApps.contains(app.bundleIdentifier ?? "") {
+            disableEnhanced(pid: app.processIdentifier)
+        }
+    }
+
+    static func disableEnhanced(pid: pid_t) {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.25)
+        AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
     }
 }

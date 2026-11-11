@@ -180,9 +180,7 @@ final class AutocompleteController {
             let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
             MainActor.assumeIsolated { self?.activeAppChanged(app) }
         }
-        if let front = NSWorkspace.shared.frontmostApplication {
-            FocusedField.enableAccessibility(pid: front.processIdentifier)
-        }
+        FocusedField.clearLeftoverEnhanced()
         Diagnostics.log("autocomplete: started")
         return true
     }
@@ -198,6 +196,7 @@ final class AutocompleteController {
         runLoopSource = nil
         cancelPending()
         hide(reason: "stop")
+        releaseAccessibility()
         retainedSelf?.release()
         retainedSelf = nil
         Diagnostics.log("autocomplete: stopped")
@@ -218,6 +217,7 @@ final class AutocompleteController {
             cancelPending()
             hide(reason: "click")
             recentTyped = ""
+            releaseAccessibility()   // the user works with the mouse now: the app must behave as if Tolk were not there
             return false
         case .keyDown:
             break
@@ -233,6 +233,12 @@ final class AutocompleteController {
             cancelPending()
             recentTyped = ""
             return false
+        }
+
+        // Nothing is switched on in another app until the user really types there (not on ⌘/⌃ shortcuts).
+        if !event.flags.contains(.maskCommand), !event.flags.contains(.maskControl), !IsSecureEventInputEnabled(),
+           let app = NSWorkspace.shared.frontmostApplication, !isOff(app.bundleIdentifier) {
+            ensureAccessibility(app.processIdentifier)
         }
 
         if let tt = typeTranslate {
@@ -831,7 +837,28 @@ final class AutocompleteController {
         cancelPending()
         hide(reason: "appSwitch")
         recentTyped = ""
-        if let app { FocusedField.enableAccessibility(pid: app.processIdentifier) }
+        // Switching to an app is not typing in it: nothing is enabled here (see `ensureAccessibility`).
+        releaseAccessibility()
+    }
+
+    /// The app whose accessibility tree was asked for, and the one that also got the «enhanced» switch.
+    private var axPID: pid_t?
+    private var enhancedPID: pid_t?
+
+    /// First typed key in an app: ask it to build its accessibility tree (once until the next click or app switch).
+    private func ensureAccessibility(_ pid: pid_t) {
+        guard axPID != pid else { return }
+        releaseAccessibility()
+        axPID = pid
+        if FocusedField.enableAccessibility(pid: pid) { enhancedPID = pid }
+    }
+
+    /// Mouse click or app switch: take the «enhanced» switch back, so the app stops drawing focus frames and
+    /// swallowing the first click. The plain tree stays (it has no visible effect) and is asked for again on the next key.
+    private func releaseAccessibility() {
+        if let pid = enhancedPID { FocusedField.disableEnhanced(pid: pid) }
+        enhancedPID = nil
+        axPID = nil
     }
 }
 

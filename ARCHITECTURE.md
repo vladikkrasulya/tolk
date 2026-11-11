@@ -700,3 +700,14 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
   caret moves one line down and left instead of being cut.
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
+
+## v1.0.1 — Tolk does not touch an app until the user types in it
+
+- Reported: in Slack a frame appeared around an element while nothing was being typed, and the first click on a
+  button did not register. Cause: on every app activation Tolk asked the app for its accessibility tree
+  (`AXManualAccessibility`) and, for Slack and Teams, also set `AXEnhancedUserInterface` — with that switch Chromium
+  behaves as if a screen reader were running (focus frames, a first click that only moves the focus).
+- Now nothing is set on activation. The switches are set at the first typed key in an app (not on ⌘/⌃ shortcuts,
+  not in a password field or a switched-off app) — `ensureAccessibility`; a mouse click or an app switch takes
+  `AXEnhancedUserInterface` back — `releaseAccessibility`. The first suggestion after a click may be missed while the
+  app rebuilds its tree.
