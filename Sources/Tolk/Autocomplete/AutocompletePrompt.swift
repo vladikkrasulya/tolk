@@ -124,7 +124,8 @@ enum AutocompletePrompt {
     }
 
     /// Turns the raw continuation into what is shown after the caret, or nil if nothing useful.
-    static func clean(_ raw: String, textBefore: String, maxWords: Int? = nil) -> String? {
+    /// `sure`: the model is nearly certain of its first token — then even a single typed letter may be completed («е» + «сть»).
+    static func clean(_ raw: String, textBefore: String, maxWords: Int? = nil, sure: Bool = false) -> String? {
         let maxWords = maxWords ?? Self.maxWords
         var s = raw
         for tok in ["<end_of_turn>", "<start_of_turn>", "<eos>", "<bos>", "<pad>", "</s>"] {
@@ -164,7 +165,7 @@ enum AutocompletePrompt {
         s = dropRepeat(s, textBefore: textBefore)
 
         // Caret inside a word: only a real word may be completed (see `midWord`).
-        guard let guarded = midWord(s, textBefore: textBefore) else { return nil }
+        guard let guarded = midWord(s, textBefore: textBefore, sure: sure) else { return nil }
         s = guarded
         guard !s.isEmpty else { return nil }
 
@@ -190,12 +191,17 @@ enum AutocompletePrompt {
     nonisolated(unsafe) static var firstTokenProb = 0.6
     /// Stricter bar for appending letters to a word that is already complete ("вчера" + "шний").
     nonisolated(unsafe) static var wholeWordProb = 0.8
+    /// Bars for the patient second look (nil = off), see `AutocompleteTuning.patientThresholds`.
+    nonisolated(unsafe) static var patient: (first: Double, next: Double)? = nil
+    /// First-token probability from which a suggestion counts as «sure» (see `clean`).
+    static let sureProb = 0.8
 
     /// Keeps the confident head of a continuation: stops at the first token whose probability is below
     /// `minTokenProb`, and never leaves half a word (cuts back to the last word boundary). Returns "" when
     /// less than one word survives. `tokens` are the generated tokens with their probabilities
     /// (llama-server `completion_probabilities`, exp(logprob)).
-    static func confidentPrefix(_ tokens: [(text: String, prob: Double)], textBefore: String) -> String {
+    static func confidentPrefix(_ tokens: [(text: String, prob: Double)], textBefore: String,
+                                first firstBar: Double = firstTokenProb, next nextBar: Double = minTokenProb) -> String {
         guard let first = tokens.first else { return "" }
         // Letters glued to a word that is already complete: only when very sure (otherwise the model guesses a suffix).
         if let last = textBefore.last, last.isLetter, let c = first.text.first, c.isLetter {
@@ -207,7 +213,7 @@ enum AutocompletePrompt {
         var cutAt: Int?
         for (i, t) in tokens.enumerated() {
             if let nl = t.text.firstIndex(where: { $0 == "\n" || $0 == "\r" }) { out += t.text[..<nl]; return out }
-            if t.prob < (i == 0 ? firstTokenProb : minTokenProb) || t.text.contains("\u{FFFD}") { cutAt = i; break }
+            if t.prob < (i == 0 ? firstBar : nextBar) || t.text.contains("\u{FFFD}") { cutAt = i; break }
             out += t.text
         }
         guard let k = cutAt else { return out }
@@ -232,13 +238,13 @@ enum AutocompletePrompt {
     ///   there is no confidence signal to say they are reliable. A 1-letter prefix is too ambiguous: silence.
     /// - The model starts a new word (`s` starts with a space/punctuation): fine only if the typed fragment is
     ///   itself a word.
-    private static func midWord(_ s: String, textBefore: String) -> String? {
+    private static func midWord(_ s: String, textBefore: String, sure: Bool = false) -> String? {
         guard let last = textBefore.last, last.isLetter else { return s }
         let partial = String(textBefore.reversed().prefix { $0.isLetter || $0 == "-" }.reversed())
         let lang = spellLanguage(for: partial.isEmpty ? textBefore : partial, fallback: textBefore)
         guard let first = s.first else { return nil }
         if first.isLetter {
-            guard partial.count >= 2 else { return nil }
+            guard partial.count >= 2 || (sure && partial.count == 1) else { return nil }
             let ending = String(s.prefix { $0.isLetter })
             return isWord(partial + ending, language: lang) ? ending : nil
         }

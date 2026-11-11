@@ -27,6 +27,7 @@ enum AutocompleteFeatures {
         let th = AutocompleteTuning.thresholds(frequency: config.autocompleteFrequency)
         AutocompletePrompt.firstTokenProb = th.first
         AutocompletePrompt.minTokenProb = th.next
+        AutocompletePrompt.patient = AutocompleteTuning.patientThresholds(frequency: config.autocompleteFrequency)
 
         // MARK: [autocorrect] — typo fixes (section owned by the autocorrect feature)
         if config.autocorrect {

@@ -203,7 +203,10 @@ struct HTTPStatusError: Error { let status: Int }
 struct CompletionClient {
     let baseURL: URL
 
-    struct Result { let text: String; let ms: Int }
+    /// `rawChars` / `firstProb`: what the model said before the confidence cut (for the log: why nothing was shown).
+    struct Result { let text: String; let ms: Int; var rawChars = 0; var firstProb: Double? = nil; var raw = ""
+                    /// Generated tokens with probabilities (after healing): for the patient second look.
+                    var tokens: [(text: String, prob: Double)] = [] }
 
     /// Does this model have a Gemma 4 chat template (`<|turn>`)? Decides between the chat-prefill and the raw prompt.
     func probeFormat() async {
@@ -265,9 +268,11 @@ struct CompletionClient {
             text = stripped.content
             tokens = stripped.tokens
         }
+        let rawChars = text.count, firstProb = tokens.first?.prob, raw = text
         if AutocompletePrompt.useConfidence, !tokens.isEmpty {
             text = AutocompletePrompt.confidentPrefix(tokens.map { ($0.text, $0.prob) }, textBefore: textBefore)
         }
-        return Result(text: text, ms: Int(Date().timeIntervalSince(t0) * 1000))
+        return Result(text: text, ms: Int(Date().timeIntervalSince(t0) * 1000), rawChars: rawChars, firstProb: firstProb, raw: raw,
+                      tokens: tokens.map { ($0.text, $0.prob) })
     }
 }

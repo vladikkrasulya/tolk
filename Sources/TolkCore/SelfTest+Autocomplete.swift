@@ -7,6 +7,10 @@ extension SelfTest {
         let old = #"{"autocomplete": true, "autocompleteFrequency": "often"}"#
         let c = (try? JSONDecoder().decode(TolkConfig.self, from: Data(old.utf8))) ?? TolkConfig()
         check(c.autocomplete && c.autocompleteFrequency == "often", "ac config: old keys kept")
+        // Patient second look: on in «часто» and «обычно», off in «редко»; its bars are below every frequency's own.
+        let pt = AutocompleteTuning.patientThresholds(frequency: "often")
+        check(pt != nil && pt!.first < AutocompleteTuning.thresholds(frequency: "often").first && AutocompleteTuning.patientThresholds(frequency: "normal") != nil
+              && AutocompleteTuning.patientThresholds(frequency: "rare") == nil && AutocompleteTuning.patientDelayMs >= 400, "ac: patient second look thresholds")
         check(!c.autocompleteBatteryRare && !c.autocompleteBatteryNoScreen && !c.autocompleteBatteryShort, "ac config: battery switches off by default")
         check(c.autocompleteScreenContext, "ac config: screen context on by default (as before)")
         var n = TolkConfig(); n.autocompleteBatteryShort = true; n.autocompleteScreenContext = false

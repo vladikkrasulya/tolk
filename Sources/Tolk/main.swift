@@ -5,7 +5,13 @@ let smoke = ProcessInfo.processInfo.environment["TOLK_SMOKE"] != nil // touches 
 #else
 let smoke = false
 #endif
-if !smoke { Diagnostics.install() } // first: log + crash capture for everything that follows
+if !smoke, ProcessInfo.processInfo.environment["TOLK_AC_EVAL"] == nil { Diagnostics.install() } // first: log + crash capture for everything that follows
+
+if let evalPath = ProcessInfo.processInfo.environment["TOLK_AC_EVAL"] {
+    // Dev: autocomplete evaluation against the running local model (see ACEval).
+    Task { @MainActor in await ACEval.run(path: evalPath); exit(0) }
+    RunLoop.main.run()
+}
 
 MainActor.assumeIsolated {
     let app = NSApplication.shared

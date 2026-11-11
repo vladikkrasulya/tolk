@@ -440,3 +440,12 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
 - Translate page at narrow widths: the mode switch is not clipped, the «из кеша · заново» status stays on one line.
 - «Ответ»: a foreign text carried over from a translation becomes the partner's message, not «my answer».
 - ⌘V right after choosing «Фото и скриншоты» in the sidebar pastes the picture (`MainWindowController.paste`).
+
+## v0.7.4 — autocomplete: a suggestion when you stop and wait
+- Patient second look: when a request ends empty only because of the confidence bar and the caret stays put for
+  `AutocompleteTuning.patientDelayMs`, the continuation is shown with relaxed bars (`patientThresholds`: first 0.08,
+  next 0.2; not in «редко»). On 40 mid-sentence stops (`~/Translate/test-corpus/ac/midsentence-40.txt`, full live
+  prompt): 28 → 38 shown; the two left are wrong word endings, correctly silent.
+- A single typed letter is completed when the model is nearly certain (p ≥ 0.8): «как е» + «сть».
+- The log says why a request was dropped or came back empty (`no request — …`, `empty suggestion … p1= need= patient=`).
+- Dev: `TOLK_AC_EVAL=cases.txt [TOLK_AC_FULL=1] .build/debug/Tolk` runs cases through the live pipeline (`ACEval`).

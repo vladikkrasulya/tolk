@@ -27,6 +27,17 @@ public enum AutocompleteTuning {
         }
     }
 
+    // MARK: Patient second look
+
+    /// The user stopped typing and keeps waiting: a continuation the model was not sure enough about is shown after
+    /// all. Measured on 40 mid-sentence stops: 28 shown at once, 9 more cut by the confidence bar — all nine were
+    /// sensible continuations («будет время.», «плохо.», «посмотрю.»). Not in «редко» mode (nil).
+    public static func patientThresholds(frequency: String) -> (first: Double, next: Double)? {
+        frequency == "rare" ? nil : (0.08, 0.2)
+    }
+    /// How long the caret must stay put after an empty answer before the less sure continuation appears.
+    public static let patientDelayMs = 650
+
     // MARK: Small fields
 
     /// Why a field gets no suggestions (nil = fine): one-line search and address fields, table cells, tiny fields.

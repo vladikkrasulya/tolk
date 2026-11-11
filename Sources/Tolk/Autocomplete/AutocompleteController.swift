@@ -682,23 +682,41 @@ final class AutocompleteController {
         }
         guard !Task.isCancelled, gen == generation else { return }
         // The text may have changed while the model was thinking.
-        guard !IsSecureEventInputEnabled(), let now = await FocusedField.readAsync() else { skip("field not read after the answer"); return }
+        guard !IsSecureEventInputEnabled(), var now = await FocusedField.readAsync() else { skip("field not read after the answer"); return }
         guard !Task.isCancelled, gen == generation else { return }
         guard now.pid == field.pid, now.textBefore == field.textBefore, AutocompleteSafety.isBlankTail(now.restOfLine), !isOff(now.bundleID) else {
             skip("field changed while the model answered (ms=\(result.ms), before \(field.textBefore.count) → \(now.textBefore.count) chars)"); return
         }
         if let a = field.element, let b = now.element, !CFEqual(a, b) { skip("focus moved while the model answered"); return }
-        guard let text = AutocompletePrompt.clean(result.text, textBefore: field.textBefore, maxWords: extras.maxWords),
-              !text.isEmpty else {
-            Diagnostics.log("autocomplete: empty suggestion ms=\(result.ms)")
-            return
+        let sure = (result.firstProb ?? 0) >= AutocompletePrompt.sureProb
+        var patient = false
+        var text = AutocompletePrompt.clean(result.text, textBefore: field.textBefore, maxWords: extras.maxWords, sure: sure) ?? ""
+        if text.isEmpty {
+            let p1 = result.firstProb.map { String(format: "%.2f", $0) } ?? "-"
+            let midWord = field.textBefore.last?.isLetter == true
+            // Patient second look: the user stopped and keeps waiting → the less sure continuation is better than silence.
+            var relaxed = ""
+            if let bars = AutocompletePrompt.patient, !result.tokens.isEmpty {
+                let kept = AutocompletePrompt.confidentPrefix(result.tokens, textBefore: field.textBefore, first: bars.first, next: bars.next)
+                relaxed = AutocompletePrompt.clean(kept, textBefore: field.textBefore, maxWords: extras.maxWords, sure: sure) ?? ""
+            }
+            Diagnostics.log("autocomplete: empty suggestion ms=\(result.ms) raw=\(result.rawChars) kept=\(result.text.count) p1=\(p1) need=\(AutocompletePrompt.firstTokenProb) midword=\(midWord) patient=\(relaxed.count)")
+            guard !relaxed.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(AutocompleteTuning.patientDelayMs))
+            guard !Task.isCancelled, gen == generation, suggestion == nil, instant == nil, !IsSecureEventInputEnabled(),
+                  let later = await FocusedField.readAsync(), !Task.isCancelled, gen == generation,
+                  later.pid == field.pid, later.textBefore == field.textBefore, AutocompleteSafety.isBlankTail(later.restOfLine), !isOff(later.bundleID) else { return }
+            if let a = field.element, let b = later.element, !CFEqual(a, b) { return }
+            now = later
+            text = relaxed
+            patient = true
         }
         anchor = (now.snapshot, now.element)
         display(text, caret: now.caret, fontSize: now.fontSize, rightLimit: now.rightLimit)
         shownTextBefore = now.textBefore
         shownBundleID = now.bundleID
         let f = panel?.frame ?? .zero
-        Diagnostics.log("autocomplete: shown len=\(text.count) ms=\(result.ms) ctx=\(context?.count ?? 0) app=\(now.bundleID ?? "?") fs=\(now.fontSize.map { String(Int($0 * 10)) } ?? "-")/10 ax=\(now.caretInfo) caret=(\(Int(now.caret.minX)),\(Int(now.caret.minY)) \(Int(now.caret.width))x\(Int(now.caret.height))) panel=(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)))")
+        Diagnostics.log("autocomplete: shown\(patient ? " (patient)" : "") len=\(text.count) ms=\(result.ms) ctx=\(context?.count ?? 0) app=\(now.bundleID ?? "?") fs=\(now.fontSize.map { String(Int($0 * 10)) } ?? "-")/10 ax=\(now.caretInfo) caret=(\(Int(now.caret.minX)),\(Int(now.caret.minY)) \(Int(now.caret.width))x\(Int(now.caret.height))) panel=(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)))")
         stats.shown(model: statsModel, app: now.bundleID, text: text, ms: result.ms); onStatsChanged?()
         journal.shown(bundleID: now.bundleID, before: now.textBefore, text: text, ms: result.ms, ctxChars: context?.count ?? 0,
                       ctxSource: lastContextSource.isEmpty ? nil : lastContextSource, caret: now.caret, panel: panel)
