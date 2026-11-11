@@ -19,11 +19,14 @@ public struct UsageDay: Codable, Equatable, Sendable {
     public var firstChunk: [Int: Int] = [:]     // time to the first words, 100 ms buckets
     /// Why autocomplete stayed silent: reason key → times.
     public var acMisses: [String: Int] = [:]
+    /// How suggestions behave in every place the user types: place ("bundle.id" or "bundle.id|host" for a browser)
+    /// → event → times. Events: exact / ocr / under (how the caret was found), accepted, notInserted.
+    public var acPlaces: [String: [String: Int]] = [:]
 
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case translations, chars, cached, fallback, failed, byOrigin, byPair, byProvider, byApp, latency, firstChunk, acMisses
+        case translations, chars, cached, fallback, failed, byOrigin, byPair, byProvider, byApp, latency, firstChunk, acMisses, acPlaces
     }
 
     /// Every key is optional, so a file written by an older version still loads.
@@ -35,6 +38,7 @@ public struct UsageDay: Codable, Equatable, Sendable {
         translations = int(.translations); chars = int(.chars); cached = int(.cached); fallback = int(.fallback); failed = int(.failed)
         byOrigin = map(.byOrigin); byPair = map(.byPair); byProvider = map(.byProvider); byApp = map(.byApp)
         latency = hist(.latency); firstChunk = hist(.firstChunk); acMisses = map(.acMisses)
+        acPlaces = ((try? c.decodeIfPresent([String: [String: Int]].self, forKey: .acPlaces)) ?? nil) ?? [:]
     }
 
     public mutating func add(_ o: UsageDay) {
@@ -46,6 +50,7 @@ public struct UsageDay: Codable, Equatable, Sendable {
         for (k, v) in o.latency { latency[k, default: 0] += v }
         for (k, v) in o.firstChunk { firstChunk[k, default: 0] += v }
         for (k, v) in o.acMisses { acMisses[k, default: 0] += v }
+        for (place, events) in o.acPlaces { for (k, v) in events { acPlaces[place, default: [:]][k, default: 0] += v } }
     }
 
     public static func median(_ h: [Int: Int], bucket: Int = 100) -> Int? {
@@ -127,6 +132,10 @@ public struct UsageData: Codable, Equatable, Sendable {
         days[day, default: UsageDay()].acMisses[reason, default: 0] += 1
     }
 
+    public mutating func recordPlace(_ place: String, _ event: String, day: String) {
+        days[day, default: UsageDay()].acPlaces[place, default: [:]][event, default: 0] += 1
+    }
+
     public mutating func prune(now: Date = Date(), calendar: Calendar = .current) {
         guard let cut = calendar.date(byAdding: .day, value: -Self.retentionDays, to: now) else { return }
         let key = ACStats.dayKey(cut, calendar: calendar)
@@ -155,6 +164,48 @@ public struct UsageData: Codable, Equatable, Sendable {
     }
 
     public var isEmpty: Bool { days.values.allSatisfy(\.isEmpty) }
+}
+
+/// One place where the user types, with how suggestions behaved there.
+public struct PlaceReport: Sendable, Equatable {
+    public enum Verdict: String, Sendable { case good, snapshot, under, insertTrouble, fewData }
+    public let place: String
+    public let exact: Int, ocr: Int, under: Int, accepted: Int, notInserted: Int
+    public var shown: Int { exact + ocr + under }
+
+    public init(place: String, events: [String: Int]) {
+        self.place = place
+        exact = events["exact"] ?? 0; ocr = events["ocr"] ?? 0; under = events["under"] ?? 0
+        accepted = events["accepted"] ?? 0; notInserted = events["notInserted"] ?? 0
+    }
+
+    /// App bundle id and, for a browser, the site.
+    public var bundleID: String { place.split(separator: "|", maxSplits: 1).first.map(String.init) ?? place }
+    public var host: String? { place.split(separator: "|", maxSplits: 1).dropFirst().first.map(String.init) }
+
+    public var verdict: Verdict {
+        if shown < 5 { return .fewData }
+        if notInserted >= 2, notInserted * 5 >= accepted + notInserted { return .insertTrouble }
+        if under * 3 >= shown { return .under }
+        if ocr * 2 >= shown { return .snapshot }
+        return .good
+    }
+
+    public var verdictText: String {
+        switch verdict {
+        case .good: "работает хорошо: подсказка стоит у курсора"
+        case .snapshot: "курсор находится по снимку поля — чуть медленнее и не всегда точно"
+        case .under: "программа не сообщает место курсора: плашка показывается под полем"
+        case .insertTrouble: "подсказки часто не вставляются по Tab"
+        case .fewData: "пока мало данных"
+        }
+    }
+
+    /// Places with the most suggestions first.
+    public static func reports(_ day: UsageDay) -> [PlaceReport] {
+        day.acPlaces.map { PlaceReport(place: $0.key, events: $0.value) }
+            .sorted { ($0.shown, $1.place) > ($1.shown, $0.place) }
+    }
 }
 
 public enum UsageText {
@@ -276,6 +327,10 @@ public final class UsageStore: @unchecked Sendable {
         mutate { $0.recordMiss(reason, day: ACStats.dayKey(date)) }
     }
 
+    public func recordPlace(_ place: String, _ event: String, at date: Date = Date()) {
+        mutate { $0.recordPlace(place, event, day: ACStats.dayKey(date)) }
+    }
+
     /// One-time: count the translations already in the history (no timings there).
     public func importHistoryIfNeeded(_ entries: [HistoryEntry]) {
         mutate { d in
@@ -378,6 +433,19 @@ extension SelfTest {
         } else { check(false, "tuning: translation request uses the settings") }
         check(Array(Language.allCases.prefix(4)) == Language.main && Language.main == [.ukrainian, .english, .russian, .polish]
               && Language.others.count == Language.allCases.count - 4 && !Language.others.contains(.polish), "languages: the four main ones lead every list")
+        var pd = UsageData()
+        for _ in 0..<8 { pd.recordPlace("com.google.Chrome|jira.example.com", "under", day: "2026-11-11") }
+        for _ in 0..<9 { pd.recordPlace("com.tinyspeck.slackmacgap", "exact", day: "2026-11-11") }
+        pd.recordPlace("com.tinyspeck.slackmacgap", "accepted", day: "2026-11-11")
+        for _ in 0..<3 { pd.recordPlace("com.tinyspeck.slackmacgap", "notInserted", day: "2026-11-11") }
+        pd.recordPlace("com.apple.TextEdit", "exact", day: "2026-11-10")
+        let reps = PlaceReport.reports(pd.total(last: nil, now: now, calendar: cal))
+        check(reps.map(\.place) == ["com.tinyspeck.slackmacgap", "com.google.Chrome|jira.example.com", "com.apple.TextEdit"], "places: most used first", "\(reps.map(\.place))")
+        check(reps[0].verdict == .insertTrouble && reps[1].verdict == .under && reps[2].verdict == .fewData
+              && reps[1].host == "jira.example.com" && reps[1].bundleID == "com.google.Chrome" && reps[0].host == nil, "places: verdicts and site")
+        check(PlaceReport(place: "x", events: ["exact": 20, "ocr": 2, "accepted": 6]).verdict == .good
+              && PlaceReport(place: "x", events: ["ocr": 12, "exact": 3]).verdict == .snapshot, "places: good and snapshot")
+        if let round = try? JSONDecoder().decode(UsageData.self, from: JSONEncoder().encode(pd)) { check(round == pd, "places: round trip") } else { check(false, "places: round trip") }
         let cfg = try? JSONDecoder().decode(TolkConfig.self, from: Data(#"{"autocompletePatientDelay": 50, "keepWarmMinutes": -3}"#.utf8))
         check(cfg?.autocompletePatientDelay == 3 && cfg?.keepWarmMinutes == 0 && cfg?.autocompletePatient == true && cfg?.verboseLog == false, "usage: new config keys are clamped and default")
     }

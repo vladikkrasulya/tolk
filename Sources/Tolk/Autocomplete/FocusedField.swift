@@ -202,6 +202,24 @@ struct FocusedField {
         return NSRect(x: p.x, y: mainH - p.y - sz.height, width: sz.width, height: sz.height)
     }
 
+    /// The site of the page the element is on (browsers): host of the enclosing web area's URL. Walks up the
+    /// accessibility tree, so call it off the main thread.
+    static func webHost(of el: AXUIElement) -> String? {
+        var cur: AXUIElement? = el
+        for _ in 0..<60 {
+            guard let c = cur else { return nil }
+            AXUIElementSetMessagingTimeout(c, 0.2)
+            if let role: String = attr(c, kAXRoleAttribute), role == "AXWebArea" {
+                if let url: URL = attr(c, "AXURL"), let h = url.host, !h.isEmpty {
+                    // The editor's own frame is often about:blank / srcdoc: keep climbing to the page itself.
+                    return h.hasPrefix("www.") ? String(h.dropFirst(4)) : h
+                }
+            }
+            cur = attr(c, kAXParentAttribute)
+        }
+        return nil
+    }
+
     /// The focused field's frame in Cocoa screen coordinates (for `CaretLocator`).
     static func frame(of el: AXUIElement) -> NSRect? { axFrame(el) }
 

@@ -654,3 +654,14 @@ Only one big model fits the 6 GB GPU; switching models costs a reload (first req
   under the field. Typo-fix (instant) suggestions also look the caret up on a snapshot (`CaretLocator`) and move the
   bubble there, as model suggestions do. When the snapshot search fails the log says so
   (`caret not found on the snapshot (field WxH, lines read N, …)`), without any text.
+
+## v0.9.7 — where suggestions work: per-place counters and an editor stand
+
+- `UsageDay.acPlaces`: for every place the user types in — the app, and for a browser the site (`FocusedField.webHost`:
+  host of the enclosing `AXWebArea`, looked up off the main thread) — how the caret was found (`exact` / `ocr` /
+  `under`), accepted suggestions and failed insertions. `PlaceReport` turns the counters into a verdict (good, caret
+  by snapshot, bubble under the field, insertion trouble). Shown in Настройки → Статистика → «Где подсказки
+  работают». Only bundle ids, hosts and numbers are stored, locally.
+- `scripts/stand/editors.html`: seven kinds of web input (textarea, input, plain contenteditable, paragraphs like
+  ProseMirror, div lines like Gmail / Slack, a field that hugs its text like Jira comments, an iframe editor like
+  TinyMCE) for a live pass. Not run yet: live passes are done when the user is away from the Mac.

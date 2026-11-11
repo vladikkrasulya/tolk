@@ -25,6 +25,7 @@ struct StatsTab: View {
                 suggestCard
                 suggestChartCard
                 missesCard
+                placesCard
                 suggestTablesCard
             default:
                 privacyCard
@@ -180,6 +181,46 @@ struct StatsTab: View {
                     SShareRow(label: UsageText.miss(key), value: n, total: total, note: UsageText.missAdvice(key))
                 }
             }
+        }
+    }
+
+    /// How suggestions behave in every app and site the user types in.
+    private var placesCard: some View {
+        let reports = PlaceReport.reports(usage)
+        return SCard("Где подсказки работают", symbol: "mappin.and.ellipse",
+                     subtitle: "По каждой программе, а в браузере — по каждому сайту: как Tolk находит курсор и проходит ли вставка. Места с проблемами видно сразу.") {
+            if reports.isEmpty {
+                SHint("Пока нет данных — учёт по местам начался с версии 0.9.7.")
+            }
+            ForEach(Array(reports.prefix(12).enumerated()), id: \.offset) { _, r in
+                VStack(alignment: .leading, spacing: 3) {
+                    Rectangle().fill(TolkStyle.hairline).frame(height: 0.5).padding(.bottom, 4)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(placeName(r)).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 6)
+                        placePill(r.verdict)
+                    }
+                    Text(r.verdictText).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text("показано \(r.shown): у курсора \(r.exact), по снимку \(r.ocr), под полем \(r.under) · принято \(r.accepted)" + (r.notInserted > 0 ? " · не вставилось \(r.notInserted)" : ""))
+                        .font(.caption).foregroundStyle(.tertiary).monospacedDigit()
+                }
+                .padding(.bottom, 8)
+            }
+        }
+    }
+
+    private func placeName(_ r: PlaceReport) -> String {
+        let app = r.bundleID == "?" ? "не определена" : SettingsModel.appName(r.bundleID)
+        return r.host.map { app + " — " + $0 } ?? app
+    }
+
+    private func placePill(_ v: PlaceReport.Verdict) -> some View {
+        switch v {
+        case .good: SPill(text: "хорошо", symbol: "checkmark", role: .ok)
+        case .snapshot: SPill(text: "по снимку", symbol: "camera.viewfinder", role: .accent)
+        case .under: SPill(text: "под полем", symbol: "arrow.down.to.line", role: .warn)
+        case .insertTrouble: SPill(text: "сбои вставки", symbol: "exclamationmark.triangle", role: .bad)
+        case .fewData: SPill(text: "мало данных")
         }
     }
 

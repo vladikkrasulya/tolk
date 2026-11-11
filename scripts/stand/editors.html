@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Tolk — стенд редакторов</title>
+<style>
+  body { font: 14px/1.45 -apple-system, sans-serif; margin: 24px; max-width: 900px; color: #222; }
+  h1 { font-size: 18px; } h2 { font-size: 14px; margin: 22px 0 4px; }
+  p.note { color: #666; margin: 0 0 6px; font-size: 12px; }
+  textarea, input, .ce, iframe { width: 100%; box-sizing: border-box; border: 1px solid #bbb; border-radius: 6px; font: inherit; }
+  textarea { height: 90px; padding: 8px; }
+  input { padding: 6px 8px; }
+  .ce { min-height: 60px; padding: 8px; outline: none; }
+  .ce p { margin: 0 0 6px; }
+  .hug { min-height: 0; }
+  iframe { height: 90px; }
+</style>
+</head>
+<body>
+<h1>Стенд редакторов для живого прогона подсказок</h1>
+<p class="note">Каждый блок повторяет то, как устроено поле ввода в популярных программах и на сайтах. В каждом: набрать «Давай созвонимся завтра и обсудим», дождаться подсказки, принять Tab; набрать слово с опечаткой, принять исправление. Смотреть: где стоит подсказка, вставилась ли она, что записано во вкладке «Статистика → Где подсказки работают».</p>
+
+<h2>1. Обычное многострочное поле (textarea)</h2>
+<p class="note">Формы на сайтах, GitHub, старые веб-чаты. Chrome не сообщает место курсора.</p>
+<textarea id="e1" placeholder="textarea"></textarea>
+
+<h2>2. Однострочное поле (input)</h2>
+<p class="note">Короткие поля. Узкие и поисковые Tolk пропускает намеренно.</p>
+<input id="e2" placeholder="input" style="width: 640px">
+
+<h2>3. Простое редактируемое поле (contenteditable)</h2>
+<p class="note">Самый простой веб-редактор: текст лежит прямо в блоке.</p>
+<div id="e3" class="ce" contenteditable="true"></div>
+
+<h2>4. Редактор с абзацами (как ProseMirror: Claude, Notion, Confluence)</h2>
+<p class="note">Каждая строка — отдельный абзац внутри редактируемого блока.</p>
+<div id="e4" class="ce" contenteditable="true"><p><br></p></div>
+
+<h2>5. Редактор со строками-блоками (как Gmail, Slack в браузере)</h2>
+<p class="note">Каждая строка — отдельный div.</p>
+<div id="e5" class="ce" contenteditable="true"><div><br></div></div>
+
+<h2>6. Поле, которое обтягивает текст (как редактор комментариев Jira)</h2>
+<p class="note">Высота поля равна высоте текста: «угол поля» совпадает со строкой, которую печатают.</p>
+<div id="e6" class="ce hug" contenteditable="true"><p><br></p></div>
+
+<h2>7. Редактор во вложенной странице (iframe, как старые TinyMCE и Jira)</h2>
+<p class="note">Редактируется документ внутри iframe; координаты и адрес страницы у такого поля свои.</p>
+<iframe id="e7" title="iframe editor"></iframe>
+
+<script>
+  const f = document.getElementById('e7');
+  const d = f.contentDocument;
+  d.open();
+  d.write('<!doctype html><html><head><style>body{font:14px/1.45 -apple-system,sans-serif;margin:8px}p{margin:0 0 6px}</style></head><body contenteditable="true"><p><br></p></body></html>');
+  d.close();
+</script>
+</body>
+</html>

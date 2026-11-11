@@ -115,6 +115,7 @@ final class AutocompleteController {
                 let tail = why == "rest-of-line" ? " tail=" + AutocompleteSafety.tailShape(now?.restOfLine ?? "") + " app=\(a.snap.bundleID ?? "?")" : ""
                 Diagnostics.log("autocomplete: not inserted, field check failed (\(why))\(tail)")
                 UsageStore.shared.recordMiss("not-inserted")
+                UsageStore.shared.recordPlace(lastPlace, "notInserted")
             }
             cancelPending(); hide(reason: "stale"); return nil
         }
@@ -456,6 +457,7 @@ final class AutocompleteController {
         let rest = String(chars[i...])
         let beforeInsert = insertVerified(word, kind: "word", field: verified)
         Diagnostics.log("autocomplete: accepted word len=\(word.count)")
+        UsageStore.shared.recordPlace(lastPlace, "accepted")
         stats.acceptedWord(model: statsModel, app: shownBundleID, word: word); onStatsChanged?()
         acceptedInMessage = true
         wordBias.noteAccepted(word)
@@ -478,6 +480,7 @@ final class AutocompleteController {
         guard let s = suggestion, let verified = verifiedField() else { return false }
         insertVerified(s, kind: "all", field: verified)
         Diagnostics.log("autocomplete: accepted all len=\(s.count)")
+        UsageStore.shared.recordPlace(lastPlace, "accepted")
         stats.acceptedAll(model: statsModel, app: shownBundleID, text: s); onStatsChanged?()
         acceptedInMessage = true
         wordBias.noteAccepted(s)
@@ -500,6 +503,7 @@ final class AutocompleteController {
         deleteBackward(i.replaceCount)
         insert(i.text)
         Diagnostics.log("autocomplete: accepted instant replace=\(i.replaceCount) len=\(i.text.count)")
+        UsageStore.shared.recordPlace(lastPlace, "accepted")
         stats.instantAccepted(model: statsModel, app: shownBundleID, chars: i.text.count); onStatsChanged?()
         let pf = panel?.frame
         journal.accepted(kind: "instant", text: i.text, bundleID: shownBundleID,
@@ -617,6 +621,23 @@ final class AutocompleteController {
     /// caret is looked for on a snapshot in fields that do not report it.
     static var patientDelayMs = AutocompleteTuning.patientDelayMs
     static var caretBubble = true
+    /// Browsers: the place is the site, not the browser.
+    static let browsers: Set<String> = ["com.google.Chrome", "com.apple.Safari", "company.thebrowser.Browser", "org.mozilla.firefox",
+                                         "com.microsoft.edgemac", "com.brave.Browser", "com.operasoftware.Opera", "com.vivaldi.Vivaldi"]
+    /// Where the suggestion on screen was shown (for «accepted» / «not inserted» counters).
+    private var lastPlace = "?"
+
+    /// Counts an event for the place the user types in: the app, and for a browser the site (looked up off the main thread).
+    private func notePlace(_ event: String, element: AXUIElement?, bundleID: String?) {
+        let bid = bundleID ?? "?"
+        lastPlace = bid
+        guard Self.browsers.contains(bid), let el = element else { UsageStore.shared.recordPlace(bid, event); return }
+        DispatchQueue.global(qos: .utility).async {
+            let place = FocusedField.webHost(of: el).map { bid + "|" + $0 } ?? bid
+            UsageStore.shared.recordPlace(place, event)
+            Task { @MainActor [weak self] in if self?.lastPlace == bid { self?.lastPlace = place } }
+        }
+    }
     /// Letters in the field before the first request.
     static var minChars = 4
     private func skip(_ reason: String) {
@@ -670,12 +691,16 @@ final class AutocompleteController {
             // bubble there, as for model suggestions.
             if field.caretApprox, Self.caretBubble, ScreenContext.ocrAllowed, CGPreflightScreenCaptureAccess(),
                let el = field.element, let frame = FocusedField.frame(of: el) {
-                let typed = field.textBefore, shown = s.text, size = field.fontSize, limit = field.rightLimit
+                let typed = field.textBefore, shown = s.text, size = field.fontSize, limit = field.rightLimit, bid = field.bundleID
                 Task { [weak self] in
-                    guard let found = await CaretLocator.locate(field: frame, textBefore: typed),
-                          let self, self.instant?.text == shown, self.anchor?.snap.textBefore == typed else { return }
+                    let found = await CaretLocator.locate(field: frame, textBefore: typed)
+                    guard let self else { return }
+                    self.notePlace(found == nil ? "under" : "ocr", element: el, bundleID: bid)
+                    guard let found, self.instant?.text == shown, self.anchor?.snap.textBefore == typed else { return }
                     self.panel?.show(s.display, caret: found, fontSize: size, rightLimit: limit)
                 }
+            } else {
+                notePlace(field.caretApprox ? "under" : "exact", element: field.element, bundleID: field.bundleID)
             }
             if s.blocksModel { return }
             break
@@ -778,6 +803,7 @@ final class AutocompleteController {
         let f = panel?.frame ?? .zero
         Diagnostics.log("autocomplete: shown\(patient ? " (patient)" : "") len=\(text.count) ms=\(result.ms) ctx=\(context?.count ?? 0) app=\(now.bundleID ?? "?") fs=\(now.fontSize.map { String(Int($0 * 10)) } ?? "-")/10 ax=\(where_) caret=(\(Int(caret.minX)),\(Int(caret.minY)) \(Int(caret.width))x\(Int(caret.height))) panel=(\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))x\(Int(f.height)))")
         stats.shown(model: statsModel, app: now.bundleID, text: text, ms: result.ms); onStatsChanged?()
+        notePlace(where_.hasPrefix("ocr") ? "ocr" : (now.caretApprox ? "under" : "exact"), element: now.element, bundleID: now.bundleID)
         journal.shown(bundleID: now.bundleID, before: now.textBefore, text: text, ms: result.ms, ctxChars: context?.count ?? 0,
                       ctxSource: lastContextSource.isEmpty ? nil : lastContextSource, caret: now.caret, panel: panel)
     }
