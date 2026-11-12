@@ -48,6 +48,10 @@ enum MainWindowDemo {
         if quiet { main.selectForRender(section) } else { main.show(section) }
         if section == .translate { translate.load(text: TolkUIDemo.sampleEnglish) }
 
+        if env["TOLK_SCROLL_BENCH"] != nil {
+            Task { @MainActor in await scrollBench(main: main) }
+            return
+        }
         if let dir = env["TOLK_MAIN_SHOT"], !dir.isEmpty {
             Task { @MainActor in await shootAll(main: main, translate: translate, engine: engine, dir: dir) }
         }
@@ -115,6 +119,34 @@ enum MainWindowDemo {
         render(inputWindow, to: "\(dir)/input-window-\(suffix).png")
 
         print("[main-demo] shots in \(dir)")
+        NSApp.terminate(nil)
+    }
+
+    /// Scrolls every settings tab top to bottom in 120 steps, drawing each frame, and prints the time per frame.
+    private static func scrollBench(main: MainWindowController) async {
+        main.window?.setFrame(NSRect(x: 0, y: 0, width: 1100, height: 800), display: false)
+        guard let vc = main.pages[.settings] as? SettingsViewController else { NSApp.terminate(nil); return }
+        var all: [Double] = []
+        for tab in [SettingsTab.stats, .translate, .autocomplete, .general] {
+            vc.model.open(tab, section: 0)
+            try? await Task.sleep(for: .milliseconds(1500))
+            guard let scroll = findScrollView(in: vc.view), let doc = scroll.documentView else { continue }
+            let maxY = max(0, doc.frame.height - scroll.contentView.bounds.height)
+            var times: [Double] = []
+            for i in 0...120 {
+                let y = maxY * Double(i % 61) / 60
+                let t0 = CFAbsoluteTimeGetCurrent()
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                main.window?.contentView?.superview?.display()
+                times.append((CFAbsoluteTimeGetCurrent() - t0) * 1000)
+            }
+            times.sort()
+            all += times
+            print(String(format: "[bench] %@: median %.1f ms, p90 %.1f ms, max %.1f ms", tab.rawValue, times[times.count / 2], times[times.count * 9 / 10], times.last ?? 0))
+        }
+        all.sort()
+        print(String(format: "[bench] all: median %.1f ms, p90 %.1f ms", all[all.count / 2], all[all.count * 9 / 10]))
         NSApp.terminate(nil)
     }
 

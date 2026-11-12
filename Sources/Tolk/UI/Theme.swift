@@ -170,14 +170,30 @@ enum Theme {
 
     // MARK: Plumbing
 
+    /// Resolved colours, so drawing does not rebuild a palette and a colour on every call (SwiftUI resolves each
+    /// colour many times per frame while scrolling).
+    private struct CacheKey: Hashable { let palette: ThemePalette; let dark: Bool; let token: Int }
+    nonisolated(unsafe) private static var cache: [CacheKey: NSColor] = [:]
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var nextToken = 0
+
     private static func dyn(_ key: KeyPath<ThemeColors, UInt32>, classic: @escaping @Sendable () -> NSColor) -> NSColor {
-        NSColor(name: nil) { appearance in
-            guard let c = colors(palette, dark: appearance.isDark) else {
-                var out = NSColor.clear
-                appearance.performAsCurrentDrawingAppearance { out = classic().usingColorSpace(.sRGB) ?? classic() }
-                return out
+        let token = cacheLock.withLock { nextToken += 1; return nextToken }
+        return NSColor(name: nil) { appearance in
+            let p = palette, dark = appearance.isDark
+            let k = CacheKey(palette: p, dark: dark, token: token)
+            if let hit = cacheLock.withLock({ cache[k] }) { return hit }
+            let out: NSColor
+            if let c = colors(p, dark: dark) {
+                out = NSColor(hex: c[keyPath: key])
+            } else {
+                var r = NSColor.clear
+                appearance.performAsCurrentDrawingAppearance { r = classic().usingColorSpace(.sRGB) ?? classic() }
+                out = r
             }
-            return NSColor(hex: c[keyPath: key])
+            // «Классика» follows the system accent, which the user may change: not cached.
+            if p != .classic { cacheLock.withLock { cache[k] = out } }
+            return out
         }
     }
 }

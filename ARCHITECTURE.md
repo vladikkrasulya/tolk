@@ -701,6 +701,10 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
 
+## v1.1.2 — smoother settings
+
+The user saw under 30 frames per second on a 120 Hz screen after the themes. Two suspects removed: the soft shadow under every settings card (a blurred shadow per card is an extra offscreen pass for each of them on every scrolled frame) and the colour providers, which rebuilt a palette and an `NSColor` on every resolve — now cached per palette, light/dark and token (not in «Классика», which follows the system accent). `TOLK_SCROLL_BENCH=1` scrolls every settings tab and prints the time per frame; it draws offscreen, so it does not see shadows or glass and showed no difference (≈2 ms median both ways) — the check on the real screen is the user's.
+
 ## v1.1.1 — the main window opens again
 
 1.1.0 hung on opening the main window: `SidebarViewController.loadView` called `applyTheme` before `view` was set, and `tintGlass` asked for `view`, which ran `loadView` again — endless recursion at 100 % CPU. `applyTheme` now runs after `view` is set and `tintGlass` reads `viewIfLoaded`. The renders had not caught it (taken before `tintGlass`), the smoke test did not build the main window: it now builds and lays it out in every palette and switches the palette under it.

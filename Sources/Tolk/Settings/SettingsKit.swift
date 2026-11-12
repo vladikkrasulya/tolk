@@ -153,7 +153,6 @@ struct SCard<Content: View, Trailing: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(TolkStyle.card, in: RoundedRectangle(cornerRadius: TolkStyle.cardRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: TolkStyle.cardRadius, style: .continuous).strokeBorder(TolkStyle.hairline, lineWidth: 0.5))
-        .shadow(color: .black.opacity(Theme.isCustom ? 0.05 : 0), radius: 10, x: 0, y: 3)
     }
 }
 
