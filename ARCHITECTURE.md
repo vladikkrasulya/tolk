@@ -701,6 +701,10 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
 
+## v1.0.2 — the suggestion model no longer grows to 9 GB of memory
+
+Found on the final check before leaving the app to run without development: `llama-server` with a 1.3 GB model had a 9.2 GB footprint after two hours. The cause is its prompt cache (`--cache-ram`), 8192 MiB by default: every distinct prompt left a 120–140 MiB entry until the limit was reached. `LocalModelServer` now starts it with `--cache-ram 512`: a few recent prompts are still kept (switching between two fields stays fast), the rest is dropped. The slot's own cache and `--cache-reuse` are unchanged, so typing in one field is as fast as before.
+
 ## v1.0.1 — Tolk does not touch an app until the user types in it
 
 - Reported: in Slack a frame appeared around an element while nothing was being typed, and the first click on a

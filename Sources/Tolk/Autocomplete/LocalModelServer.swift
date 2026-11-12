@@ -144,6 +144,8 @@ final class LocalModelServer {
         let command = [bin, "-m", modelPath, "--host", "127.0.0.1", "--port", "\(port)",
                        "-c", "\(contextSize)", "-ngl", "99", "-fa", "on", "-np", "1",
                        "--cache-reuse", "64", "--no-webui",
+                       // llama-server keeps old prompts in memory, 8 GB by default: a 1.3 GB model grew to 9 GB.
+                       "--cache-ram", "512",
                        // 3 = every request with timings (megabytes per hour); 2 = warnings and errors only.
                        "-lv", Diagnostics.verbose ? "3" : "2"]
         p.arguments = ServerLifecycle.wrapperArguments(command: command) // dies with Tolk even on kill -9
