@@ -701,6 +701,10 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
 
+## v1.0.7 — translation while typing: the messengers found on the Mac, each with a switch
+
+The user's idea after 1.0.6: instead of a menu of running programs, let Tolk find the suitable ones itself. `TypeTranslateApps.known` is a list of messengers and mail programs (Telegram, Slack, Teams, WhatsApp, Discord, Messages, Signal, Viber, Messenger, Skype, Zoom, Mail, Outlook, Spark); the card shows those installed, each with a switch, plus the programs switched on some other way and «Другая программа» for the rest. The hint says plainly that only Telegram was checked.
+
 ## v1.0.6 — translation while typing: programs are added in settings
 
 «Перевод при наборе» is switched on per program, and the only ways were the hotkey ⌃⌥R and the menu. On a Windows keyboard the hotkey did not reach Tolk (nothing in the log, registration was fine — most likely Alt and Win are swapped in the system), and the settings card only listed the programs with «Выключить везде». The card now has the list itself: every program with a remove button and «Добавить программу» (the running programs, as in «Тон по программам»). The hint under «Включать самому» says where the list is.

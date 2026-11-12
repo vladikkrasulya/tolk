@@ -315,22 +315,24 @@ struct AutocompleteTab: View {
             SToggle("Включать самому", isOn: cfg.typeTranslateAuto,
                     hint: "Если последнее сообщение собеседника на другом языке, режим включится в этой программе без вашего участия.",
                     offHint: "Выключено: режим работает только в программах из списка ниже. Добавить программу можно здесь, горячей клавишей (⌃⌥R, меняется во вкладке «Общие») или из меню Tolk.", divider: false)
-            // The list itself: before, a program could be added only with the hotkey or from the menu, and a hotkey
-            // that did not reach Tolk (a Windows keyboard with swapped modifiers) left no other way.
-            let on = model.config.typeTranslateApps.filter(\.value).keys.sorted { SettingsModel.appName($0) < SettingsModel.appName($1) }
-            SRow("Где включено", hint: on.isEmpty ? "Пока нигде. Добавьте программу, в которой переписываетесь." : nil) {
+            // The programs themselves: the messengers found on this Mac, each with a switch. Before, a program could be
+            // added only with the hotkey or from the menu, and a hotkey that did not reach Tolk left no other way.
+            let on = Set(model.config.typeTranslateApps.filter(\.value).keys)
+            let listed = TypeTranslateApps.installed() + on.subtracting(TypeTranslateApps.known).sorted { SettingsModel.appName($0) < SettingsModel.appName($1) }
+            SRow("Где работает", hint: "Мессенджеры и почта, найденные на этом Mac. Проверено в Telegram; в остальных включайте и смотрите — программы по-разному отдают текст поля.") {
                 if !on.isEmpty { Button("Выключить везде") { model.config.typeTranslateApps = [:] } }
             }
-            ForEach(on, id: \.self) { id in
+            ForEach(listed, id: \.self) { id in
                 HStack {
                     Text(SettingsModel.appName(id))
                     Spacer()
-                    Button(role: .destructive) { model.config.typeTranslateApps[id] = nil } label: { Image(systemName: "minus.circle") }
-                        .buttonStyle(.borderless).help("Выключить перевод при наборе в этой программе")
+                    Toggle("", isOn: Binding(get: { model.config.typeTranslateApps[id] == true },
+                                             set: { model.config.typeTranslateApps[id] = $0 ? true : nil }))
+                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
                 }
                 .padding(.vertical, 2)
             }
-            AppMenu(title: "Добавить программу", isUsed: { model.config.typeTranslateApps[$0] == true }) { model.config.typeTranslateApps[$0] = true }
+            AppMenu(title: "Другая программа", isUsed: { listed.contains($0) }) { model.config.typeTranslateApps[$0] = true }
                 .padding(.top, 6)
         }
     }
@@ -379,5 +381,20 @@ struct AutocompleteTab: View {
             AppMenu(title: "Добавить программу", isUsed: { model.config.autocompleteOffApps.contains($0) }) { model.addOffApp($0) }
                 .padding(.top, 6)
         }
+    }
+}
+
+
+/// Programs people chat and write letters in — the ones «Перевод при наборе» is offered for without a search.
+enum TypeTranslateApps {
+    static let known: [String] = [
+        "ru.keepcoder.Telegram", "com.tinyspeck.slackmacgap", "com.microsoft.teams2", "net.whatsapp.WhatsApp",
+        "com.hnc.Discord", "com.apple.MobileSMS", "org.whispersystems.signal-desktop", "com.viber.osx",
+        "com.facebook.archon", "com.skype.skype", "us.zoom.xos", "com.apple.mail", "com.microsoft.Outlook",
+        "com.readdle.smartemail-Mac",
+    ]
+    /// Those of `known` that are installed, in the order above.
+    static func installed() -> [String] {
+        known.filter { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }
     }
 }
