@@ -701,6 +701,15 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
 
+## v1.0.4 — Apple as the fallback measured; a greeting is no longer put in as a term
+
+With the language packs downloaded Apple's translation works (0.12–0.46 s per phrase, nothing leaves the Mac). Eleven work phrases, Apple against Google:
+
+- Plain: about equal. Apple kept «QPS» and wrote «расхождение» where Google wrote «количество кадров в секунду» and «несоответствие», but Apple slipped on ordinary speech («отпишемся» → «unsubscribe», «у себя» → «at home», «froud», «обилили трафик»).
+- With the glossary switch: seven of eleven got better with Apple and none came out as nonsense (Google: five of nine better, two garbled). Small flaws remain («дневняя капа», «запределили трафик»). So the switch stays off by default, and its hint now gives both sets of numbers.
+- Found on the way: the pair «Добрый день! → Hello,» was put in as a word and ate the «!». `FallbackGlossary.isPlainTerm` skips pairs with punctuation.
+- `tolk-cli --provider apple` (the main run loop is turned while waiting — Apple's service does not answer to a blocked main thread).
+
 ## v1.0.3 — glossary for the fallback translator (a switch, off by default) and the state of Apple's languages
 
 Away from home the server is not reachable and the text goes to Google as it is: «лимит» for «cap», «лента» for «feed», «количество кадров в секунду» for «QPS».

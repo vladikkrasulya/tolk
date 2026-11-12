@@ -413,9 +413,9 @@ func direct(_ p: TranslationProvider) -> AsyncThrowingStream<TranslationEvent, E
         let t = Task {
             do {
                 c.yield(.started(provider: p.name, source: r.source, target: r.target))
-                // Google here goes the way it goes in the app as the fallback: with the glossary (TOLK_PLAIN_FALLBACK=1 = without).
+                // Google and Apple here go the way they go in the app as the fallback: with the glossary (TOLK_PLAIN_FALLBACK=1 = without).
                 let plain = ProcessInfo.processInfo.environment["TOLK_PLAIN_FALLBACK"] != nil
-                let s = p is GoogleProvider ? FallbackGlossary.stream(r, provider: p, rules: engine.rules, enabled: !plain) : p.translate(r)
+                let s = (p is GoogleProvider || p is AppleTranslationProvider) ? FallbackGlossary.stream(r, provider: p, rules: engine.rules, enabled: !plain) : p.translate(r)
                 for try await d in s { c.yield(.delta(d)) }
                 c.yield(.finished); c.finish()
             } catch { c.finish(throwing: error) }
@@ -442,7 +442,8 @@ switch providerName {
 case "auto": stream = engine.translate(request)
 case "ollama", "qwen": stream = direct(engine.primary)
 case "google": stream = direct(GoogleProvider())
-default: fail("--provider: auto|ollama|google")
+case "apple": stream = direct(AppleTranslationProvider())   // on-device; needs the language packs
+default: fail("--provider: auto|ollama|google|apple")
 }
 
 let start = Date()
@@ -497,5 +498,10 @@ let consumer = Task {
 if let cancelAfter {
     DispatchQueue.global().asyncAfter(deadline: .now() + cancelAfter) { err("\n[cancel \(ms())]"); consumer.cancel() }
 }
-done.wait()
+// Apple's translation service answers only while the main run loop turns; a blocked main thread makes it time out.
+if providerName == "apple" {
+    while done.wait(timeout: .now()) == .timedOut { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+} else {
+    done.wait()
+}
 exit(status)

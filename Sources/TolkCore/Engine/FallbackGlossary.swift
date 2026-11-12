@@ -37,7 +37,9 @@ public enum FallbackGlossary {
             return a.from.count > b.from.count
         }
         for p in ordered {
-            guard p.from.lowercased() != p.to.lowercased(), RulesStore.isMostlyCyrillic(p.to) == wantCyrillic,
+            // «Добрый день! → Hello,» is a hint about a whole phrase with its punctuation; put in as a word it ate the «!».
+            guard isPlainTerm(p.from), isPlainTerm(p.to),
+                  p.from.lowercased() != p.to.lowercased(), RulesStore.isMostlyCyrillic(p.to) == wantCyrillic,
                   RulesStore.isMostlyCyrillic(p.from) != wantCyrillic, let re = RulesStore.pattern(for: p.from) else { continue }
             for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
                 let found = ns.substring(with: m.range)
@@ -48,6 +50,12 @@ public enum FallbackGlossary {
             }
         }
         return subs.sorted { $0.range.location < $1.range.location }
+    }
+
+    /// Letters, digits, spaces, hyphens and apostrophes only.
+    static func isPlainTerm(_ s: String) -> Bool {
+        let ok = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: " -'’"))
+        return !s.isEmpty && s.unicodeScalars.allSatisfy(ok.contains)
     }
 
     /// The word to insert for the form found in the text; nil = leave this place to the translator.

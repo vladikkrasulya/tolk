@@ -71,6 +71,8 @@ extension SelfTest {
               && !F.kept("видим передвижение", term: "расхождение"), "fallback glossary: a term is found in the answer by its stem")
         check(F.fixCase("Мы будем удерживать Выплаты. постбеки в норме, QPS тоже.", terms: ["выплата", "постбек"]) == "Мы будем удерживать выплаты. Постбеки в норме, QPS тоже.",
               "fallback glossary: stray capital removed, sentence start capitalised")
+        check(F.plan("Добрый день! По зоне нашли фрод.", pairs: [("Добрый день!", "Hello"), ("фрод", "fraud")], target: .english).map(\.insert) == ["fraud"],
+              "fallback glossary: a phrase with punctuation is not put in as a word")
         check(!TolkConfig().fallbackGlossary, "fallback glossary: off by default")
     }
 }
