@@ -20,6 +20,20 @@ public final class AppleTranslationProvider: TranslationProvider, @unchecked Sen
 
     public func isAvailable() async -> Bool { Self.isSupportedOnThisMac }
 
+    /// Are the language packs for `a → b` on this Mac? nil = cannot tell (old macOS, the system did not answer).
+    /// The packs are downloaded by the user in System Settings; without them every Apple translation fails.
+    public static func installed(from a: Language, to b: Language) async -> Bool? {
+        #if canImport(Translation)
+        if #available(macOS 26.0, *) {
+            let status = try? await race(seconds: 5, what: "") {
+                await LanguageAvailability().status(from: localeLanguage(a), to: localeLanguage(b))
+            }
+            return status.map { $0 == .installed }
+        }
+        #endif
+        return nil
+    }
+
     static func localeLanguage(_ l: Language) -> Locale.Language {
         Locale.Language(identifier: l == .chinese ? "zh-Hans" : l.rawValue)
     }

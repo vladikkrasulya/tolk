@@ -153,7 +153,7 @@ public final class DefaultTranslationEngine: TranslationEngine, @unchecked Senda
                     continuation.yield(.started(provider: fallback.name, source: resolved.source, target: resolved.target))
                     produced = ""
                     do {
-                        for try await chunk in ChatHeaderKeeper.stream(fallback.translate(resolved), source: resolved.text) {
+                        for try await chunk in ChatHeaderKeeper.stream(FallbackGlossary.stream(resolved, provider: fallback, rules: rules, enabled: config.fallbackGlossary), source: resolved.text) {
                             try Task.checkCancellation()
                             if firstAt == nil { firstAt = Date() }
                             produced += chunk

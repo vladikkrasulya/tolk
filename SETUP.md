@@ -1,6 +1,6 @@
 # Tolk: установка и первая настройка
 
-Версия 1.0.2. Обзор функций — в [README.md](README.md), работа с приложением — в [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
+Версия 1.0.3. Обзор функций — в [README.md](README.md), работа с приложением — в [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 Система состоит из трёх частей:
 

@@ -400,6 +400,9 @@ public struct TolkConfig: Codable, Sendable, Equatable {
     public var translateFixedSeed: Bool = true
     /// Keep finished translations in memory for a day and answer repeats instantly.
     public var translateCache: Bool = true
+    /// Put glossary terms into the text before it goes to the fallback translator (Google, Apple).
+    /// Off by default: now and then the translator garbles a word next to an inserted term (see FallbackGlossary).
+    public var fallbackGlossary: Bool = false
     /// Suggestions: use the two bars below instead of the «Частота» preset.
     public var autocompleteCustomConfidence: Bool = false
     /// Minimum probability of the first word / of every later word of a suggestion, 0.05…0.95.
@@ -438,7 +441,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         case autocompleteClipboard, autocompleteEmoji, autocorrect, autocompleteLearnStyle, autocompleteFrequency, autocompleteRecordAll, autocompleteWordPreference
         case autocompleteScreenContext, autocompleteBatteryRare, autocompleteBatteryNoScreen, autocompleteBatteryShort, typeTranslateApps, typeTranslateAuto
         case autocompletePatient, autocompletePatientDelay, autocompleteCaretBubble, verboseLog, keepWarmMinutes
-        case translateTemperature, translateFixedSeed, translateCache, autocompleteCustomConfidence, autocompleteFirstProb
+        case translateTemperature, translateFixedSeed, translateCache, fallbackGlossary, autocompleteCustomConfidence, autocompleteFirstProb
         case autocompleteNextProb, autocompletePatientProb, autocompleteTemperature, autocompleteContextSize, autocompleteMinChars
         case autocompleteBaseRules, prompts, autoEditor
     }
@@ -496,6 +499,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         translateTemperature = clamp(c.lenient(Double.self, forKey: .translateTemperature) ?? d.translateTemperature, 0, 1)
         translateFixedSeed = c.lenient(Bool.self, forKey: .translateFixedSeed) ?? d.translateFixedSeed
         translateCache = c.lenient(Bool.self, forKey: .translateCache) ?? d.translateCache
+        fallbackGlossary = c.lenient(Bool.self, forKey: .fallbackGlossary) ?? d.fallbackGlossary
         autocompleteCustomConfidence = c.lenient(Bool.self, forKey: .autocompleteCustomConfidence) ?? d.autocompleteCustomConfidence
         autocompleteFirstProb = clamp(c.lenient(Double.self, forKey: .autocompleteFirstProb) ?? d.autocompleteFirstProb, 0.05, 0.95)
         autocompleteNextProb = clamp(c.lenient(Double.self, forKey: .autocompleteNextProb) ?? d.autocompleteNextProb, 0.05, 0.95)
@@ -552,6 +556,7 @@ public struct TolkConfig: Codable, Sendable, Equatable {
         try c.encode(translateTemperature, forKey: .translateTemperature)
         try c.encode(translateFixedSeed, forKey: .translateFixedSeed)
         try c.encode(translateCache, forKey: .translateCache)
+        try c.encode(fallbackGlossary, forKey: .fallbackGlossary)
         try c.encode(autocompleteCustomConfidence, forKey: .autocompleteCustomConfidence)
         try c.encode(autocompleteFirstProb, forKey: .autocompleteFirstProb)
         try c.encode(autocompleteNextProb, forKey: .autocompleteNextProb)

@@ -701,6 +701,15 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
 
+## v1.0.3 — glossary for the fallback translator (a switch, off by default) and the state of Apple's languages
+
+Away from home the server is not reachable and the text goes to Google as it is: «лимит» for «cap», «лента» for «feed», «количество кадров в секунду» for «QPS».
+
+- `FallbackGlossary` puts glossary terms into the text before it is sent («lower the floor» → «lower the флор»); the translator builds the sentence around the word and usually inflects it. Only base forms and plain plurals are replaced (a verb form like «capped» is left alone), only into Russian and English. Every inserted term is looked for in the answer by its stem; the ones that did not survive are taken out and the text is sent again, then the plain translation is used — three requests at most. `RulesStore.glossaryPairs` picks the one rendering per term.
+- Measured on nine work phrases through Google: five better, two unchanged, two with a garbled word NEXT to an inserted term («аккаунт был причинён из-за фрода»). A back-translation guard was tried and did not tell the bad ones from the good ones, so it was removed. Hence the switch «Глоссарий в запасном переводе» is OFF by default (`fallbackGlossary`) and its hint states these numbers. `tolk-cli --provider google` goes the same way (`TOLK_PLAIN_FALLBACK=1` = without terms).
+- Also measured and rejected: the small suggestion model as the translator (wrong words: «под-публичеров») and as an editor of Google's answer (5 of 6 fine, one changed the meaning).
+- Apple as the fallback «did not work» because no language pack was downloaded on the Mac. The settings now show the state of the pair (`AppleTranslationProvider.installed`) and a button that opens System Settings; before, the user learned it from a failed translation. Not checked by eye: the row appears only with Apple selected.
+
 ## v1.0.2 — the suggestion model no longer grows to 9 GB of memory
 
 Found on the final check before leaving the app to run without development: `llama-server` with a 1.3 GB model had a 9.2 GB footprint after two hours. The cause is its prompt cache (`--cache-ram`), 8192 MiB by default: every distinct prompt left a 120–140 MiB entry until the limit was reached. `LocalModelServer` now starts it with `--cache-ram 512`: a few recent prompts are still kept (switching between two fields stays fast), the rest is dropped. The slot's own cache and `--cache-reuse` are unchanged, so typing in one field is as fast as before.

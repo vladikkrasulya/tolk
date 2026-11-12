@@ -109,6 +109,30 @@ public final class RulesStore: @unchecked Sendable {
         return out
     }
 
+    /// For the fallback translators: every glossary pair found in `text`, with the ONE rendering to use.
+    /// «cap / daily cap → капа / дневная капа» pairs the variants by position; otherwise the first rendering wins.
+    public func glossaryPairs(in text: String, target: Language) -> [(from: String, to: String)] {
+        let p = current()
+        let toCyrillic = target == .russian || target == .ukrainian || target == .bulgarian || target == .kazakh
+        let range = NSRange(text.startIndex..., in: text)
+        var out: [(from: String, to: String)] = []
+        for line in p.glossary where line.patterns.contains(where: { $0.firstMatch(in: text, range: range) != nil }) {
+            guard var body = Self.oriented(line.text, toCyrillic: toCyrillic) else { continue }
+            if body.hasPrefix("- ") { body.removeFirst(2) }
+            for pair in body.components(separatedBy: ";") {
+                let sides = pair.components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }
+                guard sides.count == 2 else { continue }
+                let from = Self.variants(sides[0]), to = Self.variants(sides[1])
+                guard let first = to.first else { continue }
+                for (i, v) in from.enumerated() where Self.pattern(for: v).map({ $0.firstMatch(in: text, range: range) != nil }) ?? false {
+                    let rendering = from.count == to.count ? to[i] : first
+                    if !out.contains(where: { $0.from == v }) { out.append((v, rendering)) }
+                }
+            }
+        }
+        return out
+    }
+
     /// "cap / daily cap (капа)" -> ["cap", "daily cap"]: alternatives split by « / » and «,», comments in brackets dropped.
     static func variants(_ side: String) -> [String] {
         let clean = side.replacingOccurrences(of: "\\([^)]*\\)", with: " ", options: .regularExpression)

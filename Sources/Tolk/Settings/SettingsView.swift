@@ -223,13 +223,21 @@ struct TranslateTab: View {
                 }
                 .labelsHidden().fixedSize()
             }
+            if model.config.fallback == .apple, AppleTranslationProvider.isSupportedOnThisMac {
+                AppleLanguagesRow(a: model.config.primaryLanguage, b: model.config.secondaryLanguage)
+            }
+            if model.config.fallback != .none {
+                SToggle("Глоссарий в запасном переводе", isOn: $model.config.fallbackGlossary,
+                        hint: "Термины из глоссария вставляются в текст до отправки: «капа», «фид», «флор» вместо «лимит», «лента», «нижний предел». Работает только для русского и английского. Проверено на 9 рабочих фразах: 5 стали лучше, 2 не изменились, в 2 переводчик исковеркал соседнее слово («аккаунт был причинён из-за фрода») — такой перевод стоит перечитывать.",
+                        offHint: "Запасной переводчик получает текст как есть и переводит своими словами: «лимит» вместо «капа», «лента» вместо «фид». Зато без случайных искажений рядом с терминами.")
+            }
         }
     }
 
     private func fallbackHint(_ f: FallbackProvider) -> String {
         switch f {
         case .google:
-            return "Перевод придёт быстро и бесплатно, но текст уйдёт в Google. Глоссарий, тон и «причесать» в запасном переводе не работают."
+            return "Перевод придёт быстро и бесплатно, но текст уйдёт в Google. Тон и «причесать» в запасном переводе не работают, глоссарий — только с переключателем ниже."
         case .apple:
             return AppleTranslationProvider.isSupportedOnThisMac
                 ? "Перевод делается на этом Mac, без интернета — текст никуда не уходит. Качество проще, чем у Google. Языки нужно скачать: Системные настройки → Основные → Язык и регион → Языки перевода."
@@ -583,5 +591,41 @@ struct ModelPicker: View {
                     .textFieldStyle(.roundedBorder).font(.callout)
             }
         }
+    }
+}
+
+
+/// «Запасной перевод: Apple» works only with the language packs downloaded in System Settings. Without this row the
+/// user learned about it from a failed translation.
+private struct AppleLanguagesRow: View {
+    let a: Language, b: Language
+    @State private var installed: Bool?
+    @State private var checked = false
+
+    var body: some View {
+        SRow("Языки Apple: \(a.label) ↔ \(b.label)", hint: hint) {
+            HStack(spacing: 8) {
+                SPill(text: checked ? (installed == true ? "скачаны" : installed == false ? "не скачаны" : "неизвестно") : "проверяю…",
+                      role: installed == true ? .ok : installed == false ? .warn : .neutral)
+                if installed != true {
+                    Button("Открыть настройки…") {
+                        if let u = URL(string: "x-apple.systempreferences:com.apple.Localization-Settings.extension") { NSWorkspace.shared.open(u) }
+                    }
+                }
+            }
+        }
+        .task(id: "\(a.rawValue)-\(b.rawValue)") {
+            checked = false
+            let there = await AppleTranslationProvider.installed(from: a, to: b)
+            let back = await AppleTranslationProvider.installed(from: b, to: a)
+            installed = (there == nil || back == nil) ? nil : (there == true && back == true)
+            checked = true
+        }
+    }
+
+    private var hint: String {
+        installed == true
+            ? "Перевод Apple готов к работе без интернета."
+            : "Пока языки не скачаны, запасной перевод Apple не работает совсем. Системные настройки → Основные → Язык и регион → Языки перевода: скачайте оба языка, затем вернитесь сюда."
     }
 }

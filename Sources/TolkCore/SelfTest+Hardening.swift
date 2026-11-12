@@ -3,6 +3,7 @@ import Foundation
 
 extension SelfTest {
     static func hardening(_ check: Check) {
+        fallbackGlossary(check)
         // Language detection: a text whose every word is dropped as an «ID» used to recurse forever.
         for t in ["ключ=значение", "путь/файл", "ид_запрос", "҂", "a=b", "12/34"] {
             let l = LanguageDetector.detect(t)
@@ -50,5 +51,26 @@ extension SelfTest {
         // Time zones: non-ASCII digits (ICU \d matches them) used to trap on Int(...)!.
         _ = TimezoneLine.lines(in: "١٠:٣٠ UTC и 10:30 UTC, ١٢.٠٣.٢٠٢٥")
         check(true, "timezone: Arabic-Indic digits do not crash")
+    }
+
+    /// Glossary for Google / Apple: which words go into the text, in what form, and how the answer is checked.
+    static func fallbackGlossary(_ check: Check) {
+        typealias F = FallbackGlossary
+        let pairs: [(from: String, to: String)] = [("cap", "капа"), ("daily cap", "дневная капа"), ("postback", "постбек"),
+                                                   ("floor", "флор"), ("Kaminari", "Kaminari")]
+        let text = "The daily cap is reached. Postbacks look fine, we capped it and lowered the floor. Kaminari is on."
+        let subs = F.plan(text, pairs: pairs, target: .russian)
+        check(subs.map(\.insert) == ["дневная капа", "Постбеки", "флор"], "fallback glossary: longest term wins, plural and capital kept, verb form and same-word pair skipped — \(subs.map(\.insert))")
+        check(F.apply(text, subs) == "The дневная капа is reached. Постбеки look fine, we capped it and lowered the флор. Kaminari is on.", "fallback glossary: terms put into the text")
+        check(F.plan(text, pairs: pairs, target: .ukrainian).isEmpty && F.plan(text, pairs: pairs, target: .polish).isEmpty, "fallback glossary: only into Russian and English")
+        let back = F.plan("Надо поднять капу по этому паблишеру", pairs: [("паблишеры", "pubs"), ("паблишер", "publisher"), ("капа", "cap")], target: .english)
+        check(back.map(\.insert) == ["cap", "publisher"], "fallback glossary: a Russian form takes the dictionary pair, not the plural one — \(back.map(\.insert))")
+        check(F.plural("постбек") == "постбеки" && F.plural("капа") == "капы" && F.plural("площадка") == "площадки" && F.plural("пиксель") == "пиксели"
+              && F.plural("оффер") == "офферы" && F.plural("дневная капа") == nil && F.plural("метро") == nil, "fallback glossary: plural of an inserted word")
+        check(F.kept("Снизим флор и капу.", term: "флор") && F.kept("от этих паблишеров", term: "паблишер") && F.kept("много мусорного трафика", term: "мусорный трафик")
+              && !F.kept("видим передвижение", term: "расхождение"), "fallback glossary: a term is found in the answer by its stem")
+        check(F.fixCase("Мы будем удерживать Выплаты. постбеки в норме, QPS тоже.", terms: ["выплата", "постбек"]) == "Мы будем удерживать выплаты. Постбеки в норме, QPS тоже.",
+              "fallback glossary: stray capital removed, sentence start capitalised")
+        check(!TolkConfig().fallbackGlossary, "fallback glossary: off by default")
     }
 }

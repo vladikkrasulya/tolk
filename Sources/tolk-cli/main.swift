@@ -413,7 +413,10 @@ func direct(_ p: TranslationProvider) -> AsyncThrowingStream<TranslationEvent, E
         let t = Task {
             do {
                 c.yield(.started(provider: p.name, source: r.source, target: r.target))
-                for try await d in p.translate(r) { c.yield(.delta(d)) }
+                // Google here goes the way it goes in the app as the fallback: with the glossary (TOLK_PLAIN_FALLBACK=1 = without).
+                let plain = ProcessInfo.processInfo.environment["TOLK_PLAIN_FALLBACK"] != nil
+                let s = p is GoogleProvider ? FallbackGlossary.stream(r, provider: p, rules: engine.rules, enabled: !plain) : p.translate(r)
+                for try await d in s { c.yield(.delta(d)) }
                 c.yield(.finished); c.finish()
             } catch { c.finish(throwing: error) }
         }
