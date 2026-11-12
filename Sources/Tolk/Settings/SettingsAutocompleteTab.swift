@@ -387,12 +387,7 @@ struct AutocompleteTab: View {
 
 /// Programs people chat and write letters in — the ones «Перевод при наборе» is offered for without a search.
 enum TypeTranslateApps {
-    static let known: [String] = [
-        "ru.keepcoder.Telegram", "com.tinyspeck.slackmacgap", "com.microsoft.teams2", "net.whatsapp.WhatsApp",
-        "com.hnc.Discord", "com.apple.MobileSMS", "org.whispersystems.signal-desktop", "com.viber.osx",
-        "com.facebook.archon", "com.skype.skype", "us.zoom.xos", "com.apple.mail", "com.microsoft.Outlook",
-        "com.readdle.smartemail-Mac",
-    ]
+    static let known: [String] = TypeTranslate.messengers + ["com.apple.mail", "com.microsoft.Outlook", "com.readdle.smartemail-Mac"]
     /// Those of `known` that are installed, in the order above.
     static func installed() -> [String] {
         known.filter { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil }

@@ -225,6 +225,25 @@ public enum TypeTranslate {
         return .unknown
     }
 
+    /// Chat programs: the field holds one short message and nothing else.
+    public static let messengers: [String] = [
+        "ru.keepcoder.Telegram", "com.tinyspeck.slackmacgap", "com.microsoft.teams2", "net.whatsapp.WhatsApp",
+        "com.hnc.Discord", "com.apple.MobileSMS", "org.whispersystems.signal-desktop", "com.viber.osx",
+        "com.facebook.archon", "com.skype.skype", "us.zoom.xos",
+    ]
+
+    /// May the translation be pasted over a selection made with ⌘A?
+    /// Checked selection (exactly the translated text) — anywhere. A field that reports nothing — only in a chat
+    /// program: in a mail reply ⌘A takes the whole letter with the quoted correspondence below, and pasting over it
+    /// would delete what was never meant to be translated. Anything else selected — never.
+    public static func mayPasteAfterKeys(_ verdict: KeySelection, bundleID: String?) -> Bool {
+        switch verdict {
+        case .all: true
+        case .unknown: bundleID.map(messengers.contains) ?? false
+        case .refuse: false
+        }
+    }
+
     // MARK: Keys
 
     public enum KeyAction: Equatable, Sendable {
@@ -265,6 +284,7 @@ public enum TypeTranslate {
         return "⚠ " + w + " — Tab ещё раз, чтобы вставить как есть"
     }
     public static let selectFailed = "Поле не даёт выделить текст — перевод не вставлен"
+    public static let selectUnchecked = "Не удалось проверить, что выделен только ваш текст, — перевод не вставлен"
     public static let changedMeanwhile = "Текст в поле изменился — перевод не вставлен"
 
     /// «→ EN».
@@ -385,6 +405,10 @@ extension SelfTest {
         check(T.keySelection(selectedText: nil, range: (0, 17), text: "Привет, как дела?") == .all && T.keySelection(selectedText: "", range: (0, 16), text: "Привет,\nкак дела") == .all,
               "type-translate ⌘A: a range over the whole text, a line break counted differently")
         check(T.keySelection(selectedText: nil, range: (5, 3), text: "Привет, как дела?") == .refuse("range 5+3 of 17"), "type-translate ⌘A: another range → no paste")
+        check(T.mayPasteAfterKeys(.all, bundleID: "com.apple.mail") && T.mayPasteAfterKeys(.unknown, bundleID: "com.microsoft.teams2")
+              && !T.mayPasteAfterKeys(.unknown, bundleID: "com.apple.mail") && !T.mayPasteAfterKeys(.unknown, bundleID: "com.google.Chrome")
+              && !T.mayPasteAfterKeys(.unknown, bundleID: nil) && !T.mayPasteAfterKeys(.refuse("selected-more"), bundleID: "com.microsoft.teams2"),
+              "type-translate ⌘A: an unchecked selection is pasted over only in a chat program, never in mail or a browser")
         check(T.keySelection(selectedText: nil, range: nil, text: "x") == .unknown && T.keySelection(selectedText: "", range: (0, 0), text: "x") == .unknown,
               "type-translate ⌘A: nothing reported → unknown")
 

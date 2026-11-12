@@ -701,6 +701,10 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
 
+## v1.0.9 — the ⌘A way never pastes over text that was not translated
+
+The user's condition for the fallback of 1.0.8: no risk of replacing what was not meant to be translated — a mail reply with the old correspondence quoted below, where ⌘A takes the whole letter. `TypeTranslate.mayPasteAfterKeys`: a checked selection (exactly the translated text) is pasted over anywhere; a field that reports no selection — only in a chat program (`TypeTranslate.messengers`), never in mail, a browser or an unknown program; anything else selected — never. When the paste is refused the selection is dropped with an arrow key, so the next keystroke does not wipe the text, and the panel says why.
+
 ## v1.0.8 — translation while typing is inserted in Teams
 
 In Teams the translation appeared under the field but Tab answered «Поле не даёт выделить текст»: Teams (a web view) refuses `AXSelectedTextRange`, and without a checked selection Tolk does not paste. Now, when the accessibility selection is refused, Tolk presses ⌘A in the field (it is the focused one, checked just before), waits 0.15 s and reads what got selected: the same text (line breaks may differ) or a range over the whole text → paste; a part or more than the field → no paste, the old message; nothing reported → paste, there is nothing to check against (`TypeTranslate.keySelection`). The log now says why the first way was refused. Not checked live: the stand cannot be driven while the user is at the Mac; the user tries it in Teams.

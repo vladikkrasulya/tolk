@@ -20,6 +20,18 @@ enum KeySynth {
         }
     }
 
+    /// Presses and releases a key without modifiers (an arrow to drop a selection).
+    static func pressKey(_ keyCode: Int) {
+        let src = CGEventSource(stateID: .privateState)
+        src?.userData = marker
+        for keyDown in [true, false] {
+            guard let e = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(keyCode), keyDown: keyDown) else { continue }
+            e.flags = []
+            e.setIntegerValueField(.eventSourceUserData, value: marker)
+            e.post(tap: .cghidEventTap)
+        }
+    }
+
     static func copy() { pressCommand(kVK_ANSI_C) }
     static func paste() { pressCommand(kVK_ANSI_V) }
     static func selectAll() { pressCommand(kVK_ANSI_A) }

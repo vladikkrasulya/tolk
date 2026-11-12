@@ -322,9 +322,16 @@ final class TypeTranslateController {
                 await sleepIgnoringCancel(0.15)
                 let sel = TypeTranslateField.selectionNow(element)
                 let verdict = TypeTranslate.keySelection(selectedText: sel.text, range: sel.range, text: s.snapshot.text)
-                if case .refuse(let why) = verdict {
-                    Diagnostics.log("type-translate: ⌘A selected something else (\(why)), not replaced app=\(bid ?? "?")")
-                    self?.show(error: TypeTranslate.selectFailed, field: now)
+                guard TypeTranslate.mayPasteAfterKeys(verdict, bundleID: bid) else {
+                    // Leave nothing selected: the next key the user presses must not wipe the text.
+                    KeySynth.pressKey(kVK_RightArrow)
+                    if case .refuse(let why) = verdict {
+                        Diagnostics.log("type-translate: ⌘A selected something else (\(why)), not replaced app=\(bid ?? "?")")
+                        self?.show(error: TypeTranslate.selectFailed, field: now)
+                    } else {
+                        Diagnostics.log("type-translate: ⌘A selection not reported and the program is not a chat, not replaced app=\(bid ?? "?")")
+                        self?.show(error: TypeTranslate.selectUnchecked, field: now)
+                    }
                     return
                 }
                 Diagnostics.log("type-translate: ⌘A selection \(verdict == .all ? "checked" : "not reported by the field") app=\(bid ?? "?")")
