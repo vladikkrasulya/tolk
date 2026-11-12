@@ -310,17 +310,28 @@ struct AutocompleteTab: View {
     }
 
     private var typeTranslateCard: some View {
-        let names = model.config.typeTranslateApps.filter(\.value).keys.sorted().map { SettingsModel.appName($0) }
         return SCard("Перевод при наборе", symbol: "arrow.left.arrow.right",
                      subtitle: "Пишете по-русски — под полем появляется перевод на язык собеседника. Tab заменяет ваш текст переводом, Esc оставляет как есть. Tolk сам ничего не отправляет.") {
             SToggle("Включать самому", isOn: cfg.typeTranslateAuto,
                     hint: "Если последнее сообщение собеседника на другом языке, режим включится в этой программе без вашего участия.",
-                    offHint: "Выключено: режим включается только вручную — горячей клавишей (⌃⌥R, меняется во вкладке «Общие») или из меню Tolk.", divider: false)
-            if !names.isEmpty {
-                SRow("Сейчас включено", hint: names.joined(separator: ", ")) {
-                    Button("Выключить везде") { model.config.typeTranslateApps = [:] }
-                }
+                    offHint: "Выключено: режим работает только в программах из списка ниже. Добавить программу можно здесь, горячей клавишей (⌃⌥R, меняется во вкладке «Общие») или из меню Tolk.", divider: false)
+            // The list itself: before, a program could be added only with the hotkey or from the menu, and a hotkey
+            // that did not reach Tolk (a Windows keyboard with swapped modifiers) left no other way.
+            let on = model.config.typeTranslateApps.filter(\.value).keys.sorted { SettingsModel.appName($0) < SettingsModel.appName($1) }
+            SRow("Где включено", hint: on.isEmpty ? "Пока нигде. Добавьте программу, в которой переписываетесь." : nil) {
+                if !on.isEmpty { Button("Выключить везде") { model.config.typeTranslateApps = [:] } }
             }
+            ForEach(on, id: \.self) { id in
+                HStack {
+                    Text(SettingsModel.appName(id))
+                    Spacer()
+                    Button(role: .destructive) { model.config.typeTranslateApps[id] = nil } label: { Image(systemName: "minus.circle") }
+                        .buttonStyle(.borderless).help("Выключить перевод при наборе в этой программе")
+                }
+                .padding(.vertical, 2)
+            }
+            AppMenu(title: "Добавить программу", isUsed: { model.config.typeTranslateApps[$0] == true }) { model.config.typeTranslateApps[$0] = true }
+                .padding(.top, 6)
         }
     }
 

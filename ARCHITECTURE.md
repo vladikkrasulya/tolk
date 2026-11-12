@@ -701,6 +701,10 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
 
+## v1.0.6 — translation while typing: programs are added in settings
+
+«Перевод при наборе» is switched on per program, and the only ways were the hotkey ⌃⌥R and the menu. On a Windows keyboard the hotkey did not reach Tolk (nothing in the log, registration was fine — most likely Alt and Win are swapped in the system), and the settings card only listed the programs with «Выключить везде». The card now has the list itself: every program with a remove button and «Добавить программу» (the running programs, as in «Тон по программам»). The hint under «Включать самому» says where the list is.
+
 ## v1.0.5 — a glossary per language pair; the glossary checked against the model
 
 - **Sections per pair.** A rules file may hold several glossaries; the pair is read from the header: `## Глоссарий EN → UK`, `## Глоссарий EN → PL` (exactly two two-letter codes in capitals, `RulesStore.headerPair`). `RulesStore.lines` picks the lines for a translation: the section of exactly this pair, else the English–Russian one as before (the model finds the equivalent itself); sections without codes take part always. Two scripts are oriented by script with the old one-way rule; one script (English–Polish) by the header order. Polish terms are matched by stem (`polishStem`): «wydawca» finds «wydawców». The prompt wording for English ↔ Russian is unchanged (`--prompt-digest` identical); a pair with its own section gets «## Glossary: English → how to write it in Ukrainian». The source language is detected from the text when the caller does not pass it.
