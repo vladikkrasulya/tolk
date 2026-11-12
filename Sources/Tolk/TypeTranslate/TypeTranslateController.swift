@@ -307,19 +307,29 @@ final class TypeTranslateController {
             reset(reason: "stale")
             return false
         }
-        guard TypeTranslateField.selectAll(element, utf16Count: s.snapshot.text.utf16.count) else {
-            Diagnostics.log("type-translate: select-all refused app=\(s.snapshot.bundleID ?? "?")")
-            shown = nil
-            show(error: TypeTranslate.selectFailed, field: now)
-            return true
-        }
         let translation = s.translation
         let bid = s.snapshot.bundleID
+        let viaAX = TypeTranslateField.selectAll(element, utf16Count: s.snapshot.text.utf16.count)
         planner.cancel()
         shown = nil
         panel.hide()
-        Diagnostics.log("type-translate: replacing len=\(s.snapshot.text.count) -> \(translation.count) app=\(bid ?? "?")")
         Task { [weak self] in
+            if !viaAX {
+                // Teams and other web-view programs do not take a selection through accessibility. Press ⌘A in the
+                // field (it is the focused one — checked above) and look at what got selected before pasting.
+                Diagnostics.log("type-translate: select-all refused (\(TypeTranslateField.lastSelectFailure)), trying ⌘A app=\(bid ?? "?")")
+                KeySynth.selectAll()
+                await sleepIgnoringCancel(0.15)
+                let sel = TypeTranslateField.selectionNow(element)
+                let verdict = TypeTranslate.keySelection(selectedText: sel.text, range: sel.range, text: s.snapshot.text)
+                if case .refuse(let why) = verdict {
+                    Diagnostics.log("type-translate: ⌘A selected something else (\(why)), not replaced app=\(bid ?? "?")")
+                    self?.show(error: TypeTranslate.selectFailed, field: now)
+                    return
+                }
+                Diagnostics.log("type-translate: ⌘A selection \(verdict == .all ? "checked" : "not reported by the field") app=\(bid ?? "?")")
+            }
+            Diagnostics.log("type-translate: replacing len=\(s.snapshot.text.count) -> \(translation.count) app=\(bid ?? "?")")
             await ClipboardPaste.paste(translation)
             ThreadMemory.shared.record(source: s.snapshot.text, translation: translation, from: s.source, to: s.target, app: bid)
             self?.suppressed = true   // the paste changed the field; wait for the user's next keystroke

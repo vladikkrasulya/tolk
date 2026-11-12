@@ -701,6 +701,10 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
 
+## v1.0.8 — translation while typing is inserted in Teams
+
+In Teams the translation appeared under the field but Tab answered «Поле не даёт выделить текст»: Teams (a web view) refuses `AXSelectedTextRange`, and without a checked selection Tolk does not paste. Now, when the accessibility selection is refused, Tolk presses ⌘A in the field (it is the focused one, checked just before), waits 0.15 s and reads what got selected: the same text (line breaks may differ) or a range over the whole text → paste; a part or more than the field → no paste, the old message; nothing reported → paste, there is nothing to check against (`TypeTranslate.keySelection`). The log now says why the first way was refused. Not checked live: the stand cannot be driven while the user is at the Mac; the user tries it in Teams.
+
 ## v1.0.7 — translation while typing: the messengers found on the Mac, each with a switch
 
 The user's idea after 1.0.6: instead of a menu of running programs, let Tolk find the suitable ones itself. `TypeTranslateApps.known` is a list of messengers and mail programs (Telegram, Slack, Teams, WhatsApp, Discord, Messages, Signal, Viber, Messenger, Skype, Zoom, Mail, Outlook, Spark); the card shows those installed, each with a switch, plus the programs switched on some other way and «Другая программа» for the rest. The hint says plainly that only Telegram was checked.

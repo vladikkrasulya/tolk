@@ -201,6 +201,30 @@ public enum TypeTranslate {
         location == 0 && length == textUTF16 && textUTF16 > 0
     }
 
+    /// What the field reports after ⌘A was pressed in it (the fallback for fields that refuse a selection set
+    /// through accessibility — Teams and other programs built on a web view).
+    public enum KeySelection: Equatable, Sendable {
+        case all                 // the whole text is selected: paste
+        case unknown             // the field reports no selection at all: paste, there is nothing to check against
+        case refuse(String)      // something else is selected: do not paste
+    }
+
+    /// `selectedText` / `range`: what accessibility returned after ⌘A, nil = not readable.
+    /// Web views count line breaks their own way, so the length may differ by the number of line breaks.
+    public static func keySelection(selectedText: String?, range: (location: Int, length: Int)?, text: String) -> KeySelection {
+        func squeeze(_ s: String) -> String { s.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).joined(separator: " ") }
+        if let selectedText, !selectedText.isEmpty {
+            let sel = squeeze(selectedText), all = squeeze(text)
+            if sel == all { return .all }
+            return .refuse(sel.count > all.count ? "selected-more" : "selected-part")
+        }
+        if let range, range.length > 0 {
+            let n = text.utf16.count, slack = text.filter(\.isNewline).count * 2 + 2
+            return range.location == 0 && abs(range.length - n) <= slack ? .all : .refuse("range \(range.location)+\(range.length) of \(n)")
+        }
+        return .unknown
+    }
+
     // MARK: Keys
 
     public enum KeyAction: Equatable, Sendable {
@@ -355,6 +379,14 @@ extension SelfTest {
         check(T.selectionCoversAll(location: 0, length: 12, textUTF16: 12), "type-translate: full selection accepted")
         check(!T.selectionCoversAll(location: 0, length: 11, textUTF16: 12) && !T.selectionCoversAll(location: 1, length: 11, textUTF16: 12), "type-translate: partial selection refused")
         check(!T.selectionCoversAll(location: 0, length: 0, textUTF16: 0), "type-translate: empty field is not a selection")
+        check(T.keySelection(selectedText: "Привет,\nкак дела?", range: nil, text: "Привет,\n\nкак дела?") == .all, "type-translate ⌘A: the same text with other line breaks = all selected")
+        check(T.keySelection(selectedText: "как дела?", range: nil, text: "Привет, как дела?") == .refuse("selected-part"), "type-translate ⌘A: a part selected → no paste")
+        check(T.keySelection(selectedText: "Чат\nПривет, как дела?", range: nil, text: "Привет, как дела?") == .refuse("selected-more"), "type-translate ⌘A: more than the field selected → no paste")
+        check(T.keySelection(selectedText: nil, range: (0, 17), text: "Привет, как дела?") == .all && T.keySelection(selectedText: "", range: (0, 16), text: "Привет,\nкак дела") == .all,
+              "type-translate ⌘A: a range over the whole text, a line break counted differently")
+        check(T.keySelection(selectedText: nil, range: (5, 3), text: "Привет, как дела?") == .refuse("range 5+3 of 17"), "type-translate ⌘A: another range → no paste")
+        check(T.keySelection(selectedText: nil, range: nil, text: "x") == .unknown && T.keySelection(selectedText: "", range: (0, 0), text: "x") == .unknown,
+              "type-translate ⌘A: nothing reported → unknown")
 
         // Keys
         func k(_ code: Int, cmd: Bool = false, ctrl: Bool = false, opt: Bool = false, printable: Bool = false, visible: Bool = true) -> T.KeyAction {

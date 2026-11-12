@@ -111,13 +111,31 @@ struct TypeTranslateField {
     static func selectAll(_ el: AXUIElement, utf16Count: Int) -> Bool {
         AXUIElementSetMessagingTimeout(el, 0.1)
         var range = CFRange(location: 0, length: utf16Count)
-        guard let value = AXValueCreate(.cfRange, &range),
-              AXUIElementSetAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, value) == .success else { return false }
+        guard let value = AXValueCreate(.cfRange, &range) else { return false }
+        let set = AXUIElementSetAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, value)
+        guard set == .success else { lastSelectFailure = "set=\(set.rawValue)"; return false }
+        guard let got = selectedRange(el) else { lastSelectFailure = "set ok, range unreadable"; return false }
+        lastSelectFailure = "set ok, got \(got.location)+\(got.length) of \(utf16Count)"
+        return TypeTranslate.selectionCoversAll(location: got.location, length: got.length, textUTF16: utf16Count)
+    }
+
+    /// Why the last `selectAll` said no — for the log.
+    nonisolated(unsafe) static var lastSelectFailure = ""
+
+    static func selectedRange(_ el: AXUIElement) -> (location: Int, length: Int)? {
         var back: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &back) == .success,
-              let back, CFGetTypeID(back) == AXValueGetTypeID() else { return false }
+              let back, CFGetTypeID(back) == AXValueGetTypeID() else { return nil }
         var got = CFRange()
-        guard AXValueGetValue(back as! AXValue, .cfRange, &got) else { return false }
-        return TypeTranslate.selectionCoversAll(location: got.location, length: got.length, textUTF16: utf16Count)
+        guard AXValueGetValue(back as! AXValue, .cfRange, &got) else { return nil }
+        return (got.location, got.length)
+    }
+
+    /// What is selected in the field right now (after ⌘A): the selected text and the range, whichever is readable.
+    static func selectionNow(_ el: AXUIElement) -> (text: String?, range: (location: Int, length: Int)?) {
+        AXUIElementSetMessagingTimeout(el, 0.1)
+        var v: CFTypeRef?
+        let text = AXUIElementCopyAttributeValue(el, kAXSelectedTextAttribute as CFString, &v) == .success ? v as? String : nil
+        return (text, selectedRange(el))
     }
 }

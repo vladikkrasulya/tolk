@@ -22,6 +22,7 @@ enum KeySynth {
 
     static func copy() { pressCommand(kVK_ANSI_C) }
     static func paste() { pressCommand(kVK_ANSI_V) }
+    static func selectAll() { pressCommand(kVK_ANSI_A) }
 
     /// The hotkey fires while the user still holds ⌃⌥; some apps read the live modifier state,
     /// so wait (≤ timeout) until ⌃⌥⇧⌘ are released before sending ⌘C.
