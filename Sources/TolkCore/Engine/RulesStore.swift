@@ -42,9 +42,16 @@ public final class RulesStore: @unchecked Sendable {
     private var parsedOnce = false // a missing file (built-in rules) is parsed once, not on every call
     private var parsed = Parsed()
 
+    /// The two languages named in a glossary header: «## Глоссарий EN → UK» = (english, ukrainian).
+    struct LanguagePair: Equatable {
+        let left: Language, right: Language
+        func isFor(_ a: Language, _ b: Language) -> Bool { (left == a && right == b) || (left == b && right == a) }
+        var sameScript: Bool { RulesStore.isCyrillic(left) == RulesStore.isCyrillic(right) }
+    }
     struct GlossaryLine {
         let text: String       // the original "- a → b; c → d" line
         let patterns: [NSRegularExpression]
+        var pair: LanguagePair? = nil   // nil = the header names no pair (old files): the line is for every language
     }
     struct Parsed {
         var style = ""
@@ -63,20 +70,25 @@ public final class RulesStore: @unchecked Sendable {
     /// Rules block for the system prompt: style always, glossary only lines matching `text`.
     /// With `target`, every glossary pair is turned to point INTO the target language
     /// (the file mixes «en → ru» and «ru → en»; Gemma copied the wrong side otherwise).
-    public func promptBlock(for text: String, target: Language? = nil) -> String {
+    /// `source` is detected from the text when not given; it only matters for files with a glossary per language pair.
+    public func promptBlock(for text: String, target: Language? = nil, source: Language? = nil) -> String {
         let p = current()
         var parts: [String] = []
         if !p.style.isEmpty { parts.append(p.style) }
         let range = NSRange(text.startIndex..., in: text)
-        let hits = p.glossary.filter { line in
+        let source = target == nil ? nil : (source ?? LanguageDetector.detect(text))
+        let (pool, own) = Self.lines(p, source: source, target: target)
+        let hits = pool.filter { line in
             line.patterns.contains { $0.firstMatch(in: text, range: range) != nil }
         }
         if !hits.isEmpty {
             if let target {
-                let toCyrillic = target == .russian || target == .ukrainian || target == .bulgarian || target == .kazakh
-                let header = toCyrillic ? "## Glossary: English → how to write it in the translation"
-                                        : "## Glossary: Russian → how to write it in English"
-                let lines = hits.compactMap { Self.oriented($0.text, toCyrillic: toCyrillic) }
+                let toCyrillic = Self.isCyrillic(target)
+                // The wording for the old single glossary is kept as it was: the model was tuned with it.
+                let header = own ? "## Glossary: \((source ?? .english).englishName) → how to write it in \(target.englishName)"
+                    : toCyrillic ? "## Glossary: English → how to write it in the translation"
+                                 : "## Glossary: Russian → how to write it in English"
+                let lines = hits.compactMap { Self.oriented($0, target: target) }
                 if !lines.isEmpty { parts.append(([header] + lines).joined(separator: "\n")) }
             } else {
                 parts.append(([p.glossaryHeader.isEmpty ? "## Glossary" : p.glossaryHeader] + hits.map(\.text))
@@ -88,19 +100,20 @@ public final class RulesStore: @unchecked Sendable {
 
     /// Glossary pairs that fire for `text` (the same lines `promptBlock` sends to the model), oriented INTO `target`.
     /// `source` is the form found in `text`, `target` the way the glossary wants it written (variants joined by « / »).
-    public func glossaryHits(in text: String, target: Language) -> [GlossaryHit] {
+    public func glossaryHits(in text: String, target: Language, source: Language? = nil) -> [GlossaryHit] {
         let p = current()
-        let toCyrillic = target == .russian || target == .ukrainian || target == .bulgarian || target == .kazakh
+        let source = source ?? LanguageDetector.detect(text)
         let range = NSRange(text.startIndex..., in: text)
         var out: [GlossaryHit] = []
-        for line in p.glossary where line.patterns.contains(where: { $0.firstMatch(in: text, range: range) != nil }) {
-            guard var body = Self.oriented(line.text, toCyrillic: toCyrillic) else { continue }
+        for line in Self.lines(p, source: source, target: target).pool where line.patterns.contains(where: { $0.firstMatch(in: text, range: range) != nil }) {
+            guard var body = Self.oriented(line, target: target) else { continue }
             if body.hasPrefix("- ") { body.removeFirst(2) }
+            let polish = line.pair != nil && source == .polish
             for pair in body.components(separatedBy: ";") {
                 let sides = pair.components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }
                 guard sides.count == 2 else { continue }
                 let from = Self.variants(sides[0]), to = Self.variants(sides[1])
-                guard let hit = from.first(where: { v in Self.pattern(for: v).map { $0.firstMatch(in: text, range: range) != nil } ?? false }),
+                guard let hit = from.first(where: { v in Self.pattern(for: v, polish: polish).map { $0.firstMatch(in: text, range: range) != nil } ?? false }),
                       !to.isEmpty else { continue }
                 let h = GlossaryHit(source: hit, targets: to)
                 if !out.contains(h) { out.append(h) }
@@ -111,24 +124,80 @@ public final class RulesStore: @unchecked Sendable {
 
     /// For the fallback translators: every glossary pair found in `text`, with the ONE rendering to use.
     /// «cap / daily cap → капа / дневная капа» pairs the variants by position; otherwise the first rendering wins.
-    public func glossaryPairs(in text: String, target: Language) -> [(from: String, to: String)] {
+    public func glossaryPairs(in text: String, source: Language, target: Language) -> [(from: String, to: String)] {
         let p = current()
-        let toCyrillic = target == .russian || target == .ukrainian || target == .bulgarian || target == .kazakh
         let range = NSRange(text.startIndex..., in: text)
         var out: [(from: String, to: String)] = []
-        for line in p.glossary where line.patterns.contains(where: { $0.firstMatch(in: text, range: range) != nil }) {
-            guard var body = Self.oriented(line.text, toCyrillic: toCyrillic) else { continue }
+        let polish = source == .polish
+        for line in Self.lines(p, source: source, target: target).pool where line.patterns.contains(where: { $0.firstMatch(in: text, range: range) != nil }) {
+            guard var body = Self.oriented(line, target: target) else { continue }
             if body.hasPrefix("- ") { body.removeFirst(2) }
             for pair in body.components(separatedBy: ";") {
                 let sides = pair.components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }
                 guard sides.count == 2 else { continue }
                 let from = Self.variants(sides[0]), to = Self.variants(sides[1])
                 guard let first = to.first else { continue }
-                for (i, v) in from.enumerated() where Self.pattern(for: v).map({ $0.firstMatch(in: text, range: range) != nil }) ?? false {
+                for (i, v) in from.enumerated() where Self.pattern(for: v, polish: polish && line.pair != nil).map({ $0.firstMatch(in: text, range: range) != nil }) ?? false {
                     let rendering = from.count == to.count ? to[i] : first
                     if !out.contains(where: { $0.from == v }) { out.append((v, rendering)) }
                 }
             }
+        }
+        return out
+    }
+
+    /// Is there a glossary written for exactly this pair of languages?
+    public func hasGlossary(source: Language, target: Language) -> Bool {
+        Self.lines(current(), source: source, target: target).own
+    }
+
+    // MARK: - A glossary per language pair
+
+    static func isCyrillic(_ l: Language) -> Bool { l == .russian || l == .ukrainian || l == .bulgarian || l == .kazakh }
+
+    /// Which glossary lines take part in a translation `source → target`.
+    /// A section whose header names this pair («## Глоссарий EN → UK») wins: `own` = true. Without one the English–Russian
+    /// glossary is used, as before sections per language existed (the model is told to find the equivalent itself).
+    /// Lines of sections without a pair in the header always take part. No target = everything.
+    static func lines(_ p: Parsed, source: Language?, target: Language?) -> (pool: [GlossaryLine], own: Bool) {
+        guard let target, p.glossary.contains(where: { $0.pair != nil }) else { return (p.glossary, false) }
+        let source = source ?? .english
+        let exact = p.glossary.filter { $0.pair?.isFor(source, target) == true }
+        let isBase = (source == .english && target == .russian) || (source == .russian && target == .english)
+        if !exact.isEmpty { return (p.glossary.filter { $0.pair == nil || $0.pair!.isFor(source, target) }, !isBase) }
+        return (p.glossary.filter { $0.pair == nil || $0.pair!.isFor(.english, .russian) }, false)
+    }
+
+    /// A line turned to point into `target`. Two scripts (English–Russian, Polish–Ukrainian): by the script, with the
+    /// one-way rule of `oriented(_:toCyrillic:)`. One script (English–Polish, Russian–Ukrainian): by the header order.
+    static func oriented(_ line: GlossaryLine, target: Language) -> String? {
+        guard let pair = line.pair, pair.sameScript else { return oriented(line.text, toCyrillic: isCyrillic(target)) }
+        guard target == pair.left else { return line.text.hasPrefix("- ") ? line.text : "- " + String(line.text.drop(while: { $0 == "-" || $0 == "*" || $0 == " " })) }
+        var body = line.text.trimmingCharacters(in: .whitespaces)
+        if body.hasPrefix("- ") || body.hasPrefix("* ") { body.removeFirst(2) }
+        let pairs = body.components(separatedBy: ";").map { pr -> String in
+            let sides = pr.components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }
+            return sides.count == 2 ? "\(sides[1]) → \(sides[0])" : pr.trimmingCharacters(in: .whitespaces)
+        }
+        return "- " + pairs.joined(separator: "; ")
+    }
+
+    /// «## Глоссарий EN → UK» → (english, ukrainian). Exactly two two-letter codes in capitals; anything else
+    /// («EN → RU/UK», no codes) = no pair.
+    static func headerPair(_ header: String) -> LanguagePair? {
+        let codes = header.components(separatedBy: CharacterSet.letters.inverted)
+            .filter { $0.count == 2 && $0 == $0.uppercased() }
+            .compactMap { $0 == "UA" ? Language.ukrainian : Language(rawValue: $0.lowercased()) }
+        return codes.count == 2 && codes[0] != codes[1] ? LanguagePair(left: codes[0], right: codes[1]) : nil
+    }
+
+    /// Terms of a line with the side of the arrow they stand on (true = left).
+    static func sidedTerms(in line: String) -> [(term: String, left: Bool)] {
+        let body = String(line.drop(while: { $0 == "-" || $0 == "*" || $0 == " " }))
+        var out: [(String, Bool)] = []
+        for pr in body.components(separatedBy: ";") {
+            let sides = pr.components(separatedBy: "→")
+            for (i, side) in sides.prefix(2).enumerated() { out += variants(side).map { ($0, i == 0) } }
         }
         return out
     }
@@ -234,16 +303,26 @@ public final class RulesStore: @unchecked Sendable {
         var p = Parsed()
         var style: [String] = []
         var inGlossary = false
+        var pair: LanguagePair?
         for line in text.components(separatedBy: "\n") {
             if line.hasPrefix("#") {
                 inGlossary = isGlossaryHeader(line)
-                if inGlossary { p.glossaryHeader = line; continue }
+                if inGlossary {
+                    if p.glossaryHeader.isEmpty { p.glossaryHeader = line }
+                    pair = headerPair(line)
+                    continue
+                }
             }
             if inGlossary {
                 let t = line.trimmingCharacters(in: .whitespaces)
                 guard t.hasPrefix("-") || t.hasPrefix("*") else { continue }
-                let pats = terms(in: t).compactMap(pattern(for:))
-                p.glossary.append(GlossaryLine(text: t, patterns: pats))
+                let pats: [NSRegularExpression]
+                if let pair, pair.left == .polish || pair.right == .polish {
+                    pats = sidedTerms(in: t).compactMap { pattern(for: $0.term, polish: ($0.left ? pair.left : pair.right) == .polish) }
+                } else {
+                    pats = terms(in: t).compactMap { pattern(for: $0) }
+                }
+                p.glossary.append(GlossaryLine(text: t, patterns: pats, pair: pair))
             } else {
                 style.append(line)
             }
@@ -271,7 +350,9 @@ public final class RulesStore: @unchecked Sendable {
     /// does not fire when a particle follows that changes the meaning ("scale back").
     /// Cyrillic terms: matched by stem; a trailing vowel of a 4+ letter word is dropped and an ending of up to
     /// 3 letters is allowed, so «капа» matches «капу/капы/капой» but not «капитал».
-    static func pattern(for term: String) -> NSRegularExpression? {
+    /// `polish`: the term is a Polish word — matched by its stem like a Cyrillic one («wydawca» finds «wydawcy»,
+    /// «wydawców»); the English endings would miss every inflected form.
+    static func pattern(for term: String, polish: Bool = false) -> NSRegularExpression? {
         let words = term.lowercased().split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init).filter { !$0.isEmpty }
         guard !words.isEmpty else { return nil }
         let start = "(?<![\\p{L}\\p{N}])"
@@ -283,6 +364,8 @@ public final class RulesStore: @unchecked Sendable {
             if isCyr(w) {
                 let stem = cyrillicStem(w)
                 parts.append(NSRegularExpression.escapedPattern(for: stem) + "\\p{L}{0,3}")
+            } else if polish {
+                parts.append(NSRegularExpression.escapedPattern(for: polishStem(w)) + (w.count >= 4 ? "\\p{L}{0,4}" : "\\p{L}{0,2}"))
             } else if last {
                 parts.append(latinForms(w))
             } else {
@@ -296,6 +379,12 @@ public final class RulesStore: @unchecked Sendable {
         }
         body = start + body + tail
         return try? NSRegularExpression(pattern: body, options: [.caseInsensitive])
+    }
+
+    static func polishStem(_ word: String) -> String {
+        let vowels: Set<Character> = ["a", "e", "i", "o", "u", "y", "ą", "ę", "ó"]
+        guard word.count >= 5, let last = word.last, vowels.contains(last) else { return word }
+        return String(word.dropLast())
     }
 
     static func cyrillicStem(_ word: String) -> String {

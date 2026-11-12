@@ -20,14 +20,15 @@ public enum FallbackGlossary {
         let term: String        // the glossary rendering, as written in the rules file
     }
 
-    /// Glossary terms go only into Russian and English: the glossary is written for this pair, and a Russian term
-    /// inside a Ukrainian or Polish sentence is a mistake the fallback translator cannot repair.
-    static func applies(to target: Language) -> Bool { target == .russian || target == .english }
-
-    static func plan(_ text: String, pairs: [(from: String, to: String)], target: Language) -> [Sub] {
-        guard applies(to: target) else { return [] }
+    /// Without a glossary of its own for the pair, terms go only into Russian and English: the common glossary is
+    /// written for these two, and a Russian term inside a Ukrainian or Polish sentence is a mistake the fallback
+    /// translator cannot repair. `ownGlossary`: the rules file has a section for exactly this pair.
+    static func plan(_ text: String, pairs: [(from: String, to: String)], target: Language,
+                     source: Language? = nil, ownGlossary: Bool = false) -> [Sub] {
+        guard ownGlossary || target == .russian || target == .english else { return [] }
         let ns = text as NSString
-        let wantCyrillic = target == .russian
+        let wantCyrillic = RulesStore.isCyrillic(target)
+        let fromCyrillic = source.map(RulesStore.isCyrillic) ?? !wantCyrillic
         var subs: [Sub] = []
         // Longer English terms first («daily cap» before «cap»). Russian forms the other way round: «паблишеру» fits
         // both «паблишер → publisher» and «паблишеры → pubs», and the dictionary form is the shorter one.
@@ -40,7 +41,8 @@ public enum FallbackGlossary {
             // «Добрый день! → Hello,» is a hint about a whole phrase with its punctuation; put in as a word it ate the «!».
             guard isPlainTerm(p.from), isPlainTerm(p.to),
                   p.from.lowercased() != p.to.lowercased(), RulesStore.isMostlyCyrillic(p.to) == wantCyrillic,
-                  RulesStore.isMostlyCyrillic(p.from) != wantCyrillic, let re = RulesStore.pattern(for: p.from) else { continue }
+                  RulesStore.isMostlyCyrillic(p.from) == fromCyrillic,
+                  let re = RulesStore.pattern(for: p.from, polish: source == .polish && ownGlossary) else { continue }
             for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
                 let found = ns.substring(with: m.range)
                 guard !subs.contains(where: { NSIntersectionRange($0.range, m.range).length > 0 }),
@@ -123,6 +125,28 @@ public enum FallbackGlossary {
         return ns as String
     }
 
+    /// «Дневняя капа»: the translator left the noun of a two-word term as the glossary writes it but bent the word
+    /// before it into a form that does not exist. With the last word exactly as in the glossary the words before it
+    /// must be as in the glossary too.
+    static func fixAgreement(_ output: String, terms: [String]) -> String {
+        let ns = NSMutableString(string: output)
+        for term in Set(terms) {
+            let words = term.split(separator: " ").map(String.init)
+            guard words.count >= 2, let last = words.last, RulesStore.isMostlyCyrillic(term) else { continue }
+            let head = words.dropLast().map { NSRegularExpression.escapedPattern(for: stem($0)) + "\\p{L}*" }.joined(separator: "\\s+")
+            guard let re = try? NSRegularExpression(pattern: "(?<![\\p{L}])(" + head + ")\\s+" + NSRegularExpression.escapedPattern(for: last) + "(?![\\p{L}])",
+                                                    options: [.caseInsensitive]) else { continue }
+            for m in re.matches(in: ns as String, range: NSRange(location: 0, length: ns.length)).reversed() {
+                let found = ns.substring(with: m.range(at: 1))
+                var want = words.dropLast().joined(separator: " ")
+                guard found.lowercased() != want.lowercased() else { continue }
+                if found.first?.isUppercase == true { want = capitalized(want) }
+                ns.replaceCharacters(in: m.range(at: 1), with: want)
+            }
+        }
+        return ns as String
+    }
+
     static func startsSentence(_ ns: NSString, at location: Int) -> Bool {
         var i = location - 1
         while i >= 0 {
@@ -144,7 +168,8 @@ public enum FallbackGlossary {
     public static func stream(_ r: ResolvedRequest, provider: TranslationProvider, rules: RulesStore,
                               enabled: Bool) -> AsyncThrowingStream<String, Error> {
         guard enabled, r.mode == .translate else { return provider.translate(r) }
-        let all = plan(r.text, pairs: rules.glossaryPairs(in: r.text, target: r.target), target: r.target)
+        let all = plan(r.text, pairs: rules.glossaryPairs(in: r.text, source: r.source, target: r.target), target: r.target,
+                       source: r.source, ownGlossary: rules.hasGlossary(source: r.source, target: r.target))
         guard !all.isEmpty else { return provider.translate(r) }
         return AsyncThrowingStream { c in
             let task = Task {
@@ -157,7 +182,7 @@ public enum FallbackGlossary {
                         let lost = Set(active.filter { !kept(out, term: $0.term) }.map(\.term))
                         if lost.isEmpty {
                             EngineLog.write("fallback glossary: \(provider.name) terms \(active.count) of \(all.count)")
-                            c.yield(fixCase(out, terms: active.map(\.term))); c.finish(); return
+                            c.yield(fixAgreement(fixCase(out, terms: active.map(\.term)), terms: active.map(\.term))); c.finish(); return
                         }
                         active.removeAll { lost.contains($0.term) }
                     }

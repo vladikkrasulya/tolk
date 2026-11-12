@@ -701,6 +701,13 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
 
+## v1.0.5 — a glossary per language pair; the glossary checked against the model
+
+- **Sections per pair.** A rules file may hold several glossaries; the pair is read from the header: `## Глоссарий EN → UK`, `## Глоссарий EN → PL` (exactly two two-letter codes in capitals, `RulesStore.headerPair`). `RulesStore.lines` picks the lines for a translation: the section of exactly this pair, else the English–Russian one as before (the model finds the equivalent itself); sections without codes take part always. Two scripts are oriented by script with the old one-way rule; one script (English–Polish) by the header order. Polish terms are matched by stem (`polishStem`): «wydawca» finds «wydawców». The prompt wording for English ↔ Russian is unchanged (`--prompt-digest` identical); a pair with its own section gets «## Glossary: English → how to write it in Ukrainian». The source language is detected from the text when the caller does not pass it.
+- **The fallback translator** takes terms for any pair that has its own section (before: Russian and English only). «Дневняя капа» — a bent word before a noun left as in the glossary — is put right (`fixAgreement`).
+- **Audit of the user's glossary** (work profile, 81 pairs): a sentence with each term was generated and translated through the engine. One real miss («VAST wrappers» left in English), the other 16 flags were false (the generated sentence used the word in another sense, or the stem check missed a correct form). Fifty common adtech terms outside the glossary: the model is right on its own except «frequency cap» → «капа» and several inconsistent ones (supply, bid request, popunder, direct deal); eight pairs added on the user's choice. Garbage lines from earlier experiments removed, Ukrainian and Polish sections added as drafts.
+- Not done: verb forms for the fallback translator («capped» is still left to the translator) — a Russian verb cannot be inflected by rule. The glossary page shows all sections as one list; a new term goes to the first section.
+
 ## v1.0.4 — Apple as the fallback measured; a greeting is no longer put in as a term
 
 With the language packs downloaded Apple's translation works (0.12–0.46 s per phrase, nothing leaves the Mac). Eleven work phrases, Apple against Google:

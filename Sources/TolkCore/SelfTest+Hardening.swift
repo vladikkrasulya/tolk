@@ -73,6 +73,64 @@ extension SelfTest {
               "fallback glossary: stray capital removed, sentence start capitalised")
         check(F.plan("Добрый день! По зоне нашли фрод.", pairs: [("Добрый день!", "Hello"), ("фрод", "fraud")], target: .english).map(\.insert) == ["fraud"],
               "fallback glossary: a phrase with punctuation is not put in as a word")
+        check(F.fixAgreement("Привет! Дневняя капа достигнута, а дневной капы мало.", terms: ["дневная капа"]) == "Привет! Дневная капа достигнута, а дневной капы мало.",
+              "fallback glossary: a bent word before an unchanged noun is put right, a real case form is left")
+        glossarySections(check)
         check(!TolkConfig().fallbackGlossary, "fallback glossary: off by default")
+    }
+
+    /// A glossary per language pair: «## Глоссарий EN → UK», «## Глоссарий EN → PL» next to the old English–Russian one.
+    static func glossarySections(_ check: Check) {
+        let dir = NSTemporaryDirectory() + "tolk-selftest-sections-\(getpid())"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let path = dir + "/rules.md"
+        let file = """
+        ## Стиль
+        - Работа.
+
+        ## Глоссарий EN → RU (обратно — так же)
+        - cap / daily cap → капа / дневная капа
+        - publisher → паблишер
+        - разжать → raise
+
+        ## Глоссарий EN → UK
+        - cap / daily cap → капа / денна капа
+        - publisher → паблішер
+
+        ## Глоссарий EN → PL
+        - publisher → wydawca
+        - daily cap → limit dzienny
+        """
+        try? file.write(toFile: path, atomically: true, encoding: .utf8)
+        let r = RulesStore(path: path)
+        typealias P = RulesStore.LanguagePair
+        check(RulesStore.headerPair("## Глоссарий EN → RU (обратно — так же)") == P(left: .english, right: .russian)
+              && RulesStore.headerPair("## Глоссарий EN → UA") == P(left: .english, right: .ukrainian)
+              && RulesStore.headerPair("## Глоссарий бытовых слов (EN → RU/UK)") == nil && RulesStore.headerPair("## Глоссарий") == nil,
+              "glossary sections: the pair is read from the header, three codes or none = for every language")
+        let en = "The daily cap is reached for this publisher."
+        let ru = r.promptBlock(for: en, target: .russian)
+        check(ru.contains("дневная капа") && !ru.contains("денна") && !ru.contains("wydawca")
+              && ru.contains("## Glossary: English → how to write it in the translation"), "glossary sections: English → Russian reads its own section, old wording kept")
+        let uk = r.promptBlock(for: en, target: .ukrainian)
+        check(uk.contains("денна капа") && uk.contains("паблішер") && !uk.contains("дневная") && uk.contains("how to write it in Ukrainian"),
+              "glossary sections: English → Ukrainian reads the Ukrainian section — \(uk)")
+        let pl = r.promptBlock(for: en, target: .polish)
+        check(pl.contains("publisher → wydawca") && pl.contains("limit dzienny") && !pl.contains("капа"), "glossary sections: English → Polish")
+        let back = r.promptBlock(for: "Limit dzienny został osiągnięty u tych wydawców.", target: .english, source: .polish)
+        check(back.contains("wydawca → publisher") && back.contains("limit dzienny → daily cap"), "glossary sections: Polish → English turns the pairs round and finds inflected Polish words — \(back)")
+        let de = r.promptBlock(for: en, target: .german)
+        check(de.contains("капа") && !de.contains("wydawca") && !de.contains("денна"), "glossary sections: a pair without its own section falls back to the English–Russian glossary")
+        check(r.hasGlossary(source: .english, target: .ukrainian) && r.hasGlossary(source: .polish, target: .english)
+              && !r.hasGlossary(source: .english, target: .russian) && !r.hasGlossary(source: .russian, target: .ukrainian), "glossary sections: which pairs have their own glossary")
+        let pairs = r.glossaryPairs(in: en, source: .english, target: .ukrainian)
+        let subs = FallbackGlossary.plan(en, pairs: pairs, target: .ukrainian, source: .english, ownGlossary: true)
+        check(subs.map(\.insert) == ["денна капа", "паблішер"], "glossary sections: the fallback translator gets Ukrainian terms from the Ukrainian section — \(subs.map(\.insert))")
+        check(FallbackGlossary.plan(en, pairs: r.glossaryPairs(in: en, source: .english, target: .german), target: .german, source: .english, ownGlossary: false).isEmpty,
+              "glossary sections: no terms for the fallback translator without a section for the pair")
+        check(r.glossaryHits(in: "Надо разжать капу", target: .english).contains { $0.source == "разжать" }, "glossary sections: one-way Russian → English hints still work")
+        let old = RulesStore(path: dir + "/none.md", builtIn: "## Глоссарий\n- cap → капа\n")
+        check(old.promptBlock(for: "the cap", target: .ukrainian).contains("капа"), "glossary sections: a file without pairs in headers works as before")
     }
 }

@@ -4,7 +4,7 @@ English · [Русский](README.ru.md)
 
 Tolk is a local translator and system-wide autocomplete for macOS. Translation is done by your own language model (Ollama on this Mac or on a machine in your home network). Typing suggestions come from a small model that runs on the Mac itself. Text can leave your computer only through the fallback translator (Google), which you can replace with the built-in macOS translation or switch off.
 
-Version 1.0.4. The interface is in Russian. This is a personal project built around one person's habits, but the code is open (MIT): take it, build it, change it.
+Version 1.0.5. The interface is in Russian. This is a personal project built around one person's habits, but the code is open (MIT): take it, build it, change it.
 
 ## What it does
 
@@ -42,7 +42,7 @@ Version 1.0.4. The interface is in Russian. This is a personal project built aro
 
 ## Install
 
-Download `Tolk-1.0.4.dmg` from the [Releases](../../releases) page, open it and drag Tolk to Applications. The build is signed with a local certificate, not notarized by Apple: on first launch right-click the app and choose Open.
+Download `Tolk-1.0.5.dmg` from the [Releases](../../releases) page, open it and drag Tolk to Applications. The build is signed with a local certificate, not notarized by Apple: on first launch right-click the app and choose Open.
 
 Or build from source:
 
