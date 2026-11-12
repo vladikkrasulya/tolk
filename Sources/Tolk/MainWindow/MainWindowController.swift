@@ -256,7 +256,6 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         table.delegate = self
         table.focusRingType = .none
         table.setAccessibilityLabel("Разделы")
-        applyTheme()
         NotificationCenter.default.addObserver(forName: Theme.changed, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.applyTheme() }
         }
@@ -276,7 +275,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
             scroll.topAnchor.constraint(equalTo: box.topAnchor), scroll.bottomAnchor.constraint(equalTo: box.bottomAnchor),
         ])
         view = box
-        table.reloadData()
+        applyTheme()   // after `view` is set: it must never ask for the view while it is being built
     }
 
     override func viewDidAppear() {
@@ -288,7 +287,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     /// table; its tint is the way to give it the theme's sidebar colour (none in «Классика»).
     private func tintGlass() {
         guard #available(macOS 26.0, *) else { return }
-        var v = view.superview
+        var v = viewIfLoaded?.superview
         while let cur = v, !(cur is NSSplitView) {
             if let glass = cur as? NSGlassEffectView { glass.tintColor = Theme.isCustom ? Theme.side : nil; return }
             v = cur.superview

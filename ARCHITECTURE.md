@@ -701,6 +701,10 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
 
+## v1.1.1 — the main window opens again
+
+1.1.0 hung on opening the main window: `SidebarViewController.loadView` called `applyTheme` before `view` was set, and `tintGlass` asked for `view`, which ran `loadView` again — endless recursion at 100 % CPU. `applyTheme` now runs after `view` is set and `tintGlass` reads `viewIfLoaded`. The renders had not caught it (taken before `tintGlass`), the smoke test did not build the main window: it now builds and lays it out in every palette and switches the palette under it.
+
 ## v1.1.0 — colour themes
 
 Five palettes chosen by the user from a canvas of mock-ups (Jade, Milk and blue, Coffee and azure, Butter and tomato, Rose and chocolate), each with a light and a dark variant; the variant follows the system appearance. «Классика» keeps the macOS colours and the user's system accent — the look before themes. Default: Jade. Setting `theme` in `tolk.json`, picker in Настройки → Общие → Оформление.

@@ -27,6 +27,20 @@ enum SmokeTest {
         defer { try? FileManager.default.removeItem(atPath: tmp) }
         let store = HistoryStore(path: tmp + "/history.jsonl", defaults: UserDefaults(suiteName: "tolk-smoke") ?? .standard)
 
+        step("main window: built and laid out in every theme (1.1.0 hung here on launch)") {
+            let saved = Theme.palette
+            for palette in ThemePalette.allCases {
+                Theme.palette = palette
+                let m = MainWindowController(translate: TranslatePageViewController(engine: e[0]), image: ImageTranslateViewController(engine: e[0]),
+                                             documents: DocumentsViewController(engine: e[0]), history: HistoryViewController(store: store),
+                                             glossary: GlossaryViewController(rulesPath: tmp + "/rules.md"),
+                                             settings: SettingsViewController(config: TolkConfig()))
+                m.window?.contentView?.layoutSubtreeIfNeeded()
+                Theme.apply(palette == .classic ? .jade : .classic)
+                m.window?.close()
+            }
+            Theme.palette = saved
+        }
         step("translate page: setters before load") {
             let p = TranslatePageViewController(engine: e[0])
             p.engine = e[1]; p.engine = e[2]
