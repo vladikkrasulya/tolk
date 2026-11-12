@@ -37,7 +37,7 @@ private final class FollowScrollView: NSScrollView {
     }
     func updateColors() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.borderColor = NSColor.separatorColor.cgColor
+            layer?.borderColor = Theme.line.cgColor
         }
     }
     override func scrollWheel(with event: NSEvent) {
@@ -48,7 +48,7 @@ private final class FollowScrollView: NSScrollView {
 
 /// Translucent background that follows light / dark mode (drop cover).
 private final class TintedView: NSView {
-    var color: NSColor = .windowBackgroundColor.withAlphaComponent(0.85)
+    var color: NSColor = Theme.page.withAlphaComponent(0.85)
     override var wantsUpdateLayer: Bool { true }
     override func updateLayer() { layer?.backgroundColor = color.cgColor }
 }
@@ -58,10 +58,10 @@ private final class ParagraphRowView: NSTableRowView {
     var isCurrent = false { didSet { if oldValue != isCurrent { needsDisplay = true } } }
     override func drawBackground(in dirtyRect: NSRect) {
         super.drawBackground(in: dirtyRect)
-        NSColor.separatorColor.withAlphaComponent(0.5).setFill()
+        Theme.line.withAlphaComponent(0.5).setFill()
         NSRect(x: 12, y: bounds.maxY - 1, width: bounds.width - 24, height: 1).fill()
         guard isCurrent else { return }
-        NSColor.controlAccentColor.withAlphaComponent(0.09).setFill()
+        Theme.accent.withAlphaComponent(0.09).setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 1), xRadius: 6, yRadius: 6).fill()
     }
 }
@@ -101,7 +101,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
             translator.engine = engine
             if wasRunning {
                 pause()
-                showNotice("Настройки перевода изменились — нажмите «Продолжить».", color: .secondaryLabelColor)
+                showNotice("Настройки перевода изменились — нажмите «Продолжить».", color: Theme.ink2)
             }
         }
     }
@@ -297,22 +297,22 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
 
         let icon = NSImageView(image: NSImage(systemSymbolName: "doc.richtext", accessibilityDescription: nil) ?? NSImage())
         icon.symbolConfiguration = .init(pointSize: 54, weight: .light)
-        icon.contentTintColor = .tertiaryLabelColor
+        icon.contentTintColor = Theme.ink3
 
-        let title = UIFactory.label("Перетащите документ сюда", size: 22, weight: .semibold, color: .labelColor)
+        let title = UIFactory.label("Перетащите документ сюда", size: 22, weight: .semibold, color: Theme.ink)
         title.alignment = .center
         let subtitle = UIFactory.wrappingLabel(
             "PDF, Word (DOCX, DOC), RTF, ODT, HTML, TXT или Markdown.\nДокумент переводится по абзацам — можно поставить на паузу и сохранить уже готовое.",
-            size: 13, color: .secondaryLabelColor)
+            size: 13, color: Theme.ink2)
         subtitle.alignment = .center
         subtitle.preferredMaxLayoutWidth = 480
 
         let open = toolButton("Открыть файл…", symbol: "folder", #selector(openFile(_:)))
         open.controlSize = .large
         open.keyEquivalent = "\r"
-
+        open.bezelColor = Theme.accentStrong
         let hint = UIFactory.wrappingLabel("Сканы в PDF распознаются прямо на этом Mac. Перевод сохраняется в Word, RTF, TXT или Markdown.",
-                                           size: 12, color: .tertiaryLabelColor)
+                                           size: 12, color: Theme.ink3)
         hint.alignment = .center
         hint.preferredMaxLayoutWidth = 480
 
@@ -344,7 +344,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         loadingSpinner.style = .spinning
         loadingSpinner.controlSize = .regular
         loadingSpinner.isDisplayedWhenStopped = false
-        loadingLabel = UIFactory.label("", size: 14, color: .secondaryLabelColor)
+        loadingLabel = UIFactory.label("", size: 14, color: Theme.ink2)
         loadingLabel.alignment = .center
         let cancel = NSButton(title: "Отмена", target: self, action: #selector(cancelLoading(_:)))
         cancel.bezelStyle = .rounded
@@ -367,11 +367,11 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         // Row 1: file
         fileIcon = NSImageView(image: NSImage(systemSymbolName: "doc.text", accessibilityDescription: nil) ?? NSImage())
         fileIcon.symbolConfiguration = .init(pointSize: 22, weight: .regular)
-        fileIcon.contentTintColor = .controlAccentColor
-        fileLabel = UIFactory.label("", size: 15, weight: .semibold, color: .labelColor)
+        fileIcon.contentTintColor = Theme.accent
+        fileLabel = UIFactory.label("", size: 15, weight: .semibold, color: Theme.ink)
         fileLabel.lineBreakMode = .byTruncatingMiddle
         fileLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        statsLabel = UIFactory.label("", size: 12, color: .secondaryLabelColor)
+        statsLabel = UIFactory.label("", size: 12, color: Theme.ink2)
         statsLabel.lineBreakMode = .byTruncatingTail
         statsLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let titles = NSStackView(views: [fileLabel, statsLabel])
@@ -386,13 +386,13 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         fileRow.alignment = .centerY
 
         // Row 2: options + actions
-        let targetTitle = UIFactory.label("Перевести на", size: 12, color: .secondaryLabelColor)
+        let targetTitle = UIFactory.label("Перевести на", size: 12, color: Theme.ink2)
         targetPopup = NSPopUpButton(frame: .zero, pullsDown: false)
         targetPopup.controlSize = .regular
         targetPopup.target = self
         targetPopup.action = #selector(targetChanged(_:))
         targetPopup.toolTip = "На какой язык переводить документ"
-        let toneTitle = UIFactory.label("Тон", size: 12, color: .secondaryLabelColor)
+        let toneTitle = UIFactory.label("Тон", size: 12, color: Theme.ink2)
         toneControl = UIFactory.toneControl(target: self, action: #selector(toneChanged(_:)))
         toneControl.controlSize = .regular
         toneControl.font = .systemFont(ofSize: NSFont.systemFontSize)
@@ -401,6 +401,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
 
         translateButton = toolButton("Перевести", symbol: "play.fill", #selector(primaryAction(_:)))
         translateButton.keyEquivalent = "\r"
+        translateButton.bezelColor = Theme.accentStrong
         pauseButton = toolButton("Пауза", symbol: "pause.fill", #selector(pauseAction(_:)), tip: "Приостановить перевод; готовые абзацы сохранятся")
         cancelButton = toolButton("Отмена", symbol: "stop.fill", #selector(cancelAction(_:)), tip: "Остановить перевод; готовые абзацы сохранятся")
         saveButton = toolButton("Сохранить как…", symbol: "square.and.arrow.down", #selector(saveAs(_:)),
@@ -431,7 +432,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         progressBar.maxValue = 1
         progressBar.controlSize = .small
         progressBar.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
-        progressLabel = UIFactory.label("", size: 12, color: .secondaryLabelColor)
+        progressLabel = UIFactory.label("", size: 12, color: Theme.ink2)
         progressLabel.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         progressLabel.setContentHuggingPriority(.required, for: .horizontal)
         providerBadge = UIFactory.badge()
@@ -449,7 +450,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         tableView.intercellSpacing = NSSize(width: 12, height: 0)
         tableView.gridStyleMask = []
         tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-        tableView.backgroundColor = .textBackgroundColor
+        tableView.backgroundColor = Theme.card
         for (id, title) in [("orig", "Оригинал"), ("trans", "Перевод")] {
             let col = NSTableColumn(identifier: .init(id))
             col.title = title
@@ -467,11 +468,11 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = true
-        scrollView.backgroundColor = .textBackgroundColor
+        scrollView.backgroundColor = Theme.card
         scrollView.wantsLayer = true
         scrollView.layer?.cornerRadius = TolkStyle.cardRadius
         scrollView.layer?.borderWidth = 0.5
-        scrollView.layer?.borderColor = NSColor.separatorColor.cgColor
+        scrollView.layer?.borderColor = Theme.line.cgColor
         scrollView.updateColors()
         scrollView.onUserScroll = { [weak self] in self?.userScrolled() }
         NotificationCenter.default.addObserver(self, selector: #selector(liveScrollStarted(_:)),
@@ -482,8 +483,8 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         followButton.isHidden = true
         followButton.translatesAutoresizingMaskIntoConstraints = false
 
-        originalHeader = UIFactory.label("Оригинал", size: 12, weight: .semibold, color: .secondaryLabelColor)
-        translationHeader = UIFactory.label("Перевод", size: 12, weight: .semibold, color: .secondaryLabelColor)
+        originalHeader = UIFactory.label("Оригинал", size: 12, weight: .semibold, color: Theme.ink2)
+        translationHeader = UIFactory.label("Перевод", size: 12, weight: .semibold, color: Theme.ink2)
         let headerRow = NSStackView(views: [originalHeader, translationHeader])
         headerRow.distribution = .fillEqually
         headerRow.spacing = 12
@@ -512,7 +513,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         coverFrame.autoresizingMask = [.width, .height]
         cover.addSubview(coverFrame)
         dropCover = cover
-        let coverLabel = UIFactory.label("Отпустите, чтобы открыть документ", size: 17, weight: .semibold, color: .controlAccentColor)
+        let coverLabel = UIFactory.label("Отпустите, чтобы открыть документ", size: 17, weight: .semibold, color: Theme.accent)
         coverLabel.translatesAutoresizingMaskIntoConstraints = false
         dropCover.addSubview(coverLabel)
         dropCover.isHidden = true
@@ -567,7 +568,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
                        + "Перевод можно ставить на паузу, а уже готовые абзацы — сохранить в любой момент.")
         } else if doc.ocrPages > 0 {
             showNotice("\(doc.ocrPages == doc.pageCount ? "Все страницы" : "\(doc.ocrPages) \(Self.plural(doc.ocrPages, "страница", "страницы", "страниц"))") "
-                       + "без текстового слоя — текст распознан (OCR), возможны неточности.", color: .secondaryLabelColor)
+                       + "без текстового слоя — текст распознан (OCR), возможны неточности.", color: Theme.ink2)
         }
         setRunState(.idle)
         show(.content)
@@ -665,7 +666,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         if runState == .running { pause() }
         if translator.target != selectedTarget || translator.tone != selectedTone {
             showNotice("Язык или тон изменились — «Перевести заново» начнёт с первого абзаца. Уже готовый перевод пока виден.",
-                       color: .secondaryLabelColor)
+                       color: Theme.ink2)
         } else {
             hideNotice()
         }
@@ -759,7 +760,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         switch event {
         case let .provider(p):
             providerBadge.text = UIText.providerName(p)
-            providerBadge.tint = UIText.isFallbackProvider(p) ? .systemOrange : .secondaryLabelColor
+            providerBadge.tint = UIText.isFallbackProvider(p) ? .systemOrange : Theme.ink2
         case let .fellBack(from, reason):
             showNotice(UIText.fallbackSwitching(from: from), color: .systemOrange)
             noticeLabel.toolTip = reason
@@ -968,18 +969,18 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         guard row < translator.paragraphs.count else { return NSAttributedString() }
         let p = translator.paragraphs[row]
         var attrs: [NSAttributedString.Key: Any] = [.font: font(for: p.style), .paragraphStyle: Self.cellParagraph,
-                                                    .foregroundColor: NSColor.labelColor]
+                                                    .foregroundColor: Theme.ink]
         if !translation {
-            if !p.translatable { attrs[.foregroundColor] = NSColor.secondaryLabelColor }
+            if !p.translatable { attrs[.foregroundColor] = Theme.ink2 }
             return NSAttributedString(string: p.fullText, attributes: attrs)
         }
         if let t = translator.translations[row] {
-            if translator.kept.contains(row) { attrs[.foregroundColor] = NSColor.secondaryLabelColor }
+            if translator.kept.contains(row) { attrs[.foregroundColor] = Theme.ink2 }
             return NSAttributedString(string: p.prefix + t, attributes: attrs)
         }
         if row == translator.current {
             let s = NSMutableAttributedString(string: p.prefix + translator.partial, attributes: attrs)
-            attrs[.foregroundColor] = NSColor.controlAccentColor
+            attrs[.foregroundColor] = Theme.accent
             s.append(NSAttributedString(string: translator.partial.isEmpty ? "Перевожу…" : " ▍", attributes: attrs))
             return s
         }
@@ -1056,10 +1057,10 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         formatPopup.selectItem(at: format.rawValue)
         let bilingual = NSButton(checkboxWithTitle: "Двуязычный: после каждого абзаца оригинала — его перевод", target: nil, action: nil)
         bilingual.state = defaults.bool(forKey: Self.bilingualKey) ? .on : .off
-        var rows: [[NSView]] = [[UIFactory.label("Формат:", size: 13, color: .labelColor), formatPopup], [NSView(), bilingual]]
+        var rows: [[NSView]] = [[UIFactory.label("Формат:", size: 13, color: Theme.ink), formatPopup], [NSView(), bilingual]]
         let done = translator.doneCount, total = translator.paragraphs.count
         if done < total {
-            let note = UIFactory.label("Переведено \(done) из \(total) абзацев — в файл попадут только готовые.", size: 12, color: .secondaryLabelColor)
+            let note = UIFactory.label("Переведено \(done) из \(total) абзацев — в файл попадут только готовые.", size: 12, color: Theme.ink2)
             rows.append([NSView(), note])
         }
         let grid = NSGridView(views: rows)
@@ -1122,7 +1123,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
                 self.showAlert("Не удалось сохранить файл: \(result.localizedDescription)")
             } else {
                 self.saved = self.translator.isComplete
-                self.showNotice("Сохранено: \(url.lastPathComponent)", color: .secondaryLabelColor)
+                self.showNotice("Сохранено: \(url.lastPathComponent)", color: Theme.ink2)
             }
             completion?(result)
         }
@@ -1202,7 +1203,7 @@ final class DocumentsViewController: NSViewController, NSTableViewDataSource, NS
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: out)
         v.effectiveAppearance.performAsCurrentDrawingAppearance {
-            NSColor.windowBackgroundColor.setFill()
+            Theme.page.setFill()
             v.bounds.fill()
         }
         rep.draw(in: v.bounds, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)

@@ -18,8 +18,8 @@ final class ComposePanel: NSView, NSTextViewDelegate {
     private let spinner = NSProgressIndicator()
     private let copyButton = NSButton(title: "Копировать", target: nil, action: nil)
     private let warningLabel = UIFactory.label("", size: 11.5, color: .systemOrange)
-    private let backTitle = UIFactory.label("Обратный перевод — что сказано на самом деле", size: 11, weight: .semibold, color: .tertiaryLabelColor)
-    private let langNote = UIFactory.label("", size: 11, color: .tertiaryLabelColor)
+    private let backTitle = UIFactory.label("Обратный перевод — что сказано на самом деле", size: 11, weight: .semibold, color: Theme.ink3)
+    private let langNote = UIFactory.label("", size: 11, color: Theme.ink3)
     private var task: Task<Void, Never>?
     private var generation = 0
     private(set) var result: ComposeResult?
@@ -56,7 +56,7 @@ final class ComposePanel: NSView, NSTextViewDelegate {
         tv.allowsUndo = editable
         tv.drawsBackground = false
         tv.font = .systemFont(ofSize: size)
-        tv.textColor = .labelColor
+        tv.textColor = Theme.ink
         tv.textContainerInset = NSSize(width: 12, height: 10)
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticDashSubstitutionEnabled = false
@@ -72,17 +72,17 @@ final class ComposePanel: NSView, NSTextViewDelegate {
         b.boxType = .custom
         b.cornerRadius = TolkStyle.cardRadius
         b.borderWidth = 0.5
-        b.borderColor = .separatorColor
+        b.borderColor = Theme.line
         b.fillColor = tinted
             ? NSColor(name: nil) { appearance in
-                var result = NSColor.textBackgroundColor
+                var result = Theme.card
                 appearance.performAsCurrentDrawingAppearance {
-                    result = (NSColor.textBackgroundColor.blended(withFraction: 0.035, of: .labelColor) ?? .textBackgroundColor)
-                        .usingColorSpace(.sRGB) ?? .textBackgroundColor
+                    result = (Theme.card.blended(withFraction: 0.035, of: Theme.ink) ?? Theme.card)
+                        .usingColorSpace(.sRGB) ?? Theme.card
                 }
                 return result
             }
-            : .textBackgroundColor
+            : Theme.card
         b.contentViewMargins = .zero
         b.titlePosition = .noTitle
         b.translatesAutoresizingMaskIntoConstraints = false
@@ -110,8 +110,8 @@ final class ComposePanel: NSView, NSTextViewDelegate {
         guard let lc = left.contentView, let rc = right.contentView else { return }
 
         // Left card
-        let msgTitle = UIFactory.label("Сообщение собеседника (необязательно)", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
-        let ptsTitle = UIFactory.label("Что нужно сказать", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
+        let msgTitle = UIFactory.label("Сообщение собеседника (необязательно)", size: 11.5, weight: .semibold, color: Theme.ink2)
+        let ptsTitle = UIFactory.label("Что нужно сказать", size: 11.5, weight: .semibold, color: Theme.ink2)
         for t in [msgTitle, ptsTitle] { t.translatesAutoresizingMaskIntoConstraints = false }
         messageView.placeholder = "Вставьте, если отвечаете: язык и «Вы/ты» возьмутся отсюда"
         messageView.placeholderFont = .systemFont(ofSize: 14)
@@ -125,6 +125,8 @@ final class ComposePanel: NSView, NSTextViewDelegate {
         let ptsScroll = Self.pane(pointsView, size: 15, editable: true)
 
         toneControl.controlSize = .small
+
+        toneControl.selectedSegmentBezelColor = Theme.accentStrong
         toneControl.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         toneControl.selectedSegment = 0
         toneControl.toolTip = "Тон сообщения"
@@ -190,7 +192,7 @@ final class ComposePanel: NSView, NSTextViewDelegate {
         ])
 
         // Right card
-        let resTitle = UIFactory.label("Готовое сообщение", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
+        let resTitle = UIFactory.label("Готовое сообщение", size: 11.5, weight: .semibold, color: Theme.ink2)
         resTitle.translatesAutoresizingMaskIntoConstraints = false
         langNote.translatesAutoresizingMaskIntoConstraints = false
         resultView.placeholder = "Здесь появится сообщение на языке получателя"
@@ -200,7 +202,7 @@ final class ComposePanel: NSView, NSTextViewDelegate {
         backTitle.translatesAutoresizingMaskIntoConstraints = false
         backTitle.isHidden = true
         let backScroll = Self.pane(backView, size: 12, editable: false)
-        backView.textColor = .secondaryLabelColor
+        backView.textColor = Theme.ink2
         backView.textContainerInset = NSSize(width: 12, height: 4)
         backScroll.isHidden = true
         warningLabel.lineBreakMode = .byTruncatingTail

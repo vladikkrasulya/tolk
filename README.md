@@ -4,7 +4,7 @@ English · [Русский](README.ru.md)
 
 Tolk is a local translator and system-wide autocomplete for macOS. Translation is done by your own language model (Ollama on this Mac or on a machine in your home network). Typing suggestions come from a small model that runs on the Mac itself. Text can leave your computer only through the fallback translator (Google), which you can replace with the built-in macOS translation or switch off.
 
-Version 1.0.9. The interface is in Russian. This is a personal project built around one person's habits, but the code is open (MIT): take it, build it, change it.
+Version 1.1.0. The interface is in Russian. This is a personal project built around one person's habits, but the code is open (MIT): take it, build it, change it.
 
 ## What it does
 
@@ -29,6 +29,7 @@ Version 1.0.9. The interface is in Russian. This is a personal project built aro
 
 **Settings without touching code**
 - A settings page made of cards; every switch explains what happens in each position.
+- Five colour themes (Jade, Milk and blue, Coffee and azure, Butter and tomato, Rose and chocolate), each with a light and a dark variant that follows the system, plus the classic macOS look.
 - Models are downloaded, chosen and deleted from the interface, both for suggestions (on the Mac) and for translation (on the Ollama server). Tested models are listed with their measurements and whether this Mac has enough memory.
 - Fine tuning: temperature, confidence thresholds, context size. Every built-in instruction the models get can be read, reworded and reset.
 - Statistics (how much was translated and from where, how many suggestions were accepted, why a suggestion did not appear, how suggestions behave in each app and site) and a log viewer that explains every line.
@@ -42,7 +43,7 @@ Version 1.0.9. The interface is in Russian. This is a personal project built aro
 
 ## Install
 
-Download `Tolk-1.0.9.dmg` from the [Releases](../../releases) page, open it and drag Tolk to Applications. The build is signed with a local certificate, not notarized by Apple: on first launch right-click the app and choose Open.
+Download `Tolk-1.1.0.dmg` from the [Releases](../../releases) page, open it and drag Tolk to Applications. The build is signed with a local certificate, not notarized by Apple: on first launch right-click the app and choose Open.
 
 Or build from source:
 

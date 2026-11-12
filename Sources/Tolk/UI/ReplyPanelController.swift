@@ -209,7 +209,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
             setOutput(st.kept, placeholder: false)
         } else if !translation.isEmpty {
             // Keep the previous translation, dimmed, until the new one starts.
-            outputLabel.textColor = .tertiaryLabelColor
+            outputLabel.textColor = Theme.ink3
         }
         statusLine?.waiting(provider: "…")
         request.threadContext = threadContext
@@ -256,10 +256,10 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         updateButtons()
     }
 
-    private func setOutput(_ text: String, placeholder: Bool, color: NSColor = .labelColor) {
+    private func setOutput(_ text: String, placeholder: Bool, color: NSColor = Theme.ink) {
         if placeholder {
             outputLabel.stringValue = "Здесь появится перевод ответа"
-            outputLabel.textColor = .tertiaryLabelColor
+            outputLabel.textColor = Theme.ink3
         } else {
             outputLabel.stringValue = text
             outputLabel.textColor = color
@@ -414,11 +414,11 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         guard let ctx = context, let storage = partnerView.textStorage else { return }
         let text = NSMutableAttributedString(
             string: ctx.partnerTranslation.trimmingCharacters(in: .whitespacesAndNewlines),
-            attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: NSColor.labelColor])
+            attributes: [.font: NSFont.systemFont(ofSize: 13), .foregroundColor: Theme.ink])
         if visible {
             text.append(NSAttributedString(
                 string: "\n\n" + ctx.partnerText.trimmingCharacters(in: .whitespacesAndNewlines),
-                attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor]))
+                attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: Theme.ink2]))
         }
         storage.setAttributedString(text)
         updatePartnerHeight()
@@ -572,11 +572,12 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         effect.blendingMode = .behindWindow
         effect.state = .active
         p.contentView = effect
+        ThemeFillView.underlay(effect, color: Theme.panel)
 
         // Header
-        titleLabel = UIFactory.label("Ответ", size: 12, weight: .semibold, color: .secondaryLabelColor)
+        titleLabel = UIFactory.label("Ответ", size: 12, weight: .semibold, color: Theme.ink2)
         let icon = NSImageView(image: NSImage(systemSymbolName: "arrowshape.turn.up.left.fill", accessibilityDescription: nil) ?? NSImage())
-        icon.contentTintColor = .secondaryLabelColor
+        icon.contentTintColor = Theme.ink2
         icon.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
         let close = UIFactory.symbolButton("xmark", tooltip: EscText.closeKeepingDraftTip, target: self, action: #selector(closeClicked))
         let header = NSStackView(views: [icon, titleLabel, UIFactory.spacer(), close])
@@ -629,7 +630,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         tv.delegate = self
         scroll.documentView = tv
         inputView = tv
-        let inputBox = Self.roundedBox(scroll, fill: .textBackgroundColor, border: .separatorColor)
+        let inputBox = Self.roundedBox(scroll, fill: Theme.card, border: Theme.line)
         inputHeight = inputBox.heightAnchor.constraint(equalToConstant: 56)
         inputHeight.isActive = true
 
@@ -656,13 +657,13 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         chipsRow.isHidden = true
 
         // Output
-        outputLabel = UIFactory.wrappingLabel("", size: 14, color: .labelColor)
+        outputLabel = UIFactory.wrappingLabel("", size: 14, color: Theme.ink)
         outputLabel.isSelectable = true
         spinner = NSProgressIndicator()
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
-        let arrow = UIFactory.label("→", size: 14, color: .tertiaryLabelColor)
+        let arrow = UIFactory.label("→", size: 14, color: Theme.ink3)
         let outputRow = NSStackView(views: [arrow, outputLabel, spinner])
         outputRow.orientation = .horizontal
         outputRow.alignment = .top
@@ -674,6 +675,7 @@ final class ReplyPanelController: NSObject, NSTextViewDelegate {
         copyButton = NSButton(title: "Копировать", target: self, action: #selector(copyReply))
         insertButton = NSButton(title: "Вставить в чат  ⌘↩", target: self, action: #selector(insertReply))
         insertButton.keyEquivalent = "\r"
+        insertButton.bezelColor = Theme.accentStrong
         insertButton.keyEquivalentModifierMask = .command
         insertButton.toolTip = "Вернуться в чат и вставить ответ (отправите сами)"
         refineButton = NSButton(title: "Править", target: self, action: #selector(refineClicked))

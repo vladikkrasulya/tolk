@@ -199,24 +199,25 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         let icon = NSImageView(image: NSImage(systemSymbolName: "photo.on.rectangle.angled",
                                               accessibilityDescription: nil) ?? NSImage())
         icon.symbolConfiguration = .init(pointSize: 54, weight: .light)
-        icon.contentTintColor = .tertiaryLabelColor
+        icon.contentTintColor = Theme.ink3
 
-        let title = UIFactory.label("Перетащите фото или скриншот сюда", size: 22, weight: .semibold, color: .labelColor)
+        let title = UIFactory.label("Перетащите фото или скриншот сюда", size: 22, weight: .semibold, color: Theme.ink)
         title.alignment = .center
         let subtitle = UIFactory.wrappingLabel(
             "HEIC, JPEG, PNG или PDF — можно сразу несколько страниц.\nТекст распознаётся прямо на этом Mac, затем переводится.",
-            size: 13, color: .secondaryLabelColor)
+            size: 13, color: Theme.ink2)
         subtitle.alignment = .center
         subtitle.preferredMaxLayoutWidth = 460
 
         let open = bigButton("Открыть файл…", symbol: "folder", #selector(openFile(_:)))
         open.keyEquivalent = "\r"
+        open.bezelColor = Theme.accentStrong
         let paste = bigButton("Вставить из буфера", symbol: "doc.on.clipboard", #selector(pasteFromClipboard(_:)))
         let capture = bigButton("Снять область экрана", symbol: "viewfinder", #selector(captureArea(_:)))
         let buttons = NSStackView(views: [open, paste, capture])
         buttons.spacing = 10
 
-        hotKeyHint = UIFactory.label("", size: 12, color: .tertiaryLabelColor)
+        hotKeyHint = UIFactory.label("", size: 12, color: Theme.ink3)
         hotKeyHint.alignment = .center
         updateHotKeyHint()
 
@@ -249,7 +250,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         let open = toolButton("Открыть…", symbol: "folder", #selector(openFile(_:)), tip: "Открыть фото, скриншот или PDF")
         let paste = toolButton("Вставить", symbol: "doc.on.clipboard", #selector(pasteFromClipboard(_:)), tip: "Вставить картинку из буфера (⌘V)")
         let capture = toolButton("Снять область", symbol: "viewfinder", #selector(captureArea(_:)), tip: "Выделить область экрана с текстом")
-        fileLabel = UIFactory.label("", size: 12, color: .secondaryLabelColor)
+        fileLabel = UIFactory.label("", size: 12, color: Theme.ink2)
         fileLabel.lineBreakMode = .byTruncatingMiddle
         fileLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let clear = UIFactory.symbolButton("xmark.circle.fill", tooltip: "Закрыть изображение", target: self, action: #selector(clearAll(_:)))
@@ -269,7 +270,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         left.addSubview(preview)
         prevButton = UIFactory.symbolButton("chevron.left", tooltip: "Предыдущая страница", target: self, action: #selector(prevPage(_:)))
         nextButton = UIFactory.symbolButton("chevron.right", tooltip: "Следующая страница", target: self, action: #selector(nextPage(_:)))
-        pageLabel = UIFactory.label("", size: 12, weight: .medium, color: .secondaryLabelColor)
+        pageLabel = UIFactory.label("", size: 12, weight: .medium, color: Theme.ink2)
         pageBar = NSStackView(views: [prevButton, pageLabel, nextButton])
         pageBar.spacing = 6
         pageBar.translatesAutoresizingMaskIntoConstraints = false
@@ -284,7 +285,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         ])
 
         // Right: recognized text + translation
-        let sourceTitle = UIFactory.label("Распознанный текст", size: 13, weight: .semibold, color: .labelColor)
+        let sourceTitle = UIFactory.label("Распознанный текст", size: 13, weight: .semibold, color: Theme.ink)
         ocrSpinner = spinner()
         ocrStatus = UIFactory.label("", size: 12)
         copyTextButton = toolButton("Копировать", symbol: "doc.on.doc", #selector(copyText(_:)), tip: "Скопировать распознанный текст")
@@ -296,7 +297,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         sourceView = sv as? SourceTextView
         sourceView.onPasteImage = { [weak self] in self?.pasteFromClipboard(nil) }
 
-        let translationTitle = UIFactory.label("Перевод", size: 13, weight: .semibold, color: .labelColor)
+        let translationTitle = UIFactory.label("Перевод", size: 13, weight: .semibold, color: Theme.ink)
         providerBadge = UIFactory.badge()
         providerBadge.text = ""
         translateSpinner = spinner()
@@ -392,11 +393,11 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         // Translucent cover shown while a drag hovers over the loaded page.
         dropCover = DropZoneView()
         (dropCover as! DropZoneView).isTargeted = true
-        let coverLabel = UIFactory.label("Отпустите, чтобы распознать", size: 17, weight: .semibold, color: .controlAccentColor)
+        let coverLabel = UIFactory.label("Отпустите, чтобы распознать", size: 17, weight: .semibold, color: Theme.accent)
         coverLabel.translatesAutoresizingMaskIntoConstraints = false
         dropCover.addSubview(coverLabel)
         dropCover.wantsLayer = true
-        dropCover.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.85).cgColor
+        dropCover.layer?.backgroundColor = Theme.page.withAlphaComponent(0.85).cgColor
         dropCover.layer?.cornerRadius = 16
         dropCover.isHidden = true
         dropCover.translatesAutoresizingMaskIntoConstraints = false
@@ -426,11 +427,11 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         scroll.autohidesScrollers = true
         scroll.borderType = .noBorder
         scroll.drawsBackground = true
-        scroll.backgroundColor = .textBackgroundColor
+        scroll.backgroundColor = Theme.card
         scroll.wantsLayer = true
         scroll.layer?.cornerRadius = TolkStyle.cardRadius
         scroll.layer?.borderWidth = 0.5
-        scroll.layer?.borderColor = NSColor.separatorColor.cgColor
+        scroll.layer?.borderColor = Theme.line.cgColor
         let tv: NSTextView = editable ? SourceTextView() : NSTextView()
         tv.isEditable = editable
         tv.isSelectable = true
@@ -438,8 +439,8 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         tv.importsGraphics = false
         tv.allowsUndo = true
         tv.font = Self.textFont
-        tv.textColor = .labelColor
-        tv.backgroundColor = .textBackgroundColor
+        tv.textColor = Theme.ink
+        tv.backgroundColor = Theme.card
         tv.textContainerInset = NSSize(width: 10, height: 10)
         tv.isVerticallyResizable = true
         tv.isHorizontallyResizable = false
@@ -547,7 +548,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         let group = DispatchGroup()
         let lock = NSLock()
         var urls: [URL] = []
-        showNotice("Получаю файлы…", color: .secondaryLabelColor)
+        showNotice("Получаю файлы…", color: Theme.ink2)
         for p in promises {
             group.enter()
             p.receivePromisedFiles(atDestination: dir, options: [:], operationQueue: queue) { url, error in
@@ -778,7 +779,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         switch u {
         case let .started(provider, source, target):
             providerBadge.text = UIText.providerName(provider)
-            providerBadge.tint = UIText.isFallbackProvider(provider) ? .systemOrange : .secondaryLabelColor
+            providerBadge.tint = UIText.isFallbackProvider(provider) ? .systemOrange : Theme.ink2
             providerBadge.toolTip = "\(UIText.capitalized(source)) → \(target.russianName)"
         case let .text(s):
             setTranslation(s)
@@ -812,7 +813,7 @@ final class ImageTranslateViewController: NSViewController, NSTextViewDelegate {
         copyTranslationButton?.isEnabled = !translator.translation.isEmpty
         retranslateButton?.isEnabled = hasText && ocrTask == nil
         retranslateButton?.title = translator.isRunning ? "Заново" : "Перевести"
-        retranslateButton?.bezelColor = textEdited && !translator.isRunning ? .controlAccentColor : nil
+        retranslateButton?.bezelColor = textEdited && !translator.isRunning ? Theme.accent : nil
         retranslateButton?.contentTintColor = textEdited && !translator.isRunning ? .white : nil
     }
 

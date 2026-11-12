@@ -102,12 +102,20 @@ private final class TypeTranslateView: NSView {
     private static func dynamic(light: NSColor, dark: NSColor) -> NSColor {
         NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
     }
-    static let background = dynamic(light: NSColor(white: 0.97, alpha: 0.98), dark: NSColor(white: 0.17, alpha: 0.98))
-    static let border = dynamic(light: NSColor(white: 0, alpha: 0.14), dark: NSColor(white: 1, alpha: 0.16))
-    static let text = dynamic(light: NSColor(white: 0.32, alpha: 1), dark: NSColor(white: 0.78, alpha: 1))
-    static let hintColor = dynamic(light: NSColor(white: 0.52, alpha: 1), dark: NSColor(white: 0.55, alpha: 1))
-    static let chipFill = dynamic(light: NSColor(white: 0, alpha: 0.08), dark: NSColor(white: 1, alpha: 0.12))
-    static let chipText = dynamic(light: NSColor(white: 0.35, alpha: 1), dark: NSColor(white: 0.72, alpha: 1))
+    /// The theme's colour, or the old grey one in «Классика».
+    private static func themed(_ theme: NSColor, else classic: NSColor) -> NSColor {
+        NSColor(name: nil) { a in
+            var out = NSColor.clear
+            a.performAsCurrentDrawingAppearance { out = (Theme.isCustom ? theme : classic).usingColorSpace(.sRGB) ?? classic }
+            return out
+        }
+    }
+    static let background = themed(Theme.card.withAlphaComponent(0.98), else: dynamic(light: NSColor(white: 0.97, alpha: 0.98), dark: NSColor(white: 0.17, alpha: 0.98)))
+    static let border = themed(Theme.line2, else: dynamic(light: NSColor(white: 0, alpha: 0.14), dark: NSColor(white: 1, alpha: 0.16)))
+    static let text = themed(Theme.ink, else: dynamic(light: NSColor(white: 0.32, alpha: 1), dark: NSColor(white: 0.78, alpha: 1)))
+    static let hintColor = themed(Theme.ink2, else: dynamic(light: NSColor(white: 0.52, alpha: 1), dark: NSColor(white: 0.55, alpha: 1)))
+    static let chipFill = themed(Theme.accentSoft, else: dynamic(light: NSColor(white: 0, alpha: 0.08), dark: NSColor(white: 1, alpha: 0.12)))
+    static let chipText = themed(Theme.accentInk, else: dynamic(light: NSColor(white: 0.35, alpha: 1), dark: NSColor(white: 0.72, alpha: 1)))
     static let errorColor = dynamic(light: NSColor(red: 0.72, green: 0.2, blue: 0.15, alpha: 1), dark: NSColor(red: 1, green: 0.55, blue: 0.48, alpha: 1))
 }
 

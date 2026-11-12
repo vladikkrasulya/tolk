@@ -7,14 +7,14 @@ private final class DropOverlay: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let r = bounds.insetBy(dx: 10, dy: 10)
         let path = NSBezierPath(roundedRect: r, xRadius: 14, yRadius: 14)
-        NSColor.controlAccentColor.withAlphaComponent(0.10).setFill()
+        Theme.accent.withAlphaComponent(0.10).setFill()
         path.fill()
         path.lineWidth = 2
         path.setLineDash([7, 5], count: 2, phase: 0)
-        NSColor.controlAccentColor.setStroke()
+        Theme.accent.setStroke()
         path.stroke()
         let text = "Отпустите файл — он откроется в «Документах»" as NSString
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 16, weight: .semibold), .foregroundColor: NSColor.controlAccentColor]
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 16, weight: .semibold), .foregroundColor: Theme.accent]
         let size = text.size(withAttributes: attrs)
         text.draw(at: NSPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2), withAttributes: attrs)
     }
@@ -396,7 +396,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             translation = ""; tail = ""; keptPrefix = ""
             copyButton.isEnabled = false
             refineButton.isEnabled = false
-            setOutput("", color: .labelColor)
+            setOutput("", color: Theme.ink)
             spinner.stopAnimation(nil)
             providerBadge.text = ""
             detectedSource = nil
@@ -413,7 +413,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             copyButton.isEnabled = false
             refineButton.isEnabled = false
             if outputView.string.isEmpty { outputPlaceholderView.placeholder = "Перевожу…" }
-            else { outputView.textStorage?.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor,
+            else { outputView.textStorage?.addAttribute(.foregroundColor, value: Theme.ink3,
                                                         range: NSRange(location: 0, length: outputView.textStorage?.length ?? 0)) }
             spinner.startAnimation(nil)
             statusLine?.waiting(provider: "…")
@@ -436,7 +436,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             spinner.stopAnimation(nil)
             awaitingFirstDelta = false
             translation = st.kept
-            setOutput(st.kept, color: .labelColor)
+            setOutput(st.kept, color: Theme.ink)
             copyButton.isEnabled = !st.kept.isEmpty
             refineButton.isEnabled = !st.kept.isEmpty
             pushHints(useStats: false)
@@ -451,7 +451,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             // The kept part stays on screen without flicker; the tail streams in after it.
             translation = st.kept
             awaitingFirstDelta = false
-            setOutput(st.kept, color: .labelColor)
+            setOutput(st.kept, color: Theme.ink)
         } else {
             translation = ""
             awaitingFirstDelta = true
@@ -460,7 +460,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             if outputView.string.isEmpty {
                 outputPlaceholderView.placeholder = "Перевожу…"
             } else if let storage = outputView.textStorage {
-                storage.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor,
+                storage.addAttribute(.foregroundColor, value: Theme.ink3,
                                      range: NSRange(location: 0, length: storage.length))
             }
         }
@@ -478,7 +478,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             detectedTarget = target
             lastProvider = provider
             providerBadge.text = UIText.providerName(provider)
-            providerBadge.tint = UIText.isFallbackProvider(provider) ? .systemOrange : .secondaryLabelColor
+            providerBadge.tint = UIText.isFallbackProvider(provider) ? .systemOrange : Theme.ink2
             updateStatus()
             view.needsLayout = true
             if let from = fellBackFrom {
@@ -489,7 +489,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             statusLine?.chunk()
             if awaitingFirstDelta {
                 awaitingFirstDelta = false
-                setOutput("", color: .labelColor)
+                setOutput("", color: Theme.ink)
             }
             tail += chunk
             translation = keptPrefix + tail
@@ -502,7 +502,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             tail = ""
             translation = keptPrefix
             awaitingFirstDelta = true
-            setOutput(keptPrefix, color: .labelColor)
+            setOutput(keptPrefix, color: Theme.ink)
             awaitingFirstDelta = keptPrefix.isEmpty
             copyButton.isEnabled = false
             showNotice(UIText.fallbackSwitching(from: from), color: .systemOrange)
@@ -569,7 +569,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         translation = text
         keptPrefix = ""
         tail = ""
-        setOutput(text, color: .labelColor)
+        setOutput(text, color: Theme.ink)
         if let clip, let origin {
             clip.scroll(to: origin)
             outputView.enclosingScrollView?.reflectScrolledClipView(clip)
@@ -579,7 +579,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         pushHints(useStats: false)
     }
 
-    private func textAttributes(color: NSColor = .labelColor) -> [NSAttributedString.Key: Any] {
+    private func textAttributes(color: NSColor = Theme.ink) -> [NSAttributedString.Key: Any] {
         let p = NSMutableParagraphStyle()
         p.lineSpacing = 3
         return [.font: NSFont.systemFont(ofSize: Self.inputFontSize), .foregroundColor: color, .paragraphStyle: p]
@@ -649,7 +649,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         if let old = beforeRefine {   // «Вернуть»
             beforeRefine = nil
             translation = old
-            setOutput(old, color: .labelColor)
+            setOutput(old, color: Theme.ink)
             refineButton.title = "Отредактировать"
             appliedPronoun = nil
             rewriteBar.setPronoun(nil)
@@ -672,7 +672,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         refiner.start(engine: engine, source: source, translation: old, from: from, to: to, tone: tone,
                       onDelta: { [weak self] chunk in
             guard let self else { return }
-            if refined.isEmpty { self.setOutput("", color: .labelColor) }
+            if refined.isEmpty { self.setOutput("", color: Theme.ink) }
             refined += chunk
             self.translation = refined
             self.outputView.textStorage?.append(NSAttributedString(string: chunk, attributes: self.textAttributes()))
@@ -681,7 +681,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             self.spinner.stopAnimation(nil)
             let t = refined.trimmingCharacters(in: .whitespacesAndNewlines)
             if t.isEmpty || t == old.trimmingCharacters(in: .whitespacesAndNewlines) {
-                self.translation = old; self.setOutput(old, color: .labelColor)
+                self.translation = old; self.setOutput(old, color: Theme.ink)
             } else {
                 self.beforeRefine = old
                 self.refineButton.title = "Вернуть"
@@ -693,7 +693,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         }, onFail: { [weak self] message in
             guard let self else { return }
             self.spinner.stopAnimation(nil)
-            self.translation = old; self.setOutput(old, color: .labelColor)
+            self.translation = old; self.setOutput(old, color: Theme.ink)
             self.refineButton.isEnabled = true
             self.copyButton.isEnabled = true
             self.showNotice(message, color: .systemRed)
@@ -1055,7 +1055,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         let original = beforeRefine ?? translation
         beforeRefine = original
         translation = text
-        setOutput(text, color: .labelColor)
+        setOutput(text, color: Theme.ink)
         refineButton.title = "Вернуть"
         copyButton.isEnabled = true
         appliedPronoun = nil
@@ -1077,13 +1077,13 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
             }
             if mode == .formal || mode == .informal { appliedPronoun = mode; rewriteBar.setPronoun(mode) }
             guard r.changed else {
-                showTransientNotice("«\(mode.russianTitle)»: перевод уже такой", color: .secondaryLabelColor)
+                showTransientNotice("«\(mode.russianTitle)»: перевод уже такой", color: Theme.ink2)
                 return
             }
             let original = beforeRefine ?? old   // one «Вернуть» goes back to the translation before any edit
             beforeRefine = original
             translation = r.text
-            setOutput(r.text, color: .labelColor)
+            setOutput(r.text, color: Theme.ink)
             refineButton.title = "Вернуть"
             copyButton.isEnabled = true
             live.reset()
@@ -1135,7 +1135,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         }
         guard let i = hoveredPair ?? pinnedPair, pairs.indices.contains(i) else { return }
         let p = pairs[i]
-        let color = NSColor.controlAccentColor.withAlphaComponent(p.isConfident ? 0.26 : 0.10)
+        let color = Theme.accent.withAlphaComponent(p.isConfident ? 0.26 : 0.10)
         for (tv, range) in [(inputView!, p.source), (outputView!, p.translation)] {
             let r = trimmedRange(range, in: tv.string)
             if r.length > 0 { tv.layoutManager?.addTemporaryAttribute(.backgroundColor, value: color, forCharacterRange: r) }
@@ -1188,7 +1188,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
                 let shown = (outputView.string as NSString).substring(with: m.range)
                 storage.addAttributes([
                     .underlineStyle: NSUnderlineStyle.single.rawValue | NSUnderlineStyle.patternDash.rawValue,
-                    .underlineColor: NSColor.controlAccentColor,
+                    .underlineColor: Theme.accent,
                     .toolTip: "из глоссария: \(m.hit.source) → \(shown)",
                 ], range: m.range)
             }
@@ -1225,10 +1225,10 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         detectedTarget = e.targetLanguage
         lastProvider = e.provider
         providerBadge.text = UIText.providerName(e.provider)
-        providerBadge.tint = UIText.isFallbackProvider(e.provider) ? .systemOrange : .secondaryLabelColor
+        providerBadge.tint = UIText.isFallbackProvider(e.provider) ? .systemOrange : Theme.ink2
         updateStatus()
         translation = e.translation
-        setOutput(e.translation, color: .labelColor)
+        setOutput(e.translation, color: Theme.ink)
         spinner.stopAnimation(nil)
         statusLine.reset()
         copyButton.isEnabled = true
@@ -1236,7 +1236,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         lastStatsWarnings = []
         lastTranslatedRequest = TranslationRequest(text: e.source.trimmingCharacters(in: .whitespacesAndNewlines),
                                                    source: selectedSource, target: selectedTarget, tone: tone)
-        showTransientNotice("Из истории — запрос не отправлялся", color: .secondaryLabelColor)
+        showTransientNotice("Из истории — запрос не отправлялся", color: Theme.ink2)
         pushHints(useStats: false)
     }
 
@@ -1260,7 +1260,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         tv.allowsUndo = editable
         tv.drawsBackground = false
         tv.font = .systemFont(ofSize: Self.inputFontSize)
-        tv.textColor = .labelColor
+        tv.textColor = Theme.ink
         tv.textContainerInset = NSSize(width: 14, height: 16)
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticDashSubstitutionEnabled = false
@@ -1277,18 +1277,18 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         box.boxType = .custom
         box.cornerRadius = TolkStyle.cardRadius
         box.borderWidth = 0.5
-        box.borderColor = .separatorColor
+        box.borderColor = Theme.line
         // Dynamic: resolved at draw time, so the card follows the window's appearance (not the one at creation).
         box.fillColor = tinted
             ? NSColor(name: nil) { appearance in
-                var result = NSColor.textBackgroundColor
+                var result = Theme.card
                 appearance.performAsCurrentDrawingAppearance {
-                    result = (NSColor.textBackgroundColor.blended(withFraction: 0.035, of: .labelColor) ?? .textBackgroundColor)
-                        .usingColorSpace(.sRGB) ?? .textBackgroundColor
+                    result = (Theme.card.blended(withFraction: 0.035, of: Theme.ink) ?? Theme.card)
+                        .usingColorSpace(.sRGB) ?? Theme.card
                 }
                 return result
             }
-            : .textBackgroundColor
+            : Theme.card
         box.contentViewMargins = .zero
         box.titlePosition = .noTitle
         guard let cv = box.contentView else { return box }
@@ -1334,7 +1334,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         p.bezelStyle = .push
         p.isBordered = false
         p.font = .systemFont(ofSize: 14, weight: .medium)
-        p.contentTintColor = .controlAccentColor
+        p.contentTintColor = Theme.accent
         return p
     }
 
@@ -1360,6 +1360,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
 
         modeControl = NSSegmentedControl(labels: ["Перевод", "Ответ", "Составить"], trackingMode: .selectOne, target: self, action: #selector(modeChanged(_:)))
         modeControl.controlSize = .small
+        modeControl.selectedSegmentBezelColor = Theme.accentStrong
         modeControl.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         modeControl.selectedSegment = 0
         modeControl.setToolTip("Обычный перевод: текст слева, перевод справа", forSegment: 0)
@@ -1393,10 +1394,10 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         inputView.delegate = self
         inputView.setAccessibilityLabel("Исходный текст")
         inputView.setHover { [weak self] in self?.hover(input: true, index: $0) }
-        counterLabel = UIFactory.label("", size: 11.5, color: .tertiaryLabelColor)
+        counterLabel = UIFactory.label("", size: 11.5, color: Theme.ink3)
         clearButton = UIFactory.symbolButton("xmark.circle.fill", tooltip: "Очистить", target: self,
                                              action: #selector(clearInput))
-        clearButton.contentTintColor = .tertiaryLabelColor
+        clearButton.contentTintColor = Theme.ink3
         clearButton.symbolConfiguration = .init(pointSize: 14, weight: .regular)
         clearButton.isHidden = true
         let inBottom = NSStackView(views: [counterLabel, UIFactory.spacer(), clearButton])
@@ -1472,7 +1473,7 @@ final class TranslatePageViewController: NSViewController, NSTextViewDelegate {
         rewriteBar.onCancel = { [weak self] in self?.cancelRewrite() }
         let rightCard = card(outScroll, bottom: outBottom, tinted: true, top: rewriteBar)
 
-        hintLabel = UIFactory.label(footerHint, size: 11, color: .tertiaryLabelColor)
+        hintLabel = UIFactory.label(footerHint, size: 11, color: Theme.ink3)
         let toneLabel = UIFactory.label("Тон", size: 12)
         footerToneLabel = toneLabel
         leftCardView = leftCard

@@ -105,7 +105,7 @@ final class WrapLabel: NSTextField {
 
 extension UIFactory {
     /// Wrapping label (any number of lines) that adapts to its width.
-    static func flexibleLabel(_ text: String = "", size: CGFloat = 12.5, color: NSColor = .labelColor,
+    static func flexibleLabel(_ text: String = "", size: CGFloat = 12.5, color: NSColor = Theme.ink,
                               selectable: Bool = true) -> WrapLabel {
         let l = WrapLabel(wrappingLabelWithString: text)
         l.font = .systemFont(ofSize: size)
@@ -126,10 +126,10 @@ enum NoteRow {
                      onSave: @escaping (_ value: String, _ retranslate: Bool) -> Void) -> NSView {
         let text = NSMutableAttributedString()
         let small = NSFont.systemFont(ofSize: 12.5)
-        text.append(NSAttributedString(string: "\(index). ", attributes: [.font: small, .foregroundColor: NSColor.tertiaryLabelColor]))
-        text.append(NSAttributedString(string: n.term, attributes: [.font: NSFont.systemFont(ofSize: 12.5, weight: .semibold), .foregroundColor: NSColor.labelColor]))
-        text.append(NSAttributedString(string: " → «\(n.used)»", attributes: [.font: small, .foregroundColor: NSColor.labelColor]))
-        text.append(NSAttributedString(string: "\n" + n.note, attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.secondaryLabelColor]))
+        text.append(NSAttributedString(string: "\(index). ", attributes: [.font: small, .foregroundColor: Theme.ink3]))
+        text.append(NSAttributedString(string: n.term, attributes: [.font: NSFont.systemFont(ofSize: 12.5, weight: .semibold), .foregroundColor: Theme.ink]))
+        text.append(NSAttributedString(string: " → «\(n.used)»", attributes: [.font: small, .foregroundColor: Theme.ink]))
+        text.append(NSAttributedString(string: "\n" + n.note, attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: Theme.ink2]))
         let label = width == nil ? WrapLabel(labelWithAttributedString: text) : NSTextField(labelWithAttributedString: text)
         label.lineBreakMode = .byWordWrapping
         label.maximumNumberOfLines = 0
@@ -188,7 +188,7 @@ final class GlossaryFormView: NSStackView, NSTextFieldDelegate {
         let save = NSButton(title: "Сохранить", target: self, action: #selector(saveClicked))
         save.controlSize = .small
         save.bezelStyle = .push
-        if defaultButton { save.keyEquivalent = "\r" }
+        if defaultButton { save.keyEquivalent = "\r"; save.bezelColor = Theme.accentStrong }
         let cancel = NSButton(title: "Отмена", target: self, action: #selector(cancelClicked))
         cancel.controlSize = .small
         cancel.bezelStyle = .push
@@ -269,8 +269,8 @@ final class VariantRowView: NSView {
     init(label: String, text: String) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        let tag = UIFactory.label(label, size: 10.5, weight: .semibold, color: .tertiaryLabelColor)
-        let body = UIFactory.flexibleLabel(text, size: 12.5, color: .labelColor, selectable: false)
+        let tag = UIFactory.label(label, size: 10.5, weight: .semibold, color: Theme.ink3)
+        let body = UIFactory.flexibleLabel(text, size: 12.5, color: Theme.ink, selectable: false)
         let stack = NSStackView(views: [tag, body])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -296,9 +296,9 @@ final class VariantRowView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
-        (hovering ? NSColor.controlAccentColor.withAlphaComponent(0.14) : NSColor.labelColor.withAlphaComponent(0.045)).setFill()
+        (hovering ? Theme.accent.withAlphaComponent(0.14) : Theme.ink.withAlphaComponent(0.045)).setFill()
         path.fill()
-        NSColor.separatorColor.setStroke()
+        Theme.line.setStroke()
         path.lineWidth = 0.5
         path.stroke()
     }
@@ -312,8 +312,8 @@ extension UIText {
         if has(["раздраж", "недовол", "резк", "жёстк", "жестк", "агресс", "угроз", "претенз", "злой", "зол", "сердит"]) { return .systemRed }
         if has(["срочн", "давлен", "настойч", "требоват", "напряж", "нетерпел", "тревож", "отказ"]) { return .systemOrange }
         if has(["ирон", "сарказ", "насмеш"]) { return .systemPurple }
-        if has(["дружел", "тепл", "вежлив", "благодар", "радост", "позитив", "любез", "заботл"]) { return .systemGreen }
+        if has(["дружел", "тепл", "вежлив", "благодар", "радост", "позитив", "любез", "заботл"]) { return Theme.ok }
         if has(["формал", "официал", "делов", "сдержан"]) { return .systemBlue }
-        return .secondaryLabelColor
+        return Theme.ink2
     }
 }

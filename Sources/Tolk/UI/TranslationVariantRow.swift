@@ -16,7 +16,7 @@ final class TranslationVariantRow: NSView {
         let badge = UIFactory.badge()
         badge.text = variant.label
         let tone = UIText.toneColor(variant.label)
-        badge.tint = tone == .secondaryLabelColor ? .controlAccentColor : tone
+        badge.tint = tone == Theme.ink2 ? Theme.accent : tone
 
         takeButton.target = self
         takeButton.action = #selector(take)
@@ -41,10 +41,10 @@ final class TranslationVariantRow: NSView {
 
         var rows: [NSView] = [head]
         if !variant.reason.isEmpty {
-            let reason = UIFactory.flexibleLabel(variant.reason, size: 11.5, color: .secondaryLabelColor, selectable: false)
+            let reason = UIFactory.flexibleLabel(variant.reason, size: 11.5, color: Theme.ink2, selectable: false)
             rows.append(reason)
         }
-        let text = UIFactory.flexibleLabel("", size: 12.5, color: .labelColor)
+        let text = UIFactory.flexibleLabel("", size: 12.5, color: Theme.ink)
         text.attributedStringValue = TranslationHintsPanel.diff(old: base, new: variant.text).1
         rows.append(text)
 
@@ -68,9 +68,9 @@ final class TranslationVariantRow: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
-        NSColor.labelColor.withAlphaComponent(0.045).setFill()
+        Theme.ink.withAlphaComponent(0.045).setFill()
         path.fill()
-        NSColor.separatorColor.setStroke()
+        Theme.line.setStroke()
         path.lineWidth = 0.5
         path.stroke()
     }

@@ -144,7 +144,7 @@ enum UIText {
 
 enum UIFactory {
     static func label(_ text: String = "", size: CGFloat = 12, weight: NSFont.Weight = .regular,
-                      color: NSColor = .secondaryLabelColor) -> NSTextField {
+                      color: NSColor = Theme.ink2) -> NSTextField {
         let l = NSTextField(labelWithString: text)
         l.font = .systemFont(ofSize: size, weight: weight)
         l.textColor = color
@@ -153,7 +153,7 @@ enum UIFactory {
     }
 
     static func wrappingLabel(_ text: String = "", size: CGFloat = 12,
-                              color: NSColor = .secondaryLabelColor) -> NSTextField {
+                              color: NSColor = Theme.ink2) -> NSTextField {
         let l = NSTextField(wrappingLabelWithString: text)
         l.font = .systemFont(ofSize: size)
         l.textColor = color
@@ -167,7 +167,7 @@ enum UIFactory {
         b.isBordered = false
         b.bezelStyle = .regularSquare
         b.imagePosition = .imageOnly
-        b.contentTintColor = .secondaryLabelColor
+        b.contentTintColor = Theme.ink2
         b.toolTip = tooltip
         b.setButtonType(.momentaryChange)
         b.symbolConfiguration = .init(pointSize: 12, weight: .semibold)
@@ -180,6 +180,7 @@ enum UIFactory {
         let c = NSSegmentedControl(labels: Tone.allCases.map(UIText.toneTitle),
                                    trackingMode: .selectOne, target: target, action: action)
         c.controlSize = .small
+        c.selectedSegmentBezelColor = Theme.accentStrong
         c.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         for (i, tone) in Tone.allCases.enumerated() { c.setToolTip(UIText.toneHint(tone), forSegment: i) }
         return c
@@ -197,8 +198,8 @@ enum UIFactory {
 }
 
 final class BadgeView: NSView {
-    let label = UIFactory.label("", size: 10.5, weight: .semibold, color: .secondaryLabelColor)
-    var tint: NSColor = .secondaryLabelColor { didSet { needsDisplay = true; label.textColor = tint } }
+    let label = UIFactory.label("", size: 10.5, weight: .semibold, color: Theme.ink2)
+    var tint: NSColor = Theme.ink2 { didSet { needsDisplay = true; label.textColor = tint } }
 
     init() {
         super.init(frame: .zero)

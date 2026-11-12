@@ -417,13 +417,13 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         guard !sourceText.isEmpty else {
             providerBadge.text = ""
             directionButton.title = "Перевод"
-            showMessage("Нет текста. Выделите текст и дважды нажмите ⌘C.", color: .secondaryLabelColor)
+            showMessage("Нет текста. Выделите текст и дважды нажмите ⌘C.", color: Theme.ink2)
             return
         }
         updateDirectionTitle()
         providerBadge.text = ""
         spinner.startAnimation(nil)
-        showMessage("Перевожу…", color: .tertiaryLabelColor)
+        showMessage("Перевожу…", color: Theme.ink3)
         showsPlaceholder = true
         statusLine.waiting(provider: "…")
         // Short replies from the same chat get the previous lines as context (pronouns), never translated.
@@ -446,7 +446,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
             updateDirectionTitle()
             lastProvider = provider
             providerBadge.text = UIText.providerName(provider)
-            providerBadge.tint = UIText.isFallbackProvider(provider) ? .systemOrange : .secondaryLabelColor
+            providerBadge.tint = UIText.isFallbackProvider(provider) ? .systemOrange : Theme.ink2
             if let from = fellBackFrom {
                 showNotice(UIText.fallbackDone(from: from, to: provider),
                            color: .systemOrange)
@@ -469,7 +469,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
             statusLine.fellBack(reason: reason)
             fellBackFrom = from
             translation = ""
-            showMessage("Перевожу через запасной сервис…", color: .tertiaryLabelColor)
+            showMessage("Перевожу через запасной сервис…", color: Theme.ink3)
             showsPlaceholder = true
             copyButton.isEnabled = false
             showNotice(UIText.fallbackSwitching(from: from), color: .systemOrange)
@@ -480,7 +480,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
             if !translation.isEmpty, let f = detectedSource, let t = detectedTarget {
                 ThreadMemory.shared.record(source: sourceText, translation: translation, from: f, to: t, app: frontApp)
             }
-            if translation.isEmpty { showMessage("Пустой перевод.", color: .secondaryLabelColor) }
+            if translation.isEmpty { showMessage("Пустой перевод.", color: Theme.ink2) }
             else {
                 showTimeConversions()
                 refineButton.isEnabled = true
@@ -510,7 +510,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
     private var textAttributes: [NSAttributedString.Key: Any] {
         let p = NSMutableParagraphStyle()
         p.lineSpacing = 2
-        return [.font: NSFont.systemFont(ofSize: 16), .foregroundColor: NSColor.labelColor, .paragraphStyle: p]
+        return [.font: NSFont.systemFont(ofSize: 16), .foregroundColor: Theme.ink, .paragraphStyle: p]
     }
 
     private func showMessage(_ text: String, color: NSColor) {
@@ -691,13 +691,13 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
 
     private func showAlternatives(fragment: String, range: NSRange, options: [String]?) {
         altBox.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let title = UIFactory.label("«\(fragment)»:", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
+        let title = UIFactory.label("«\(fragment)»:", size: 11.5, weight: .semibold, color: Theme.ink2)
         title.lineBreakMode = .byTruncatingMiddle
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         altBox.addArrangedSubview(title)
         if let options {
             if options.isEmpty {
-                altBox.addArrangedSubview(UIFactory.label("вариантов нет", size: 11.5, color: .tertiaryLabelColor))
+                altBox.addArrangedSubview(UIFactory.label("вариантов нет", size: 11.5, color: Theme.ink3))
             }
             for o in options {
                 let b = ClosureButton(title: o) { [weak self] in self?.applyAlternative(o, range: range) }
@@ -705,7 +705,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
                 altBox.addArrangedSubview(b)
             }
         } else {
-            altBox.addArrangedSubview(UIFactory.label("подбираю варианты…", size: 11.5, color: .tertiaryLabelColor))
+            altBox.addArrangedSubview(UIFactory.label("подбираю варианты…", size: 11.5, color: Theme.ink3))
         }
         altBox.addArrangedSubview(UIFactory.spacer())
         altBox.isHidden = false
@@ -725,7 +725,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         translation = textView.string
         hideAlternatives()
         textView.setSelectedRange(NSRange(location: range.location, length: (text as NSString).length))
-        showNotice("Заменено. ⌘C или «Копировать» — уже с этим вариантом.", color: .secondaryLabelColor)
+        showNotice("Заменено. ⌘C или «Копировать» — уже с этим вариантом.", color: Theme.ink2)
     }
 
     // MARK: - Footnotes
@@ -757,7 +757,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
 
     private func showNotesLoading() {
         notesBox.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let l = UIFactory.label("Ищу спорные термины…", size: 11.5, color: .tertiaryLabelColor)
+        let l = UIFactory.label("Ищу спорные термины…", size: 11.5, color: Theme.ink3)
         notesBox.addArrangedSubview(l)
         notesBox.isHidden = false
         updateSize()
@@ -766,7 +766,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
     private func showNotes(_ notes: [TranslationNote]) {
         notesBox.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard !notes.isEmpty else { notesBox.isHidden = true; updateSize(); return }
-        let title = UIFactory.label("Сноски", size: 11, weight: .semibold, color: .tertiaryLabelColor)
+        let title = UIFactory.label("Сноски", size: 11, weight: .semibold, color: Theme.ink3)
         notesBox.addArrangedSubview(title)
         for (i, n) in notes.enumerated() {
             notesBox.addArrangedSubview(noteRow(n, index: i + 1))
@@ -786,9 +786,9 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
             try engine.addGlossaryTerm(source: term, translation: value)
             if retranslate {
                 startTranslation()
-                showNotice("В глоссарии: «\(term)» → «\(value)». Перевожу заново.", color: .systemGreen)
+                showNotice("В глоссарии: «\(term)» → «\(value)». Перевожу заново.", color: Theme.ok)
             } else {
-                showNotice("В глоссарии: «\(term)» → «\(value)»", color: .systemGreen)
+                showNotice("В глоссарии: «\(term)» → «\(value)»", color: Theme.ok)
             }
         } catch {
             showNotice("Не удалось сохранить в глоссарий: \(error.localizedDescription)", color: .systemRed)
@@ -801,7 +801,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         backEnabled = backButton.state == .on
         if backEnabled {
             backBox.isHidden = false
-            if mainFinished, !translation.isEmpty { startBack() } else { setBack(title: "Обратный перевод", text: "Появится после перевода…", color: .tertiaryLabelColor) }
+            if mainFinished, !translation.isEmpty { startBack() } else { setBack(title: "Обратный перевод", text: "Появится после перевода…", color: Theme.ink3) }
         } else {
             backJob.cancel()
             backBox.isHidden = true
@@ -813,13 +813,13 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         backJob.cancel()
         backButton.state = backEnabled ? .on : .off
         backBox.isHidden = !backEnabled
-        if backEnabled { setBack(title: "Обратный перевод", text: "Появится после перевода…", color: .tertiaryLabelColor) }
+        if backEnabled { setBack(title: "Обратный перевод", text: "Появится после перевода…", color: Theme.ink3) }
     }
 
     private func startBack() {
         guard let src = detectedTarget, let dst = detectedSource else { return }
         backBox.isHidden = false
-        setBack(title: "Обратно: \(src.flag) → \(dst.flag) \(UIText.capitalized(dst))", text: "Перевожу обратно…", color: .tertiaryLabelColor)
+        setBack(title: "Обратно: \(src.flag) → \(dst.flag) \(UIText.capitalized(dst))", text: "Перевожу обратно…", color: Theme.ink3)
         updateSize()
         backJob.start(engine: engine, translation: translation, from: src, to: dst)
     }
@@ -827,9 +827,9 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
     private func handleBack(_ update: BackTranslationJob.Update) {
         switch update {
         case let .running(text):
-            if !text.isEmpty { setBack(title: nil, text: text, color: .secondaryLabelColor) }
+            if !text.isEmpty { setBack(title: nil, text: text, color: Theme.ink2) }
         case let .finished(text):
-            if text.isEmpty { setBack(title: nil, text: "—", color: .tertiaryLabelColor) }
+            if text.isEmpty { setBack(title: nil, text: "—", color: Theme.ink3) }
             startPendingNotes()
         case let .failed(message):
             setBack(title: nil, text: message, color: .systemRed)
@@ -872,7 +872,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         do {
             try engine.addGlossaryTerm(source: term, translation: value)
             setGlossaryFormVisible(false)
-            showNotice("Добавлено в глоссарий: «\(term)» → «\(value)»", color: .systemGreen)
+            showNotice("Добавлено в глоссарий: «\(term)» → «\(value)»", color: Theme.ok)
             panel.makeFirstResponder(textView)
         } catch {
             showNotice("Не удалось сохранить в глоссарий: \(error.localizedDescription)", color: .systemRed)
@@ -1054,12 +1054,13 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         effect.blendingMode = .behindWindow
         effect.state = .active
         p.contentView = effect
+        ThemeFillView.underlay(effect, color: Theme.panel)
 
         // Header: direction, swap, provider, spinner … close
         directionButton = NSButton(title: "Авто → …", target: self, action: #selector(showDirectionMenu(_:)))
         directionButton.isBordered = false
         directionButton.font = .systemFont(ofSize: 13, weight: .semibold)
-        directionButton.contentTintColor = .labelColor
+        directionButton.contentTintColor = Theme.ink
         directionButton.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)
         directionButton.symbolConfiguration = .init(pointSize: 9, weight: .bold)
         directionButton.imagePosition = .imageTrailing
@@ -1114,8 +1115,8 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         glossaryForm.isHidden = true
 
         // Back-translation: the translation translated back, to check the meaning survived.
-        backTitle = UIFactory.label("Обратный перевод", size: 11, weight: .semibold, color: .tertiaryLabelColor)
-        backText = UIFactory.wrappingLabel("", size: 13, color: .secondaryLabelColor)
+        backTitle = UIFactory.label("Обратный перевод", size: 11, weight: .semibold, color: Theme.ink3)
+        backText = UIFactory.wrappingLabel("", size: 13, color: Theme.ink2)
         backText.isSelectable = true
         backText.preferredMaxLayoutWidth = width - inset * 2 - 20
         backBox = NSStackView(views: [backTitle, backText])
@@ -1125,7 +1126,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         backBox.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
         backBox.wantsLayer = true
         backBox.layer?.cornerRadius = TolkStyle.controlRadius
-        backBox.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.05).cgColor
+        backBox.layer?.backgroundColor = Theme.ink.withAlphaComponent(0.05).cgColor
         backBox.isHidden = true
 
         statusLine = StatusLineView()
@@ -1133,9 +1134,9 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
 
         let clock = NSImageView(image: NSImage(systemSymbolName: "clock", accessibilityDescription: "Время") ?? NSImage())
         clock.symbolConfiguration = .init(pointSize: 11, weight: .regular)
-        clock.contentTintColor = .secondaryLabelColor
+        clock.contentTintColor = Theme.ink2
         clock.setContentHuggingPriority(.required, for: .horizontal)
-        timeLabel = UIFactory.wrappingLabel("", size: 12, color: .secondaryLabelColor)
+        timeLabel = UIFactory.wrappingLabel("", size: 12, color: Theme.ink2)
         timeRow = NSStackView(views: [clock, timeLabel])
         timeRow.orientation = .horizontal
         timeRow.alignment = .firstBaseline
@@ -1236,7 +1237,7 @@ final class TranslationPopupController: NSObject, NSTextViewDelegate {
         card.titlePosition = .noTitle
         card.cornerRadius = TolkStyle.cardRadius
         card.fillColor = TolkStyle.nsCard
-        card.borderColor = .separatorColor
+        card.borderColor = Theme.line
         card.borderWidth = 0.5
         card.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(card)

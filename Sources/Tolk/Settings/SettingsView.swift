@@ -6,8 +6,16 @@ import TolkCore
 
 struct SettingsView: View {
     @ObservedObject var model: SettingsModel
+    @ObservedObject private var theme = ThemeState.shared
 
     var body: some View {
+        page
+            .id(theme.palette)
+            .tint(Theme.accentC)
+            .foregroundStyle(Theme.inkC)
+    }
+
+    private var page: some View {
         VStack(spacing: 0) {
             header
             ScrollView {
@@ -75,9 +83,9 @@ struct SettingsView: View {
                     Text(tab.title).lineLimit(1).fixedSize()
                 }
                 .padding(.horizontal, 10).padding(.vertical, 5)
-                .foregroundStyle(on ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
-                .fontWeight(on ? .medium : .regular)
-                .background(on ? Color.accentColor.opacity(0.14) : Color.clear, in: RoundedRectangle(cornerRadius: TolkStyle.controlRadius, style: .continuous))
+                .foregroundStyle(on ? AnyShapeStyle(Theme.accentInkC) : AnyShapeStyle(.secondary))
+                .fontWeight(on ? .semibold : .regular)
+                .background(on ? Theme.accentSoftC : Color.clear, in: RoundedRectangle(cornerRadius: TolkStyle.controlRadius, style: .continuous))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -91,7 +99,7 @@ struct SettingsView: View {
     }
 
     private func statusPill(_ s: (String, String, SRole), tab: SettingsTab) -> some View {
-        Button { model.open(tab, section: 0) } label: { SPill(text: s.0, symbol: s.1, role: s.2) }
+        Button { model.open(tab, section: tab == .general ? 1 : 0) } label: { SPill(text: s.0, symbol: s.1, role: s.2) }
             .buttonStyle(.plain)
             .help("Открыть вкладку «\(tab.title)»")
     }
@@ -404,6 +412,8 @@ struct GeneralTab: View {
     var body: some View {
         SSections(tab: .general) { section in
             if section == 0 {
+                ThemePicker(model: model).fullSpan()
+            } else if section == 1 {
                 launchCard
                 permissionsCard
                 hotKeysCard
@@ -627,5 +637,91 @@ private struct AppleLanguagesRow: View {
         installed == true
             ? "Перевод Apple готов к работе без интернета."
             : "Пока языки не скачаны, запасной перевод Apple не работает совсем. Системные настройки → Основные → Язык и регион → Языки перевода: скачайте оба языка, затем вернитесь сюда."
+    }
+}
+
+
+// MARK: - Theme
+
+/// «Оформление»: the five palettes and «Классика», each shown as a small window in its light and dark variant.
+struct ThemePicker: View {
+    @ObservedObject var model: SettingsModel
+
+    private var current: ThemePalette { ThemePalette(rawValue: model.config.theme) ?? .default }
+
+    var body: some View {
+        SCard("Тема", symbol: "paintpalette", subtitle: "Светлый или тёмный вид Tolk берёт из системы: Системные настройки → Оформление.") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 196), spacing: 12)], alignment: .leading, spacing: 12) {
+                ForEach(ThemePalette.allCases, id: \.self) { p in
+                    Button { choose(p) } label: { tile(p) }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Тема «\(p.title)»")
+                        .accessibilityAddTraits(p == current ? .isSelected : [])
+                }
+            }
+            SHint(current.note).padding(.top, 10)
+        }
+    }
+
+    private func choose(_ p: ThemePalette) {
+        model.config.theme = p.rawValue
+        Theme.apply(p)
+    }
+
+    private func tile(_ p: ThemePalette) -> some View {
+        let on = p == current
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                preview(p, dark: false)
+                preview(p, dark: true)
+            }
+            HStack(spacing: 6) {
+                Text(p.title).font(.callout.weight(on ? .semibold : .regular))
+                Spacer(minLength: 4)
+                if on { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accentC) }
+            }
+        }
+        .padding(8)
+        .background(on ? Theme.accentSoftC : Color.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(on ? Theme.accentC : TolkStyle.hairline, lineWidth: on ? 1.5 : 0.5))
+        .contentShape(Rectangle())
+    }
+
+    /// A tiny window: page, a card with two lines and an accent button, a second-colour dot.
+    private func preview(_ p: ThemePalette, dark: Bool) -> some View {
+        let c = Theme.swatch(p, dark: dark).map { Color(nsColor: $0) }
+        let ink = dark ? Color.white.opacity(0.55) : Color.black.opacity(0.35)
+        return ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 7, style: .continuous).fill(c[0])
+            VStack(alignment: .leading, spacing: 4) {
+                Capsule().fill(ink).frame(width: 34, height: 3)
+                Capsule().fill(ink.opacity(0.6)).frame(width: 24, height: 3)
+                HStack(spacing: 4) {
+                    Capsule().fill(c[2]).frame(width: 20, height: 7)
+                    Circle().fill(c[3]).frame(width: 7, height: 7)
+                }
+                .padding(.top, 2)
+            }
+            .padding(7)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(c[1], in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .padding(6)
+        }
+        .frame(height: 62)
+        .frame(maxWidth: .infinity)
+        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
+    }
+}
+
+/// Re-renders SwiftUI pages when the palette changes (their colours are the same objects, so SwiftUI would not notice).
+@MainActor
+final class ThemeState: ObservableObject {
+    static let shared = ThemeState()
+    @Published private(set) var palette = Theme.palette
+    private init() {
+        NotificationCenter.default.addObserver(forName: Theme.changed, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { ThemeState.shared.palette = Theme.palette }
+        }
     }
 }

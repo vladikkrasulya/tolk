@@ -67,9 +67,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
 
         window.title = "Tolk"
+        window.backgroundColor = Theme.page
+        window.titlebarAppearsTransparent = Theme.isCustom
         window.minSize = NSSize(width: 720, height: 480)
         window.isReleasedWhenClosed = false
-        window.titlebarAppearsTransparent = false
         window.toolbarStyle = .unified
         window.titleVisibility = .visible
         window.tabbingMode = .disallowed
@@ -98,6 +99,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         if !window.setFrameUsingName(Self.autosaveName) { window.center() }
         window.setFrameAutosaveName(Self.autosaveName)
 
+        NotificationCenter.default.addObserver(forName: Theme.changed, object: nil, queue: .main) { [weak window] _ in
+            MainActor.assumeIsolated { window?.titlebarAppearsTransparent = Theme.isCustom }
+        }
         sidebar.onSelect = { [weak self] in self?.select($0) }
         select(current)
         AppPresence.shared.mainWindow = self
@@ -128,6 +132,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
         AppPresence.bringToFront(window)
     }
+
+    #if DEBUG
+    /// Renders: switch the page without putting the window on screen or activating the app.
+    func selectForRender(_ section: Section) {
+        select(section)
+        window?.contentView?.layoutSubtreeIfNeeded()
+    }
+    #endif
 
     private func select(_ section: Section) {
         current = section
@@ -184,6 +196,7 @@ final class PageContainerViewController: NSViewController {
     override func loadView() {
         let v = NSView()
         v.wantsLayer = true
+        ThemeFillView.underlay(v, color: Theme.page)
         view = v
     }
 
@@ -243,14 +256,52 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         table.delegate = self
         table.focusRingType = .none
         table.setAccessibilityLabel("Разделы")
+        applyTheme()
+        NotificationCenter.default.addObserver(forName: Theme.changed, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyTheme() }
+        }
 
         let scroll = NSScrollView()
         scroll.documentView = table
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = false
         scroll.automaticallyAdjustsContentInsets = true
-        view = scroll
+        // The sidebar's own colour over the translucent material (clear in «Классика», which keeps the material).
+        let box = NSView()
+        ThemeFillView.underlay(box, color: Theme.side)
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            scroll.leadingAnchor.constraint(equalTo: box.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: box.topAnchor), scroll.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+        ])
+        view = box
         table.reloadData()
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        tintGlass()
+    }
+
+    /// On macOS 26 the sidebar sits in a Liquid Glass view, which draws its own glass over the colour behind the
+    /// table; its tint is the way to give it the theme's sidebar colour (none in «Классика»).
+    private func tintGlass() {
+        guard #available(macOS 26.0, *) else { return }
+        var v = view.superview
+        while let cur = v, !(cur is NSSplitView) {
+            if let glass = cur as? NSGlassEffectView { glass.tintColor = Theme.isCustom ? Theme.side : nil; return }
+            v = cur.superview
+        }
+    }
+
+    private func applyTheme() {
+        tintGlass()
+        table.backgroundColor = .clear
+        table.selectionHighlightStyle = Theme.isCustom ? .none : .sourceList
+        let selected = table.selectedRowIndexes
+        table.reloadData()
+        table.selectRowIndexes(selected, byExtendingSelection: false)
     }
 
     func select(_ section: Section) {
@@ -286,6 +337,8 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
 
     func numberOfRows(in tableView: NSTableView) -> Int { sections.count }
 
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { SidebarRowView() }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let section = sections[row]
         let id = NSUserInterfaceItemIdentifier("SidebarCell")
@@ -311,7 +364,9 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         cell.textField?.stringValue = section.title
         cell.imageView?.image = NSImage(systemSymbolName: section.symbol, accessibilityDescription: section.title)
         cell.imageView?.symbolConfiguration = .init(pointSize: 15, weight: .regular)
-        cell.imageView?.contentTintColor = .controlAccentColor
+        cell.imageView?.contentTintColor = Theme.accent
+        cell.textField?.textColor = Theme.ink
+        cell.textField?.font = .systemFont(ofSize: NSFont.systemFontSize + 1)
         return cell
     }
 
@@ -324,4 +379,21 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposed: IndexSet) -> IndexSet {
         proposed.isEmpty ? tableView.selectedRowIndexes : proposed
     }
+}
+
+
+/// Sidebar selection in the theme: a soft rounded block of the accent colour. In a theme the table's own
+/// selection is off (`.none`: the system one is a material that ignores the palette), so the row draws it here.
+/// In «Классика» the system look stays.
+final class SidebarRowView: NSTableRowView {
+    override var isSelected: Bool { didSet { needsDisplay = true } }
+    override func drawBackground(in dirtyRect: NSRect) {
+        super.drawBackground(in: dirtyRect)
+        guard Theme.isCustom, isSelected else { return }
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            Theme.accentSoft.setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: 10, dy: 1), xRadius: 8, yRadius: 8).fill()
+        }
+    }
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { Theme.isCustom ? .normal : super.interiorBackgroundStyle }
 }

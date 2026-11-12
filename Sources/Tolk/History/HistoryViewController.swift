@@ -88,15 +88,15 @@ final class HistoryViewController: NSViewController {
         buildDetail()
 
         countLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        countLabel.textColor = .secondaryLabelColor
+        countLabel.textColor = Theme.ink2
         let hint = NSTextField(labelWithString: "Хранится только на этом Mac — никуда не отправляется")
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        hint.textColor = .tertiaryLabelColor
+        hint.textColor = Theme.ink3
         hint.lineBreakMode = .byTruncatingTail
         hint.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let lock = NSImageView(image: NSImage(systemSymbolName: "lock.fill", accessibilityDescription: nil) ?? NSImage())
         lock.symbolConfiguration = .init(pointSize: 9, weight: .medium)
-        lock.contentTintColor = .tertiaryLabelColor
+        lock.contentTintColor = Theme.ink3
         let footer = NSStackView(views: [countLabel, UIFactory.spacer(), lock, hint])
         footer.spacing = 4
 
@@ -128,7 +128,7 @@ final class HistoryViewController: NSViewController {
     private func roundedBox(_ box: NSBox) {
         box.boxType = .custom
         box.cornerRadius = TolkStyle.cardRadius
-        box.borderColor = .separatorColor
+        box.borderColor = Theme.line
         box.borderWidth = 0.5
         box.fillColor = TolkStyle.nsCard
         box.contentViewMargins = .zero
@@ -161,12 +161,12 @@ final class HistoryViewController: NSViewController {
         scroll.drawsBackground = false
 
         emptyIcon.symbolConfiguration = .init(pointSize: 30, weight: .light)
-        emptyIcon.contentTintColor = .tertiaryLabelColor
+        emptyIcon.contentTintColor = Theme.ink3
         emptyTitle.font = .systemFont(ofSize: 14, weight: .semibold)
-        emptyTitle.textColor = .secondaryLabelColor
+        emptyTitle.textColor = Theme.ink2
         emptyTitle.alignment = .center
         emptyText.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        emptyText.textColor = .secondaryLabelColor
+        emptyText.textColor = Theme.ink2
         emptyText.alignment = .center
         emptyText.preferredMaxLayoutWidth = 240
         emptyView.orientation = .vertical
@@ -198,7 +198,7 @@ final class HistoryViewController: NSViewController {
         roundedBox(detailBox)
 
         metaLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        metaLabel.textColor = .secondaryLabelColor
+        metaLabel.textColor = Theme.ink2
         metaLabel.lineBreakMode = .byTruncatingTail
         metaLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let meta = NSStackView(views: [originBadge, metaLabel])
@@ -207,11 +207,12 @@ final class HistoryViewController: NSViewController {
         let (sourceScroll, targetScroll) = (textScroll(sourceText, size: 13), textScroll(targetText, size: 14))
         for c in [sourceCaption, targetCaption] {
             c.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
-            c.textColor = .secondaryLabelColor
+            c.textColor = Theme.ink2
         }
 
         copyTranslationButton = button("Копировать перевод", symbol: "doc.on.doc", #selector(copyTranslation))
         copyTranslationButton.keyEquivalent = "\r"
+        copyTranslationButton.bezelColor = Theme.accentStrong
         copySourceButton = button("Копировать оригинал", symbol: nil, #selector(copySource))
         openButton = button("Открыть в переводе", symbol: "arrow.up.forward.app", #selector(openInTranslate))
         deleteButton = button("Удалить", symbol: "trash", #selector(deleteSelected))
@@ -239,7 +240,7 @@ final class HistoryViewController: NSViewController {
         sourceScroll.setContentHuggingPriority(.init(1), for: .vertical)
         targetScroll.setContentHuggingPriority(.init(1), for: .vertical)
 
-        detailPlaceholder.textColor = .tertiaryLabelColor
+        detailPlaceholder.textColor = Theme.ink3
         detailPlaceholder.alignment = .center
         detailPlaceholder.font = .systemFont(ofSize: 13)
 
@@ -265,7 +266,7 @@ final class HistoryViewController: NSViewController {
         tv.isRichText = false
         tv.drawsBackground = false
         tv.font = .systemFont(ofSize: size)
-        tv.textColor = .labelColor
+        tv.textColor = Theme.ink
         tv.textContainerInset = NSSize(width: 0, height: 2)
         tv.textContainer?.lineFragmentPadding = 0
         tv.isVerticallyResizable = true
@@ -410,7 +411,7 @@ final class HistoryViewController: NSViewController {
     static func originColor(_ origin: String) -> NSColor {
         switch origin {
         case "popup": .systemBlue
-        case "reply": .systemGreen
+        case "reply": Theme.ok
         case "quick": .systemOrange
         case "page": .systemPurple
         case "image": .systemPink
@@ -594,7 +595,7 @@ extension HistoryViewController: NSTableViewDataSource, NSTableViewDelegate {
                 c.identifier = id
                 let l = NSTextField(labelWithString: "")
                 l.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
-                l.textColor = .secondaryLabelColor
+                l.textColor = Theme.ink2
                 l.translatesAutoresizingMaskIntoConstraints = false
                 c.addSubview(l)
                 c.textField = l
@@ -634,12 +635,12 @@ final class HistoryTableView: NSTableView {
 
 /// Row: «14:32 · [icon] Telegram ……… [Попап]» / source snippet / «→ translation snippet».
 final class HistoryCellView: NSTableCellView {
-    private let timeLabel = UIFactory.label("", size: 11, color: .secondaryLabelColor)
+    private let timeLabel = UIFactory.label("", size: 11, color: Theme.ink2)
     private let appIcon = NSImageView()
-    private let appLabel = UIFactory.label("", size: 11, color: .secondaryLabelColor)
+    private let appLabel = UIFactory.label("", size: 11, color: Theme.ink2)
     private let badge = BadgeView()
-    private let sourceLabel = UIFactory.label("", size: 13, color: .labelColor)
-    private let translationLabel = UIFactory.label("", size: 12, color: .secondaryLabelColor)
+    private let sourceLabel = UIFactory.label("", size: 13, color: Theme.ink)
+    private let translationLabel = UIFactory.label("", size: 12, color: Theme.ink2)
 
     private static var iconCache: [String: NSImage] = [:]
 
@@ -692,9 +693,9 @@ final class HistoryCellView: NSTableCellView {
         didSet {
             // Selected row (emphasized): keep text readable on the accent color.
             let selected = backgroundStyle == .emphasized
-            sourceLabel.textColor = selected ? .alternateSelectedControlTextColor : .labelColor
+            sourceLabel.textColor = selected ? .alternateSelectedControlTextColor : Theme.ink
             for l in [timeLabel, appLabel, translationLabel] {
-                l.textColor = selected ? NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.8) : .secondaryLabelColor
+                l.textColor = selected ? NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.8) : Theme.ink2
             }
         }
     }

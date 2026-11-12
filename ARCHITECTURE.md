@@ -701,6 +701,16 @@ through, and that Tab no longer falls through to the app. Closed for 1.0:
 - **README in English** (`README.md`), the Russian one is `README.ru.md`.
 - A DMG is attached to the GitHub release.
 
+## v1.1.0 — colour themes
+
+Five palettes chosen by the user from a canvas of mock-ups (Jade, Milk and blue, Coffee and azure, Butter and tomato, Rose and chocolate), each with a light and a dark variant; the variant follows the system appearance. «Классика» keeps the macOS colours and the user's system accent — the look before themes. Default: Jade. Setting `theme` in `tolk.json`, picker in Настройки → Общие → Оформление.
+
+- `UI/Theme.swift`: every token (`page`, `card`, `side`, `well`, `ink…`, `line`, `accent`, `accentStrong`, `accentSoft`, `accentInk`, `hero`, `second…`, `ok…`, `panel`) is a dynamic `NSColor` resolved at draw time for the view's appearance and `Theme.palette`, with a system fallback for «Классика»; SwiftUI twins (`…C`). `Theme.apply` switches the palette and flips every window's appearance to force a redraw; SwiftUI pages observe `ThemeState` and re-render (`.id(palette)`). `TOLK_THEME` overrides the palette for renders.
+- The app's system colours were replaced by tokens in one pass (335 places: accent, label, background, separator colours); default buttons and segmented controls take `accentStrong`. Window background, page container, floating panels (popup, reply, HUD, input window) and the type-translate panel get the theme colour; «Классика» keeps the translucent materials.
+- Main window sidebar: on macOS 26 it is a Liquid Glass view, which paints over anything behind the table — it gets `NSGlassEffectView.tintColor`; the selection is drawn by `SidebarRowView` in `accentSoft` (the system selection is a material that ignores the palette). Not verified on screen: offscreen renders do not show the glass, the user checks it.
+- Settings: cards with an icon badge and a soft shadow, sections with a large badge, tiles with tones (`STone`: accent, second, ok, hero), rounded figures, coloured share bars per block, a donut for «Кто переводил», a smooth area chart with hover (`SDayChart`) instead of bars. Raw miss reasons of older versions («text after the caret (…)») are folded into readable ones (`UsageText.foldedMisses`).
+- Renders: `TOLK_QUIET=1` takes the main-window shots without putting the window on screen or activating the app (a render popped a window over the user's work, and a Dock click on it crashed `applicationShouldHandleReopen`, which now returns when no main window exists).
+
 ## v1.0.9 — the ⌘A way never pastes over text that was not translated
 
 The user's condition for the fallback of 1.0.8: no risk of replacing what was not meant to be translated — a mail reply with the old correspondence quoted below, where ⌘A takes the whole letter. `TypeTranslate.mayPasteAfterKeys`: a checked selection (exactly the translated text) is pasted over anywhere; a field that reports no selection — only in a chat program (`TypeTranslate.messengers`), never in mail, a browser or an unknown program; anything else selected — never. When the paste is refused the selection is dropped with an arrow key, so the next keystroke does not wipe the text, and the panel says why.

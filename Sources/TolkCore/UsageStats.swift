@@ -237,6 +237,8 @@ public enum UsageText {
         case "secure": "Поле для пароля"
         case "small-field": "Поле поиска, адреса или слишком маленькое"
         case "not-inserted": "Нажали Tab, но поле изменилось — подсказка не вставлена"
+        case "after-caret": "За курсором уже есть текст — подсказка не к месту"
+        case "own-window": "Курсор в окне самого Tolk"
         default: key
         }
     }
@@ -261,7 +263,16 @@ public enum UsageText {
         if r.hasPrefix("«Перевод при наборе»") { return "type-translate" }
         if r.hasPrefix("model not ready") { return "not-ready" }
         if r.hasPrefix("secure") { return "secure" }
+        if r.hasPrefix("text after the caret") { return "after-caret" }
+        if r.hasPrefix("focus in Tolk") { return "own-window" }
         return r
+    }
+
+    /// Stored reasons with the raw ones of older versions («text after the caret (5 c… app=…)») folded into their key.
+    public static func foldedMisses(_ m: [String: Int]) -> [String: Int] {
+        var out: [String: Int] = [:]
+        for (k, v) in m { out[missKey(forSkipReason: k), default: 0] += v }
+        return out
     }
 
     public static func ms(_ v: Int?) -> String {

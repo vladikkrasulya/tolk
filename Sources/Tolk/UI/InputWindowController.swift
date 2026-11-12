@@ -86,6 +86,7 @@ final class InputWindowController: NSObject, NSWindowDelegate {
         effect.material = .windowBackground
         effect.blendingMode = .behindWindow
         effect.state = .followsWindowActiveState
+        ThemeFillView.underlay(effect, color: Theme.panel)
         let pageView = page.view
         pageView.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(pageView)

@@ -61,8 +61,8 @@ final class QuickActionHUD {
         icon.isHidden = kind == .progress
         if kind == .progress { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
         switch kind {
-        case .success: setIcon("checkmark.circle.fill", .systemGreen)
-        case .info: setIcon("info.circle.fill", .secondaryLabelColor)
+        case .success: setIcon("checkmark.circle.fill", Theme.ok)
+        case .info: setIcon("info.circle.fill", Theme.ink2)
         case .error: setIcon("exclamationmark.triangle.fill", .systemOrange)
         case .progress: break
         }
@@ -122,17 +122,18 @@ final class QuickActionHUD {
         effect.layer?.masksToBounds = true
         effect.maskImage = Self.roundedMask(radius: 10)
         p.contentView = effect
+        ThemeFillView.underlay(effect, color: Theme.panel)
 
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
         icon.symbolConfiguration = .init(pointSize: 13, weight: .semibold)
         label.font = .systemFont(ofSize: 12.5, weight: .medium)
-        label.textColor = .labelColor
+        label.textColor = Theme.ink
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         hint.font = .systemFont(ofSize: 10.5)
-        hint.textColor = .tertiaryLabelColor
+        hint.textColor = Theme.ink3
 
         let stack = NSStackView(views: [spinner, icon, label, hint])
         stack.orientation = .horizontal

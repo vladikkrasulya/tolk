@@ -6,8 +6,8 @@ import AppKit
 final class ReplyMessageCard: NSView {
     let messageView = PlaceholderTextView()
     let translationView = NSTextView()
-    private let titleLabel = UIFactory.label("Сообщение собеседника", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
-    private let langLabel = UIFactory.label("", size: 11, color: .tertiaryLabelColor)
+    private let titleLabel = UIFactory.label("Сообщение собеседника", size: 11.5, weight: .semibold, color: Theme.ink2)
+    private let langLabel = UIFactory.label("", size: 11, color: Theme.ink3)
     private let spinner = NSProgressIndicator()
     private let box = NSBox()
 
@@ -19,7 +19,7 @@ final class ReplyMessageCard: NSView {
         box.boxType = .custom
         box.cornerRadius = TolkStyle.cardRadius
         box.borderWidth = 0.5
-        box.borderColor = .separatorColor
+        box.borderColor = Theme.line
         box.fillColor = TolkStyle.nsCard
         box.contentViewMargins = .zero
         box.titlePosition = .noTitle
@@ -45,7 +45,7 @@ final class ReplyMessageCard: NSView {
         messageView.setAccessibilityLabel("Сообщение собеседника")
         let (trScroll, tr) = Self.pane(translationView, editable: false)
         _ = (msg, tr)
-        translationView.textColor = .secondaryLabelColor
+        translationView.textColor = Theme.ink2
 
         let divider = NSBox()
         divider.boxType = .separator
@@ -89,7 +89,7 @@ final class ReplyMessageCard: NSView {
         tv.allowsUndo = editable
         tv.drawsBackground = false
         tv.font = .systemFont(ofSize: fontSize)
-        tv.textColor = .labelColor
+        tv.textColor = Theme.ink
         tv.textContainerInset = NSSize(width: 10, height: 6)
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticDashSubstitutionEnabled = false
@@ -109,7 +109,7 @@ final class ReplyMessageCard: NSView {
     func setTranslation(_ text: String, dim: Bool = false, error: Bool = false) {
         let p = NSMutableParagraphStyle()
         p.lineSpacing = 2
-        let color: NSColor = error ? .systemRed : dim ? .tertiaryLabelColor : .secondaryLabelColor
+        let color: NSColor = error ? .systemRed : dim ? Theme.ink3 : Theme.ink2
         translationView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: [
             .font: NSFont.systemFont(ofSize: Self.fontSize), .foregroundColor: color, .paragraphStyle: p]))
     }
@@ -117,6 +117,6 @@ final class ReplyMessageCard: NSView {
         let p = NSMutableParagraphStyle()
         p.lineSpacing = 2
         translationView.textStorage?.append(NSAttributedString(string: chunk, attributes: [
-            .font: NSFont.systemFont(ofSize: Self.fontSize), .foregroundColor: NSColor.secondaryLabelColor, .paragraphStyle: p]))
+            .font: NSFont.systemFont(ofSize: Self.fontSize), .foregroundColor: Theme.ink2, .paragraphStyle: p]))
     }
 }

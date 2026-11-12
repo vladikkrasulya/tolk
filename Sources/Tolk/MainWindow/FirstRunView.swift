@@ -41,7 +41,7 @@ final class FirstRunView: NSVisualEffectView {
         state = .active
 
         let title = UIFactory.label("Добро пожаловать в Tolk", size: 22, weight: .semibold)
-        let sub = UIFactory.label("Два вопроса — и можно переводить", size: 13, color: .secondaryLabelColor)
+        let sub = UIFactory.label("Два вопроса — и можно переводить", size: 13, color: Theme.ink2)
         for p in [mine, target] {
             p.addItems(withTitles: Language.allCases.map { "\($0.flag)  " + UIText.capitalized($0) })
             p.widthAnchor.constraint(equalToConstant: 200).isActive = true
@@ -57,11 +57,12 @@ final class FirstRunView: NSVisualEffectView {
             return r
         }
         let note = UIFactory.wrappingLabel("Модель работает только в домашней сети. Вне дома перевод идёт через запасной сервис.",
-                                           size: 12, color: .secondaryLabelColor)
+                                           size: 12, color: Theme.ink2)
         note.alignment = .center
         note.preferredMaxLayoutWidth = 320
         doneButton.bezelStyle = .push
         doneButton.keyEquivalent = "\r"
+        doneButton.bezelColor = Theme.accentStrong
         doneButton.target = self
         doneButton.action = #selector(done)
 

@@ -6,7 +6,7 @@ import SwiftUI
 final class HelpViewController: NSViewController {
     init() { super.init(nibName: nil, bundle: nil); title = "Как пользоваться" }
     required init?(coder: NSCoder) { fatalError() }
-    override func loadView() { view = NSHostingView(rootView: HelpView()) }
+    override func loadView() { view = NSHostingView(rootView: ThemedHelp()) }
 }
 
 // MARK: - Page
@@ -111,7 +111,7 @@ struct HelpCard<Anim: View>: View {
             anim(hovering)
                 .frame(maxWidth: .infinity)
                 .frame(height: 110)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
+                .background(RoundedRectangle(cornerRadius: 10).fill(Theme.inkC.opacity(0.04)))
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             HStack(spacing: 6) {
                 Text(title).font(.headline)
@@ -122,8 +122,8 @@ struct HelpCard<Anim: View>: View {
             Text(text).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).stroke(hovering ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08)))
+        .background(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).fill(Color(nsColor: Theme.card)))
+        .overlay(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).stroke(hovering ? Theme.accentC.opacity(0.5) : Theme.inkC.opacity(0.08)))
         .onHover { hovering = $0 }
     }
 }
@@ -137,8 +137,8 @@ struct KeyCap: View {
             .font(.system(size: 12, weight: .semibold, design: .rounded))
             .frame(minWidth: 22, minHeight: 22)
             .padding(.horizontal, 3)
-            .background(RoundedRectangle(cornerRadius: 5).fill(pressed ? Color.accentColor.opacity(0.35) : Color.primary.opacity(0.08)))
-            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.primary.opacity(0.15)))
+            .background(RoundedRectangle(cornerRadius: 5).fill(pressed ? Theme.accentC.opacity(0.35) : Theme.inkC.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Theme.inkC.opacity(0.15)))
             .offset(y: pressed ? 1.5 : 0)
     }
 }
@@ -147,7 +147,7 @@ struct KeyCap: View {
 struct Lines: View {
     var count = 3
     var width: CGFloat = 120
-    var color = Color.primary.opacity(0.18)
+    var color = Theme.inkC.opacity(0.18)
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             ForEach(0..<count, id: \.self) { i in
@@ -159,13 +159,13 @@ struct Lines: View {
 
 /// Small rounded "window".
 struct MiniWindow<Content: View>: View {
-    var tint: Color = Color(nsColor: .windowBackgroundColor)
+    var tint: Color = Color(nsColor: Theme.page)
     @ViewBuilder let content: () -> Content
     var body: some View {
         content()
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(tint))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.inkC.opacity(0.12)))
     }
 }
 
@@ -176,13 +176,13 @@ struct DoubleCopyAnim: View {
     var body: some View {
         HStack(spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
-                Lines(count: 3, width: 90, color: phase >= 1 ? Color.accentColor.opacity(0.45) : Color.primary.opacity(0.18))
+                Lines(count: 3, width: 90, color: phase >= 1 ? Theme.accentC.opacity(0.45) : Theme.inkC.opacity(0.18))
                 HStack(spacing: 4) { KeyCap("⌘", pressed: phase == 2 || phase == 3); KeyCap("C", pressed: phase == 2 || phase == 3) }
             }
             MiniWindow {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 4) { Text("EN → RU").font(.system(size: 9, weight: .semibold)); Spacer() }
-                    Lines(count: 3, width: 80, color: Color.primary.opacity(0.35))
+                    Lines(count: 3, width: 80, color: Theme.inkC.opacity(0.35))
                 }
                 .frame(width: 96)
             }
@@ -197,18 +197,18 @@ struct ReplyAnim: View {
     var body: some View {
         MiniWindow {
             VStack(alignment: .leading, spacing: 6) {
-                Lines(count: 2, width: 150, color: Color.primary.opacity(0.22))
+                Lines(count: 2, width: 150, color: Theme.inkC.opacity(0.22))
                     .padding(5)
-                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.05)))
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Theme.inkC.opacity(0.05)))
                 HStack(spacing: 0) {
                     Text(String("Да, отключим сабы сегодня".prefix(min(25, phase * 7))))
                         .font(.system(size: 9))
-                    Rectangle().fill(Color.accentColor).frame(width: 1, height: 10).opacity(phase < 4 ? 1 : 0)
+                    Rectangle().fill(Theme.accentC).frame(width: 1, height: 10).opacity(phase < 4 ? 1 : 0)
                     Spacer(minLength: 0)
                 }
                 .frame(width: 160, height: 16)
                 .padding(.horizontal, 4)
-                .background(RoundedRectangle(cornerRadius: 4).stroke(Color.primary.opacity(0.15)))
+                .background(RoundedRectangle(cornerRadius: 4).stroke(Theme.inkC.opacity(0.15)))
                 Text("→ Yes, we'll disable the subs today").font(.system(size: 9)).foregroundStyle(.secondary)
                     .opacity(phase >= 4 ? 1 : 0)
             }
@@ -226,13 +226,13 @@ struct ReplaceAnim: View {
                 Text(phase >= 3 ? to : from)
                     .font(.system(size: 11))
                     .padding(.horizontal, 4)
-                    .background(RoundedRectangle(cornerRadius: 3).fill(phase >= 1 && phase < 3 ? Color.accentColor.opacity(0.3) : .clear))
+                    .background(RoundedRectangle(cornerRadius: 3).fill(phase >= 1 && phase < 3 ? Theme.accentC.opacity(0.3) : .clear))
                     .contentTransition(.opacity)
                 Spacer()
             }
             .padding(8)
             .frame(width: 210)
-            .background(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.18)))
+            .background(RoundedRectangle(cornerRadius: 8).stroke(Theme.inkC.opacity(0.18)))
             Text(phase == 2 ? "Перевожу…" : (phase >= 3 ? "Готово ✓" : " "))
                 .font(.system(size: 9)).foregroundStyle(.secondary)
         }
@@ -247,13 +247,13 @@ struct CaptureAnim: View {
                 .padding(.top, 14).padding(.leading, 20)
             RoundedRectangle(cornerRadius: 3)
                 .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                .foregroundStyle(Color.accentColor)
-                .background(Color.accentColor.opacity(0.08))
+                .foregroundStyle(Theme.accentC)
+                .background(Theme.accentC.opacity(0.08))
                 .frame(width: phase >= 1 ? 160 : 10, height: phase >= 1 ? 50 : 8)
                 .padding(.top, 8).padding(.leading, 14)
                 .opacity(phase >= 1 && phase < 5 ? 1 : 0)
             MiniWindow {
-                Lines(count: 2, width: 70, color: Color.primary.opacity(0.35)).frame(width: 80)
+                Lines(count: 2, width: 70, color: Theme.inkC.opacity(0.35)).frame(width: 80)
             }
             .padding(.top, 58).padding(.leading, 110)
             .opacity(phase >= 3 ? 1 : 0)
@@ -268,18 +268,18 @@ struct DropAnim: View {
         HStack(spacing: 22) {
             Image(systemName: "photo")
                 .font(.system(size: 26))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Theme.accentC)
                 .offset(x: phase >= 1 && phase <= 2 ? 46 : 0)
                 .opacity(phase >= 3 ? 0.3 : 1)
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
-                .foregroundStyle(Color.primary.opacity(0.3))
+                .foregroundStyle(Theme.inkC.opacity(0.3))
                 .frame(width: 120, height: 76)
                 .overlay {
                     if phase >= 3 {
                         VStack(alignment: .leading, spacing: 6) {
-                            Lines(count: 2, width: 90, color: Color.primary.opacity(0.22))
-                            Lines(count: 2, width: 90, color: Color.accentColor.opacity(0.45))
+                            Lines(count: 2, width: 90, color: Theme.inkC.opacity(0.22))
+                            Lines(count: 2, width: 90, color: Theme.accentC.opacity(0.45))
                         }
                     }
                 }
@@ -294,8 +294,8 @@ private extension View {
     func infoCardStyle() -> some View {
         padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).fill(Color(nsColor: .controlBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).stroke(Color.primary.opacity(0.08)))
+            .background(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).fill(Color(nsColor: Theme.card)))
+            .overlay(RoundedRectangle(cornerRadius: TolkStyle.cardRadius).stroke(Theme.inkC.opacity(0.08)))
     }
 }
 
@@ -317,7 +317,7 @@ struct PopupButtonsCard: View {
             Text("В окне перевода").font(.headline)
             ForEach(rows, id: \.1) { icon, title, note in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Image(systemName: icon).frame(width: 20).foregroundStyle(Color.accentColor)
+                    Image(systemName: icon).frame(width: 20).foregroundStyle(Theme.accentC)
                     Text(title).frame(width: 190, alignment: .leading)
                     Text(note).foregroundStyle(.secondary)
                     Spacer()
@@ -348,7 +348,7 @@ struct BigWindowCard: View {
             Text("Большое окно (Tolk в меню, ⌘1…⌘7 — разделы)").font(.headline)
             ForEach(rows, id: \.1) { icon, title, note in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Image(systemName: icon).frame(width: 20).foregroundStyle(Color.accentColor)
+                    Image(systemName: icon).frame(width: 20).foregroundStyle(Theme.accentC)
                     Text(title).frame(width: 110, alignment: .leading)
                     Text(note).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     Spacer()
@@ -363,7 +363,7 @@ struct BigWindowCard: View {
 struct AutocompleteHelpCard: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "text.cursor").font(.title2).foregroundStyle(Color.accentColor)
+            Image(systemName: "text.cursor").font(.title2).foregroundStyle(Theme.accentC)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Автодополнение (по умолчанию выключено)").font(.headline)
                 Text("Включается в меню Tolk → «Автодополнение» или в «Настройках». Пока вы печатаете, серый текст у курсора предлагает продолжение: Tab принимает слово, → — всё целиком, ⌥Tab — обычный Tab, Esc скрывает подсказку в этом поле. Модель работает на этом Mac. Опечатки и эмодзи (:fire) подсказываются и без модели. В терминалах, редакторах кода и полях паролей выключено — список в «Настройках». Сколько подсказок показано и принято — «Настройки» → «Автодополнение» → «Статистика» и меню.")
@@ -385,5 +385,14 @@ struct TroubleCard: View {
             }
         }
         .infoCardStyle()
+    }
+}
+
+
+/// The help page, redrawn when the palette changes.
+private struct ThemedHelp: View {
+    @ObservedObject private var theme = ThemeState.shared
+    var body: some View {
+        HelpView().id(theme.palette).tint(Theme.accentC).foregroundStyle(Theme.inkC).background(Theme.pageC)
     }
 }

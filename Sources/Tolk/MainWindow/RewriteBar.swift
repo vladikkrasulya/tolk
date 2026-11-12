@@ -16,7 +16,7 @@ final class RewriteBar: NSView {
     private let foldMenu = NSPopUpButton(frame: .zero, pullsDown: true)
     private let spinner = NSProgressIndicator()
     private let cancel = NSButton(title: "Отмена", target: nil, action: nil)
-    private let busyLabel = UIFactory.label("", size: 11.5, color: .secondaryLabelColor)
+    private let busyLabel = UIFactory.label("", size: 11.5, color: Theme.ink2)
     private let row = NSStackView()
     private var compact = false
     private var busy = false
@@ -65,6 +65,7 @@ final class RewriteBar: NSView {
         pronoun.target = self
         pronoun.action = #selector(pronounClicked(_:))
         pronoun.controlSize = .small
+        pronoun.selectedSegmentBezelColor = Theme.accentStrong
         pronoun.font = .systemFont(ofSize: 11.5)
         pronoun.selectedSegment = -1
         pronoun.segmentStyle = .rounded

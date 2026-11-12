@@ -25,10 +25,10 @@ private final class GhostLabel: NSView {
 private final class BubbleBack: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let r = bounds.insetBy(dx: 0.5, dy: 0.5)
-        NSColor.windowBackgroundColor.withAlphaComponent(0.97).setFill()
+        Theme.page.withAlphaComponent(0.97).setFill()
         let path = NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6)
         path.fill()
-        NSColor.separatorColor.setStroke()
+        Theme.line.setStroke()
         path.stroke()
     }
 }
@@ -177,7 +177,7 @@ private final class HintBadge: NSView {
         bubbleBack.needsDisplay = true
 
         textField.text = body
-        textField.color = bubble ? NSColor.labelColor.withAlphaComponent(0.8) : Self.ghostColor
+        textField.color = bubble ? Theme.ink.withAlphaComponent(0.8) : Self.ghostColor
         textField.leadingGap = bubble ? 0 : gapW
         textField.font = font
         textField.frame = NSRect(x: padX, y: padY + (height - textH) / 2, width: textW, height: textH)

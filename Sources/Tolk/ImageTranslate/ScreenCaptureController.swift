@@ -448,7 +448,7 @@ enum Toast {
         panel?.orderOut(nil)
         let label = NSTextField(labelWithString: text)
         label.font = .systemFont(ofSize: 13, weight: .medium)
-        label.textColor = .labelColor
+        label.textColor = Theme.ink
         let size = label.fittingSize
         let frame = NSRect(x: point.x - size.width / 2 - 16, y: point.y - size.height / 2 - 9,
                            width: size.width + 32, height: size.height + 18)

@@ -71,11 +71,11 @@ struct StatsTab: View {
                 SHint("Переводов за этот период нет.")
             } else {
                 STileGrid {
-                    STile(caption: "Переводов", value: UsageText.count(u.translations), note: "\(UsageText.count(u.chars)) знаков исходного текста")
-                    STile(caption: "Обычное время", value: UsageText.ms(u.medianLatency), note: u.medianFirstChunk.map { "первые слова через \(UsageText.ms($0))" } ?? "от запроса до готового перевода")
-                    STile(caption: "Из кэша", value: pct(u.cached, u.translations), note: "повторный текст отдаётся мгновенно")
-                    STile(caption: "Запасной перевод", value: pct(u.fallback, u.translations), note: u.fallback == 0 ? "сервер отвечал всегда" : "\(u.fallback) раз сервер был недоступен")
-                    STile(caption: "Ошибок", value: "\(u.failed)", note: u.failed == 0 ? "все переводы дошли" : "подробности во вкладке «Журнал»")
+                    STile(caption: "Переводов", value: UsageText.count(u.translations), note: "\(UsageText.count(u.chars)) знаков исходного текста", symbol: "character.bubble", tone: .hero)
+                    STile(caption: "Обычное время", value: UsageText.ms(u.medianLatency), note: u.medianFirstChunk.map { "первые слова через \(UsageText.ms($0))" } ?? "от запроса до готового перевода", symbol: "bolt")
+                    STile(caption: "Из кэша", value: pct(u.cached, u.translations), note: "повторный текст отдаётся мгновенно", symbol: "arrow.clockwise")
+                    STile(caption: "Запасной перевод", value: pct(u.fallback, u.translations), note: u.fallback == 0 ? "сервер отвечал всегда" : "\(u.fallback) раз сервер был недоступен", symbol: "arrow.triangle.branch", tone: u.fallback == 0 ? .neutral : .second)
+                    STile(caption: "Ошибок", value: "\(u.failed)", note: u.failed == 0 ? "все переводы дошли" : "подробности во вкладке «Журнал»", symbol: u.failed == 0 ? "checkmark" : "exclamationmark.triangle", tone: u.failed == 0 ? .ok : .second)
                 }
                 if u.medianLatency == nil {
                     SHint("Время перевода считается с версии 0.8: более ранние переводы взяты из истории без замеров.").padding(.top, 6)
@@ -97,19 +97,22 @@ struct StatsTab: View {
             if u.translations == 0 {
                 SHint("Нет данных за этот период.")
             } else {
-                shareBlock("Способ", u.byOrigin.map { (UsageText.origin($0.key), $0.value) }, total: u.translations)
-                shareBlock("Направление", u.byPair.map { ($0.key.uppercased(), $0.value) }, total: u.translations)
-                if !u.byApp.isEmpty { shareBlock("Программа", u.byApp.map { ($0.key, $0.value) }, total: u.translations) }
-                if u.byProvider.count > 1 { shareBlock("Кто переводил", u.byProvider.map { ($0.key, $0.value) }, total: u.translations) }
+                if !u.byProvider.isEmpty {
+                    Text("Кто переводил").font(.caption).foregroundStyle(.secondary)
+                    SDonut(rows: u.byProvider.map { ($0.key, $0.value) }).padding(.vertical, 6)
+                }
+                shareBlock("Способ", u.byOrigin.map { (UsageText.origin($0.key), $0.value) }, total: u.translations, color: Theme.accentC)
+                shareBlock("Направление", u.byPair.map { ($0.key.uppercased(), $0.value) }, total: u.translations, color: Theme.secondC)
+                if !u.byApp.isEmpty { shareBlock("Программа", u.byApp.map { ($0.key, $0.value) }, total: u.translations, color: Theme.okC) }
             }
         }
     }
 
-    private func shareBlock(_ title: String, _ rows: [(String, Int)], total: Int, limit: Int = 5) -> some View {
+    private func shareBlock(_ title: String, _ rows: [(String, Int)], total: Int, limit: Int = 5, color: Color = Theme.accentC) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title).font(.caption).foregroundStyle(.secondary).padding(.top, 6)
             ForEach(Array(rows.sorted { ($0.1, $1.0) > ($1.1, $0.0) }.prefix(limit).enumerated()), id: \.offset) { _, r in
-                SShareRow(label: r.0, value: r.1, total: total)
+                SShareRow(label: r.0, value: r.1, total: total, color: color)
             }
         }
     }
@@ -124,12 +127,12 @@ struct StatsTab: View {
                 SHint("Подсказок за этот период не было.")
             } else {
                 STileGrid {
-                    STile(caption: "Показано", value: UsageText.count(shown), note: a.instantShown > 0 ? "из них \(a.instantShown) — опечатки и эмодзи" : nil)
-                    STile(caption: "Принято", value: pct(a.acceptedEvents, shown), note: "\(a.acceptedEvents) раз: Tab \(a.tabEvents + a.instantAccepted), → \(a.allEvents)")
-                    STile(caption: "Слов принято", value: UsageText.count(a.acceptedWords), note: nil)
-                    STile(caption: "Сбережено нажатий", value: UsageText.count(a.savedKeystrokes), note: "знаки, которые не пришлось печатать")
-                    STile(caption: "Обычная задержка", value: a.medianLatency.map { "\($0) мс" } ?? "—", note: "от паузы до подсказки")
-                    STile(caption: "Не подошло", value: pct(a.typedOn + a.esc, shown), note: "печатали дальше \(a.typedOn), Esc \(a.esc)")
+                    STile(caption: "Показано", value: UsageText.count(shown), note: a.instantShown > 0 ? "из них \(a.instantShown) — опечатки и эмодзи" : nil, symbol: "eye")
+                    STile(caption: "Принято", value: pct(a.acceptedEvents, shown), note: "\(a.acceptedEvents) раз: Tab \(a.tabEvents + a.instantAccepted), → \(a.allEvents)", symbol: "checkmark", tone: .ok)
+                    STile(caption: "Слов принято", value: UsageText.count(a.acceptedWords), note: nil, symbol: "text.word.spacing", tone: .accent)
+                    STile(caption: "Сбережено нажатий", value: UsageText.count(a.savedKeystrokes), note: "знаки, которые не пришлось печатать", symbol: "keyboard", tone: .hero)
+                    STile(caption: "Обычная задержка", value: a.medianLatency.map { "\($0) мс" } ?? "—", note: "от паузы до подсказки", symbol: "timer")
+                    STile(caption: "Не подошло", value: pct(a.typedOn + a.esc, shown), note: "печатали дальше \(a.typedOn), Esc \(a.esc)", symbol: "arrow.uturn.left", tone: .second)
                 }
                 SHint(verdict(a, shown: shown)).padding(.top, 8)
             }
@@ -156,21 +159,20 @@ struct StatsTab: View {
             return .init(id: day, back: (b?.shown ?? 0) + (b?.instantShown ?? 0), front: b?.acceptedEvents ?? 0, mark: changes[day] != nil)
         }
         return SCard("Подсказки по дням", symbol: "calendar") {
-            HStack(spacing: 10) {
-                SLegend(color: Color.primary.opacity(0.2), text: "показано")
-                SLegend(color: .accentColor, text: "принято")
-                SLegend(color: .orange, text: "смена модели")
+            FlowLayout(spacing: 12) {
+                SLegend(color: Theme.secondC, text: "показано")
+                SLegend(color: Theme.accentC, text: "принято")
+                SLegend(color: Theme.ink3C, text: "смена модели")
             }
-        } content: {
-            SDayChart(bars: bars)
+            SDayChart(bars: bars, frontName: "принято")
             ForEach(bars.filter(\.mark)) { b in
-                Text("\(SDayChart.short(b.id)): модель \(ACStats.shortModel(changes[b.id] ?? ""))").font(.caption).foregroundStyle(.orange)
+                Text("\(SDayChart.short(b.id)): модель \(ACStats.shortModel(changes[b.id] ?? ""))").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
 
     private var missesCard: some View {
-        let misses = usage.acMisses
+        let misses = UsageText.foldedMisses(usage.acMisses)
         let total = misses.values.reduce(0, +)
         return SCard("Почему подсказки не было", symbol: "questionmark.bubble",
                      subtitle: "Случаи, когда вы остановились, а у курсора осталось пусто.") {
@@ -484,7 +486,7 @@ private struct LogLine: View {
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 4).padding(.vertical, 1)
-        .background(selected ? Color.accentColor.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
+        .background(selected ? Theme.accentC.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 4))
         .help(entry.map { $0.title + " — " + $0.meaning } ?? "")
     }
 

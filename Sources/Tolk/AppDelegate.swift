@@ -55,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastExternalApp: NSRunningApplication?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The palette before any window is built; TOLK_THEME overrides it for renders.
+        Theme.palette = ThemePalette(rawValue: ProcessInfo.processInfo.environment["TOLK_THEME"] ?? TolkConfig.load().theme) ?? .default
         #if DEBUG
         // First of all: builds throw-away controllers only; no autocomplete, event taps, hotkeys, timers or server.
         if SmokeTest.requested { SmokeTest.run(); exit(0) }
@@ -260,7 +262,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Click on the Dock / Launchpad icon while Tolk is already running.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         // `flag` is also true for a visible panel (suggestion, HUD, popup): judge by the main window itself.
-        mainWindow.show()
+        // Render and test modes build no main window: a Dock click must not crash them.
+        guard let window = mainWindow as MainWindowController? else { return true }
+        window.show()
         return false
     }
 
@@ -269,6 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func configChanged() {
         config = TolkConfig.load()
         Diagnostics.verbose = config.verboseLog
+        Theme.apply(ThemePalette(rawValue: config.theme) ?? .default)
         Diagnostics.log("settings changed: profile=\(config.activeProfileID) model=\(config.effectiveModel) fallback=\(config.fallback.rawValue)")
         engine = DefaultTranslationEngine(config: config)
         popup.replaceEngine(withHistory("popup"))

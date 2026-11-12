@@ -18,6 +18,11 @@ enum MainWindowDemo {
     private static var keepAlive: [AnyObject] = []
     private static var forced: NSAppearance?
 
+    static var quiet: Bool { ProcessInfo.processInfo.environment["TOLK_QUIET"] != nil }
+    private static func open(_ main: MainWindowController, _ s: MainWindowController.Section) {
+        if quiet { main.selectForRender(s) } else { main.show(s) }
+    }
+
     static func runIfRequested() {
         let env = ProcessInfo.processInfo.environment
         guard let raw = env["TOLK_MAIN_DEMO"], !raw.isEmpty, raw != "0" else { return }
@@ -39,7 +44,8 @@ enum MainWindowDemo {
         keepAlive = [main, translate]
         main.window?.appearance = forced
         let section = MainWindowController.Section(rawValue: raw) ?? .translate
-        main.show(section)
+        // TOLK_QUIET: shots only, the window never reaches the screen (safe while the user works on this Mac).
+        if quiet { main.selectForRender(section) } else { main.show(section) }
         if section == .translate { translate.load(text: TolkUIDemo.sampleEnglish) }
 
         if let dir = env["TOLK_MAIN_SHOT"], !dir.isEmpty {
@@ -53,12 +59,12 @@ enum MainWindowDemo {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         main.window?.setFrame(NSRect(x: 80, y: 80, width: 900, height: 620), display: true)
 
-        main.show(.translate)
+        open(main, .translate)
         translate.load(text: TolkUIDemo.sampleEnglish)
         try? await Task.sleep(for: .seconds(4))
         render(main.window, to: "\(dir)/main-translate-\(suffix).png")
         for section in [MainWindowController.Section.settings, .glossary, .image, .help] {
-            main.show(section)
+            open(main, section)
             try? await Task.sleep(for: .seconds(1))
             render(main.window, to: "\(dir)/main-\(section.rawValue)-\(suffix).png")
         }
@@ -90,7 +96,7 @@ enum MainWindowDemo {
         }
 
         // Settings scrolled to the bottom part.
-        main.show(.settings)
+        open(main, .settings)
         try? await Task.sleep(for: .milliseconds(500))
         if let scroll = findScrollView(in: main.pages[.settings]?.view) {
             scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, (scroll.documentView?.frame.height ?? 0) - scroll.contentView.bounds.height)))
@@ -99,6 +105,7 @@ enum MainWindowDemo {
             render(main.window, to: "\(dir)/main-settings-bottom-\(suffix).png")
         }
 
+        if quiet { print("[main-demo] shots in \(dir)"); NSApp.terminate(nil); return }
         let input = InputWindowController(engine: engine)
         keepAlive.append(input)
         input.show(text: "Can you send the latest ads.txt and confirm the new seller IDs?")

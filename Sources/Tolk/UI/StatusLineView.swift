@@ -30,7 +30,7 @@ final class StatusLineView: NSView {
         dot.layer?.cornerRadius = 3.5
         dot.translatesAutoresizingMaskIntoConstraints = false
         label.font = .systemFont(ofSize: fontSize)
-        label.textColor = .secondaryLabelColor
+        label.textColor = Theme.ink2
         label.lineBreakMode = .byTruncatingTail
         label.maximumNumberOfLines = 1
         label.cell?.usesSingleLineMode = true
@@ -80,7 +80,7 @@ final class StatusLineView: NSView {
         retranslatable = false
         stopHint()
         provider = ""; firstChunkAt = nil; chunks = 0; fallbackReason = nil
-        set("", color: .clear, text: .secondaryLabelColor)
+        set("", color: .clear, text: Theme.ink2)
         isHidden = true
     }
 
@@ -92,7 +92,7 @@ final class StatusLineView: NSView {
         firstChunkAt = nil; chunks = 0
         isHidden = false
         let local = !UIText.isFallbackProvider(provider)
-        set("\(UIText.providerName(provider)) · жду ответ…", color: .tertiaryLabelColor, text: .secondaryLabelColor)
+        set("\(UIText.providerName(provider)) · жду ответ…", color: Theme.ink3, text: Theme.ink2)
         // A cold model takes 15–120 s to load on the server; say so, with a running counter, instead of
         // looking stuck. One 1 s timer only while waiting for the first word (stopped by chunk/finish/fail).
         waitStart = Date()
@@ -104,7 +104,7 @@ final class StatusLineView: NSView {
                     guard n >= 3 else { return }
                     let what = n >= 40 ? "модель всё ещё загружается (холодный старт)" : "модель загружается на сервере"
                     self.set("\(UIText.providerName(self.provider)) · \(what)… \(n) с",
-                             color: .systemYellow, text: .secondaryLabelColor)
+                             color: .systemYellow, text: Theme.ink2)
                 }
             }
             RunLoop.main.add(t, forMode: .common)
@@ -132,7 +132,7 @@ final class StatusLineView: NSView {
         if elapsed > 0.3, !UIText.isFallbackProvider(provider) {
             text += " · \(Int((Double(chunks) / elapsed).rounded())) ток/с"
         }
-        set(text, color: fallbackReason == nil ? .systemGreen : .systemOrange, text: .secondaryLabelColor)
+        set(text, color: fallbackReason == nil ? Theme.ok : .systemOrange, text: Theme.ink2)
     }
 
     func finished(_ st: TranslationStats) {
@@ -142,17 +142,17 @@ final class StatusLineView: NSView {
         if st.fromCache {
             // Same text and settings as a recent translation: shown from memory, the model was not asked.
             parts.append("из кеша")
-            set(parts.joined(separator: " · "), color: .systemGreen, text: .secondaryLabelColor)
+            set(parts.joined(separator: " · "), color: Theme.ok, text: Theme.ink2)
             if onRetranslate != nil {
                 let attr = NSMutableAttributedString(string: label.stringValue + " · ", attributes: [
-                    .font: label.font as Any, .foregroundColor: NSColor.secondaryLabelColor])
+                    .font: label.font as Any, .foregroundColor: Theme.ink2])
                 if let img = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Перевести заново") {
                     let att = NSTextAttachment()
                     att.image = img.withSymbolConfiguration(.init(pointSize: label.font?.pointSize ?? 11, weight: .regular))
                     attr.append(NSAttributedString(attachment: att))
                 }
                 attr.append(NSAttributedString(string: " заново", attributes: [
-                    .font: label.font as Any, .foregroundColor: NSColor.controlAccentColor]))
+                    .font: label.font as Any, .foregroundColor: Theme.accent]))
                 // Without a paragraph style the attributed text wraps into a column when the pane is narrow.
                 let para = NSMutableParagraphStyle()
                 para.lineBreakMode = .byTruncatingTail
@@ -173,8 +173,8 @@ final class StatusLineView: NSView {
             parts.append(Self.shortReason(reason) + " — без глоссария")
             set(parts.joined(separator: " · "), color: .systemOrange, text: .systemOrange)
         } else {
-            set(parts.joined(separator: " · "), color: st.route == .remote ? .systemBlue : .systemGreen,
-                text: .secondaryLabelColor)
+            set(parts.joined(separator: " · "), color: st.route == .remote ? .systemBlue : Theme.ok,
+                text: Theme.ink2)
         }
         var tip = st.fallbackReason.map { "Запасной перевод. Причина: \($0)" }
             ?? (st.tokensExact ? "Скорость по данным сервера" : "Скорость примерная")
@@ -185,7 +185,7 @@ final class StatusLineView: NSView {
             let attr = NSMutableAttributedString(string: warn, attributes: [
                 .font: label.font as Any, .foregroundColor: NSColor.systemOrange])
             attr.append(NSAttributedString(string: " · " + rest, attributes: [
-                .font: label.font as Any, .foregroundColor: label.textColor ?? NSColor.secondaryLabelColor]))
+                .font: label.font as Any, .foregroundColor: label.textColor ?? Theme.ink2]))
             let para = NSMutableParagraphStyle()
             para.lineBreakMode = .byTruncatingTail
             attr.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: attr.length))

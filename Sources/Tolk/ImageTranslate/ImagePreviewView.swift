@@ -59,7 +59,7 @@ final class ImagePreviewView: NSView {
         nsImage.draw(in: ir, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
         NSGraphicsContext.restoreGraphicsState()
 
-        let accent = NSColor.controlAccentColor
+        let accent = Theme.accent
         for (i, box) in boxes.enumerated() {
             let r = viewRect(box)
             let path = NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3)
@@ -108,10 +108,10 @@ final class DropZoneView: NSView {
         let r = bounds.insetBy(dx: 1.5, dy: 1.5)
         let path = NSBezierPath(roundedRect: r, xRadius: 16, yRadius: 16)
         if isTargeted {
-            NSColor.controlAccentColor.withAlphaComponent(0.08).setFill()
+            Theme.accent.withAlphaComponent(0.08).setFill()
             path.fill()
         }
-        (isTargeted ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor).setStroke()
+        (isTargeted ? Theme.accent : Theme.ink3).setStroke()
         path.lineWidth = isTargeted ? 2.5 : 1.5
         path.setLineDash([7, 5], count: 2, phase: 0)
         path.stroke()

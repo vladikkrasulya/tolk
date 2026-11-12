@@ -14,9 +14,9 @@ private final class RecentRow: NSView {
         func oneLine(_ s: String) -> String { s.replacingOccurrences(of: "\n", with: " ") }
         let meta = "\(entry.sourceLanguage.flag) → \(entry.targetLanguage.flag)  ·  " + Self.date(entry.date)
             + (entry.app.map { "  ·  \($0)" } ?? "")
-        let metaLabel = UIFactory.label(meta, size: 10.5, color: .tertiaryLabelColor)
-        let src = UIFactory.label(oneLine(entry.source), size: 12.5, weight: .medium, color: .labelColor)
-        let dst = UIFactory.label(oneLine(entry.translation), size: 12, color: .secondaryLabelColor)
+        let metaLabel = UIFactory.label(meta, size: 10.5, color: Theme.ink3)
+        let src = UIFactory.label(oneLine(entry.source), size: 12.5, weight: .medium, color: Theme.ink)
+        let dst = UIFactory.label(oneLine(entry.translation), size: 12, color: Theme.ink2)
         for l in [metaLabel, src, dst] {
             l.lineBreakMode = .byTruncatingTail
             l.setContentCompressionResistancePriority(.init(250), for: .horizontal)
@@ -51,7 +51,7 @@ private final class RecentRow: NSView {
     override func mouseDown(with event: NSEvent) { onClick?() }
     override func draw(_ dirtyRect: NSRect) {
         guard hovering else { return }
-        NSColor.controlAccentColor.withAlphaComponent(0.14).setFill()
+        Theme.accent.withAlphaComponent(0.14).setFill()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 4, dy: 1), xRadius: 6, yRadius: 6).fill()
     }
 }
@@ -64,7 +64,7 @@ final class RecentTranslationsViewController: NSViewController, NSSearchFieldDel
     var onPick: ((HistoryEntry) -> Void)?
     private let search = NSSearchField()
     private let stack = NSStackView()
-    private let empty = UIFactory.label("", size: 12, color: .tertiaryLabelColor)
+    private let empty = UIFactory.label("", size: 12, color: Theme.ink3)
     static let limit = 40
 
     init(store: HistoryStore) {

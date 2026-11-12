@@ -162,7 +162,7 @@ final class AppPresence: NSObject {
             .version: "",
             .credits: NSAttributedString(string: "Личный переводчик: двойной ⌘C — и перевод у курсора.",
                                          attributes: [.font: NSFont.systemFont(ofSize: 11),
-                                                      .foregroundColor: NSColor.secondaryLabelColor]),
+                                                      .foregroundColor: Theme.ink2]),
         ])
         NSApp.activate()
     }

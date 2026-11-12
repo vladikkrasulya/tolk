@@ -18,7 +18,7 @@ private final class HintHeaderRow: NSStackView {
 final class HintCard: NSView {
     private let box = NSBox()
     private let chevron = NSImageView()
-    private let titleLabel = UIFactory.label("", size: 12.5, weight: .semibold, color: .labelColor)
+    private let titleLabel = UIFactory.label("", size: 12.5, weight: .semibold, color: Theme.ink)
     private let countBadge = UIFactory.badge()
     private let bodyHolder = NSStackView()
     private let header = HintHeaderRow()
@@ -36,7 +36,7 @@ final class HintCard: NSView {
         box.boxType = .custom
         box.cornerRadius = TolkStyle.cardRadius
         box.borderWidth = 0.5
-        box.borderColor = .separatorColor
+        box.borderColor = Theme.line
         box.fillColor = Self.fill(tint)
         box.contentViewMargins = .zero
         box.titlePosition = .noTitle
@@ -48,11 +48,11 @@ final class HintCard: NSView {
         ])
 
         chevron.symbolConfiguration = .init(pointSize: 9, weight: .bold)
-        chevron.contentTintColor = .tertiaryLabelColor
+        chevron.contentTintColor = Theme.ink3
         chevron.setContentHuggingPriority(.required, for: .horizontal)
         let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
         icon.symbolConfiguration = .init(pointSize: 12, weight: .medium)
-        icon.contentTintColor = tint == nil ? .secondaryLabelColor : tint
+        icon.contentTintColor = tint == nil ? Theme.ink2 : tint
         titleLabel.stringValue = title
         countBadge.text = ""
         accessory.orientation = .horizontal
@@ -105,7 +105,7 @@ final class HintCard: NSView {
     /// Dynamic: follows light/dark; a tint is blended in lightly.
     private static func fill(_ tint: NSColor?) -> NSColor {
         NSColor(name: nil) { appearance in
-            let base = NSColor.textBackgroundColor
+            let base = Theme.card
             var result = base
             appearance.performAsCurrentDrawingAppearance {
                 let mixed = tint.flatMap { base.blended(withFraction: 0.09, of: $0) } ?? base
@@ -177,17 +177,17 @@ final class TranslationHintsPanel: NSView {
     private let notesCheck = NSButton(checkboxWithTitle: "Сноски", target: nil, action: nil)
     private let backCheck = NSButton(checkboxWithTitle: "Обратный", target: nil, action: nil)
     private let stack = NSStackView()
-    private let emptyLabel = UIFactory.wrappingLabel("", size: 12, color: .tertiaryLabelColor)
-    private let feedback = UIFactory.label("", size: 11.5, color: .secondaryLabelColor)
+    private let emptyLabel = UIFactory.wrappingLabel("", size: 12, color: Theme.ink3)
+    private let feedback = UIFactory.label("", size: 11.5, color: Theme.ink2)
 
     private let warnBody = NSStackView()
-    private let backCaption = UIFactory.label("", size: 11, color: .tertiaryLabelColor)
-    private let backText = UIFactory.flexibleLabel("", size: 12.5, color: .secondaryLabelColor)
-    private let backLegend = UIFactory.flexibleLabel("", size: 10.5, color: .tertiaryLabelColor, selectable: false)
+    private let backCaption = UIFactory.label("", size: 11, color: Theme.ink3)
+    private let backText = UIFactory.flexibleLabel("", size: 12.5, color: Theme.ink2)
+    private let backLegend = UIFactory.flexibleLabel("", size: 10.5, color: Theme.ink3, selectable: false)
     private let notesBody = NSStackView()
     private let altBody = NSStackView()
-    private let editBefore = UIFactory.flexibleLabel("", size: 12.5, color: .secondaryLabelColor)
-    private let editAfter = UIFactory.flexibleLabel("", size: 12.5, color: .labelColor)
+    private let editBefore = UIFactory.flexibleLabel("", size: 12.5, color: Theme.ink2)
+    private let editAfter = UIFactory.flexibleLabel("", size: 12.5, color: Theme.ink)
     private let variantsBody = NSStackView()
     private let explainBody = NSStackView()
     private let tvBody = NSStackView()
@@ -366,7 +366,7 @@ final class TranslationHintsPanel: NSView {
         backShown = true
         backCaption.stringValue = "На \(c.from.russianName): \(c.to.flag) → \(c.from.flag)"
         backText.stringValue = "Перевожу обратно…"
-        backText.textColor = .tertiaryLabelColor
+        backText.textColor = Theme.ink3
         backLegend.isHidden = true
         refreshAll()
         back.start(engine: engine, translation: c.translation, from: c.to, to: c.from)
@@ -376,10 +376,10 @@ final class TranslationHintsPanel: NSView {
         guard let c = ctx else { return }
         switch update {
         case let .running(text):
-            if !text.isEmpty { backText.stringValue = text; backText.textColor = .secondaryLabelColor }
+            if !text.isEmpty { backText.stringValue = text; backText.textColor = Theme.ink2 }
         case let .finished(text):
             if text.isEmpty {
-                backText.stringValue = "—"; backText.textColor = .tertiaryLabelColor
+                backText.stringValue = "—"; backText.textColor = Theme.ink3
             } else {
                 let diff = BackDiff.compare(source: c.source, back: text, glossary: engine.glossaryHits(in: c.source, target: c.to))
                 backText.attributedStringValue = Self.highlight(text, diff: diff)
@@ -407,7 +407,7 @@ final class TranslationHintsPanel: NSView {
         let gen = generation
         let engine = self.engine, source = c.source, translated = c.translation, from = c.from, to = c.to
         notesBody.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        addFull(UIFactory.label("Ищу спорные термины…", size: 12, color: .tertiaryLabelColor), to: notesBody)
+        addFull(UIFactory.label("Ищу спорные термины…", size: 12, color: Theme.ink3), to: notesBody)
         notesCard.setCount(nil)
         notesCard.isHidden = false
         refreshEmpty()
@@ -440,10 +440,10 @@ final class TranslationHintsPanel: NSView {
         do {
             try engine.addGlossaryTerm(source: term, translation: value)
             if retranslate {
-                flash("В глоссарии: «\(term)» → «\(value)». Перевожу заново.", color: .systemGreen)
+                flash("В глоссарии: «\(term)» → «\(value)». Перевожу заново.", color: Theme.ok)
                 onRetranslate?()
             } else {
-                flash("В глоссарии: «\(term)» → «\(value)»", color: .systemGreen)
+                flash("В глоссарии: «\(term)» → «\(value)»", color: Theme.ok)
             }
         } catch {
             flash("Не удалось сохранить в глоссарий: \(error.localizedDescription)", color: .systemRed)
@@ -466,11 +466,11 @@ final class TranslationHintsPanel: NSView {
 
     private func showAlternatives(fragment: String, range: NSRange, options: [String]?) {
         altBody.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let title = UIFactory.label("Вместо «\(fragment)»:", size: 11.5, weight: .semibold, color: .secondaryLabelColor)
+        let title = UIFactory.label("Вместо «\(fragment)»:", size: 11.5, weight: .semibold, color: Theme.ink2)
         title.lineBreakMode = .byTruncatingMiddle
         addFull(title, to: altBody)
         if let options {
-            if options.isEmpty { addFull(UIFactory.label("вариантов нет", size: 12, color: .tertiaryLabelColor), to: altBody) }
+            if options.isEmpty { addFull(UIFactory.label("вариантов нет", size: 12, color: Theme.ink3), to: altBody) }
             for o in options {
                 let b = ClosureButton(title: o) { [weak self] in self?.onReplace?(range, o) }
                 b.toolTip = "Заменить «\(fragment)» на «\(o)»"
@@ -478,7 +478,7 @@ final class TranslationHintsPanel: NSView {
             }
             altCard.setCount(options.isEmpty ? nil : options.count)
         } else {
-            addFull(UIFactory.label("подбираю варианты…", size: 12, color: .tertiaryLabelColor), to: altBody)
+            addFull(UIFactory.label("подбираю варианты…", size: 12, color: Theme.ink3), to: altBody)
             altCard.setCount(nil)
         }
         altCard.isHidden = false
@@ -528,25 +528,25 @@ final class TranslationHintsPanel: NSView {
 
     private func showVariants(current: String, range: NSRange, result: Result<[SentenceVariant], Error>?) {
         variantsBody.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let now = UIFactory.flexibleLabel("Сейчас: «\(current)»", size: 11.5, color: .secondaryLabelColor, selectable: false)
+        let now = UIFactory.flexibleLabel("Сейчас: «\(current)»", size: 11.5, color: Theme.ink2, selectable: false)
         now.maximumNumberOfLines = 3
         now.cell?.truncatesLastVisibleLine = true
         addFull(now, to: variantsBody)
         variantsCancel.isHidden = result != nil
         switch result {
         case nil:
-            addFull(UIFactory.label("подбираю варианты…", size: 12, color: .tertiaryLabelColor), to: variantsBody)
+            addFull(UIFactory.label("подбираю варианты…", size: 12, color: Theme.ink3), to: variantsBody)
             variantsCard.setCount(nil)
         case let .failure(error)?:
             addFull(UIFactory.flexibleLabel(UIText.errorMessage(error), size: 12, color: .systemRed, selectable: false), to: variantsBody)
             variantsCard.setCount(nil)
         case let .success(list)?:
-            if list.isEmpty { addFull(UIFactory.label("других вариантов нет", size: 12, color: .tertiaryLabelColor), to: variantsBody) }
+            if list.isEmpty { addFull(UIFactory.label("других вариантов нет", size: 12, color: Theme.ink3), to: variantsBody) }
             for v in list {
                 let row = VariantRowView(label: v.label, text: v.text)
                 row.onClick = { [weak self] in
                     self?.onReplace?(range, v.text)
-                    self?.flash("Предложение заменено", color: .systemGreen)
+                    self?.flash("Предложение заменено", color: Theme.ok)
                 }
                 addFull(row, to: variantsBody)
             }
@@ -603,7 +603,7 @@ final class TranslationHintsPanel: NSView {
     private func showTV(_ error: String?, loading: Bool = false) {
         tvResults.arrangedSubviews.forEach { $0.removeFromSuperview() }
         if loading {
-            addFull(UIFactory.label("подбираю варианты…", size: 12, color: .tertiaryLabelColor), to: tvResults)
+            addFull(UIFactory.label("подбираю варианты…", size: 12, color: Theme.ink3), to: tvResults)
             tvCard.setCount(nil)
             return
         }
@@ -620,7 +620,7 @@ final class TranslationHintsPanel: NSView {
         }
         if tvDone, tvList.isEmpty {
             addFull(UIFactory.flexibleLabel("Достойных вариантов не нашлось: модель предложила только то, что меняет смысл или похоже на текущий перевод.",
-                                            size: 12, color: .tertiaryLabelColor, selectable: false), to: tvResults)
+                                            size: 12, color: Theme.ink3, selectable: false), to: tvResults)
         }
         tvCard.setCount(tvList.isEmpty ? nil : tvList.count)
         if tvDone {
@@ -640,7 +640,7 @@ final class TranslationHintsPanel: NSView {
 
     private func take(_ v: TranslationVariant) {
         onTakeVariant?(v.text, v.label)
-        flash("Перевод заменён на «\(v.label)»", color: .systemGreen)
+        flash("Перевод заменён на «\(v.label)»", color: Theme.ok)
         showTV(nil)
     }
 
@@ -699,16 +699,16 @@ final class TranslationHintsPanel: NSView {
             let badge = UIFactory.badge()
             badge.text = e.tone
             badge.tint = UIText.toneColor(e.tone)
-            let toneRow = NSStackView(views: [UIFactory.label("Тон", size: 11, weight: .semibold, color: .tertiaryLabelColor), badge, UIFactory.spacer()])
+            let toneRow = NSStackView(views: [UIFactory.label("Тон", size: 11, weight: .semibold, color: Theme.ink3), badge, UIFactory.spacer()])
             toneRow.orientation = .horizontal
             toneRow.spacing = 6
             addFull(toneRow, to: explainBody)
-            addFull(UIFactory.flexibleLabel(e.meaning, size: 12.5, color: .labelColor), to: explainBody)
+            addFull(UIFactory.flexibleLabel(e.meaning, size: 12.5, color: Theme.ink), to: explainBody)
             if !e.terms.isEmpty {
-                addFull(UIFactory.label("Термины", size: 11, weight: .semibold, color: .tertiaryLabelColor), to: explainBody)
+                addFull(UIFactory.label("Термины", size: 11, weight: .semibold, color: Theme.ink3), to: explainBody)
                 for t in e.terms {
-                    let text = NSMutableAttributedString(string: t.term, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: NSColor.labelColor])
-                    text.append(NSAttributedString(string: " — " + t.meaning, attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor]))
+                    let text = NSMutableAttributedString(string: t.term, attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .semibold), .foregroundColor: Theme.ink])
+                    text.append(NSAttributedString(string: " — " + t.meaning, attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: Theme.ink2]))
                     let l = WrapLabel(wrappingLabelWithString: "")
                     l.attributedStringValue = text
                     l.isSelectable = true
@@ -721,7 +721,7 @@ final class TranslationHintsPanel: NSView {
         } else if let error {
             addFull(UIFactory.flexibleLabel(error, size: 12, color: .systemRed, selectable: false), to: explainBody)
         } else {
-            addFull(UIFactory.label("разбираю смысл…", size: 12, color: .tertiaryLabelColor), to: explainBody)
+            addFull(UIFactory.label("разбираю смысл…", size: 12, color: Theme.ink3), to: explainBody)
         }
         explainCard.isHidden = false
         refreshAll()
@@ -792,7 +792,7 @@ final class TranslationHintsPanel: NSView {
             icon.symbolConfiguration = .init(pointSize: 10.5, weight: .regular)
             icon.contentTintColor = .systemOrange
             icon.setContentHuggingPriority(.required, for: .horizontal)
-            let label = UIFactory.flexibleLabel(w, size: 12.5, color: .labelColor)
+            let label = UIFactory.flexibleLabel(w, size: 12.5, color: Theme.ink)
             let row = NSStackView(views: [icon, label])
             row.orientation = .horizontal
             row.alignment = .firstBaseline
@@ -804,9 +804,9 @@ final class TranslationHintsPanel: NSView {
         for t in times {
             let icon = NSImageView(image: NSImage(systemSymbolName: "clock", accessibilityDescription: nil) ?? NSImage())
             icon.symbolConfiguration = .init(pointSize: 10.5, weight: .regular)
-            icon.contentTintColor = .secondaryLabelColor
+            icon.contentTintColor = Theme.ink2
             icon.setContentHuggingPriority(.required, for: .horizontal)
-            let label = UIFactory.flexibleLabel(t, size: 12.5, color: .labelColor)
+            let label = UIFactory.flexibleLabel(t, size: 12.5, color: Theme.ink)
             let row = NSStackView(views: [icon, label])
             row.orientation = .horizontal
             row.alignment = .firstBaseline
@@ -872,7 +872,7 @@ final class TranslationHintsPanel: NSView {
     /// synonyms are not highlighted.
     static func highlight(_ back: String, diff: BackDiff.Result) -> NSAttributedString {
         let out = NSMutableAttributedString(string: back, attributes: [
-            .font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: NSColor.secondaryLabelColor])
+            .font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: Theme.ink2])
         for r in diff.marks where NSMaxRange(r) <= out.length {
             out.addAttribute(.backgroundColor, value: NSColor.systemOrange.withAlphaComponent(0.28), range: r)
         }
@@ -891,14 +891,14 @@ final class TranslationHintsPanel: NSView {
         let a = words(old), b = words(new)
         let d = b.map(\.0).difference(from: a.map(\.0))
         let base: (NSColor) -> [NSAttributedString.Key: Any] = { [.font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: $0] }
-        let oldOut = NSMutableAttributedString(string: old, attributes: base(.secondaryLabelColor))
-        let newOut = NSMutableAttributedString(string: new, attributes: base(.labelColor))
+        let oldOut = NSMutableAttributedString(string: old, attributes: base(Theme.ink2))
+        let newOut = NSMutableAttributedString(string: new, attributes: base(Theme.ink))
         for change in d {
             switch change {
             case let .remove(offset, _, _):
                 oldOut.addAttribute(.backgroundColor, value: NSColor.systemRed.withAlphaComponent(0.22), range: a[offset].1)
             case let .insert(offset, _, _):
-                newOut.addAttribute(.backgroundColor, value: NSColor.systemGreen.withAlphaComponent(0.28), range: b[offset].1)
+                newOut.addAttribute(.backgroundColor, value: Theme.ok.withAlphaComponent(0.28), range: b[offset].1)
             }
         }
         return (oldOut, newOut)
@@ -908,7 +908,7 @@ final class TranslationHintsPanel: NSView {
 
     private func build() {
         // Header
-        let title = UIFactory.label("Подсказки", size: 13, weight: .semibold, color: .labelColor)
+        let title = UIFactory.label("Подсказки", size: 13, weight: .semibold, color: Theme.ink)
         for c in [notesCheck, backCheck] {
             c.controlSize = .small
             c.font = .systemFont(ofSize: 11.5)
@@ -966,8 +966,8 @@ final class TranslationHintsPanel: NSView {
         backText.widthAnchor.constraint(equalTo: backBody.widthAnchor).isActive = true
         backLegend.widthAnchor.constraint(equalTo: backBody.widthAnchor).isActive = true
         let editBody = NSStackView(views: [
-            UIFactory.label("Было", size: 11, weight: .semibold, color: .tertiaryLabelColor), editBefore,
-            UIFactory.label("Стало", size: 11, weight: .semibold, color: .tertiaryLabelColor), editAfter,
+            UIFactory.label("Было", size: 11, weight: .semibold, color: Theme.ink3), editBefore,
+            UIFactory.label("Стало", size: 11, weight: .semibold, color: Theme.ink3), editAfter,
         ])
         editBody.orientation = .vertical
         editBody.alignment = .leading
@@ -979,7 +979,7 @@ final class TranslationHintsPanel: NSView {
             guard let self else { return }
             do {
                 try self.engine.addGlossaryTerm(source: term, translation: value)
-                self.flash("Добавлено в глоссарий: «\(term)» → «\(value)»", color: .systemGreen)
+                self.flash("Добавлено в глоссарий: «\(term)» → «\(value)»", color: Theme.ok)
                 self.glossary.clear()
             } catch {
                 self.flash("Не удалось сохранить в глоссарий: \(error.localizedDescription)", color: .systemRed)

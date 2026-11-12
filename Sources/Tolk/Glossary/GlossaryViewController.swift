@@ -58,12 +58,14 @@ final class GlossaryViewController: NSViewController {
         view = root
 
         tabs.target = self
+
+        tabs.selectedSegmentBezelColor = Theme.accentStrong
         tabs.action = #selector(tabChanged)
         tabs.segmentStyle = .automatic
         tabs.selectedSegment = UserDefaults.standard.integer(forKey: Self.tabKey) == 1 ? 1 : 0
 
         statusLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.textColor = Theme.ink2
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         statusIcon.symbolConfiguration = .init(pointSize: 11, weight: .medium)
@@ -104,7 +106,7 @@ final class GlossaryViewController: NSViewController {
         search.target = self
         search.action = #selector(searchChanged)
         search.sendsSearchStringImmediately = true
-        countLabel.textColor = .secondaryLabelColor
+        countLabel.textColor = Theme.ink2
         countLabel.alignment = .right
         countLabel.setContentHuggingPriority(.required, for: .horizontal)
         let top = NSStackView(views: [search, countLabel])
@@ -145,13 +147,13 @@ final class GlossaryViewController: NSViewController {
         let box = NSBox()
         box.boxType = .custom
         box.cornerRadius = TolkStyle.cardRadius
-        box.borderColor = .separatorColor
+        box.borderColor = Theme.line
         box.borderWidth = 0.5
         box.fillColor = TolkStyle.nsCard
         box.contentViewMargins = .zero
         box.contentView = scroll
 
-        emptyLabel.textColor = .tertiaryLabelColor
+        emptyLabel.textColor = Theme.ink3
         emptyLabel.alignment = .center
         emptyLabel.isHidden = true
 
@@ -183,7 +185,7 @@ final class GlossaryViewController: NSViewController {
             "Варианты пишите через «/»: «cap / daily cap → капа / дневная капа». В запрос к модели попадают только строки, "
             + "термины которых встречаются в переводимом тексте. Комментарий подсказывает модели контекст.")
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        hint.textColor = .secondaryLabelColor
+        hint.textColor = Theme.ink2
 
         for v in [top, box, bottom, hint, emptyLabel] {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -217,7 +219,7 @@ final class GlossaryViewController: NSViewController {
             + "(ID, суммы, названия продуктов), какие аббревиатуры оставлять. Пишите коротко, списком — "
             + "чем длиннее блок, тем медленнее начинается перевод. Термины лучше вносить во вкладку «Термины»: "
             + "они подставляются только когда встречаются в тексте.")
-        hint.textColor = .secondaryLabelColor
+        hint.textColor = Theme.ink2
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
 
         styleText.isRichText = false
@@ -231,7 +233,7 @@ final class GlossaryViewController: NSViewController {
         styleText.isAutomaticSpellingCorrectionEnabled = false
         styleText.isContinuousSpellCheckingEnabled = false
         styleText.drawsBackground = true
-        styleText.backgroundColor = .textBackgroundColor
+        styleText.backgroundColor = Theme.card
         styleText.delegate = self
         styleText.isVerticallyResizable = true
         styleText.isHorizontallyResizable = false
@@ -249,14 +251,14 @@ final class GlossaryViewController: NSViewController {
         let box = NSBox()
         box.boxType = .custom
         box.cornerRadius = TolkStyle.cardRadius
-        box.borderColor = .separatorColor
+        box.borderColor = Theme.line
         box.borderWidth = 0.5
         box.fillColor = TolkStyle.nsCard
         box.contentViewMargins = .zero
         box.contentView = scroll
 
         styleCount.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        styleCount.textColor = .secondaryLabelColor
+        styleCount.textColor = Theme.ink2
 
         for v in [title, hint, box, styleCount] {
             v.translatesAutoresizingMaskIntoConstraints = false
@@ -383,15 +385,15 @@ final class GlossaryViewController: NSViewController {
     private func setStatus(_ s: Status) {
         let (text, symbol, color): (String, String?, NSColor) = {
             switch s {
-            case .saved: return ("Сохранено", "checkmark.circle.fill", .systemGreen)
-            case .editing: return ("Изменено…", "pencil.circle", .secondaryLabelColor)
-            case .saving: return ("Сохранение…", "arrow.triangle.2.circlepath", .secondaryLabelColor)
+            case .saved: return ("Сохранено", "checkmark.circle.fill", Theme.ok)
+            case .editing: return ("Изменено…", "pencil.circle", Theme.ink2)
+            case .saving: return ("Сохранение…", "arrow.triangle.2.circlepath", Theme.ink2)
             case .info(let t): return (t, "arrow.down.circle.fill", .systemBlue)
             case .error(let t): return (t, "exclamationmark.triangle.fill", .systemRed)
             }
         }()
         statusLabel.stringValue = text
-        statusLabel.textColor = { if case .error = s { return .systemRed }; return .secondaryLabelColor }()
+        statusLabel.textColor = { if case .error = s { return .systemRed }; return Theme.ink2 }()
         statusIcon.image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
         statusIcon.contentTintColor = color
         statusLabel.toolTip = abbreviated(rulesPath)
@@ -640,7 +642,7 @@ extension GlossaryViewController: NSTableViewDataSource, NSTableViewDelegate, NS
         let tf = cell.textField!
         tf.stringValue = value(e, col)
         tf.font = col == .term ? .systemFont(ofSize: 13, weight: .medium) : .systemFont(ofSize: 13)
-        tf.textColor = col == .comment ? .secondaryLabelColor : .labelColor
+        tf.textColor = col == .comment ? Theme.ink2 : Theme.ink
         tf.placeholderString = col == .term ? "термин" : col == .translation ? "перевод" : nil
         tf.toolTip = value(e, col).isEmpty ? nil : value(e, col)
         return cell
